@@ -1,0 +1,1 @@
+Place the exact Bannerlord 1.3.15 and TOR 1.16 audit/reference files listed in ../reference-manifest.json here for a release build. These proprietary files are intentionally excluded from source control and release packages.
