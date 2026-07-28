@@ -4,7 +4,7 @@ namespace Voidstep
 {
     public sealed class VoidstepSubModule : MBSubModuleBase
     {
-        protected override void OnMissionBehaviorInitialize(Mission mission)
+        public override void OnMissionBehaviorInitialize(Mission mission)
         {
             base.OnMissionBehaviorInitialize(mission);
             if (mission != null)
