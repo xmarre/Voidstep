@@ -68,7 +68,14 @@ namespace Voidstep
                 {
                     _readyNoticeShown = true;
                     _logger.Info("Runtime ready. Default controls are Ctrl+1 through Ctrl+6 unless changed in MCM.");
-                    InformationManager.DisplayMessage(new InformationMessage("Voidstep v1.0.1 active — use Ctrl+1 through Ctrl+6 by default."));
+                    try
+                    {
+                        InformationManager.DisplayMessage(new InformationMessage("Voidstep v1.0.1 active — use Ctrl+1 through Ctrl+6 by default."));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug($"Readiness notification was unavailable: {ex.GetType().Name}.");
+                    }
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
