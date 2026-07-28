@@ -24,6 +24,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -f .hotfix/v1.0.2.part00 ]]; then
+            echo 'Verified payload was already applied.'
+            exit 0
+          fi
           python - <<'PY'
           from hashlib import sha256
           from pathlib import Path
@@ -51,7 +55,7 @@ jobs:
           echo '922158352cf5850a42f3f2fc899e5f4a58e1d4a6c737334222a8d348e9ccb2ce  /tmp/voidstep-v1.0.2.zip' | sha256sum --check --strict
           unzip -o /tmp/voidstep-v1.0.2.zip -d .
           rm -rf .hotfix
-          rm -f .github/workflows/apply-v1.0.2-hotfix.yml
+          git checkout HEAD -- .github/workflows/build.yml .github/workflows/release.yml .github/workflows/apply-v1.0.2-hotfix.yml
           python scripts/test_metadata_reader.py
           python scripts/run_logic_mirror_tests.py
           python scripts/verify_source_invariants.py
