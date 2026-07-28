@@ -9,6 +9,7 @@ Verified Bannerlord surfaces include:
 - `Mission.GetNearbyEnemyAgents(Vec2, float, Team, MBList<Agent>)`
 - `Mission.GetNearbyAgents(Vec2, float, MBList<Agent>)`
 - `Mission.CreateMeleeBlow(...)`
+- `AttackCollisionData.GetAttackCollisionDataForDebugPurpose(...)` is used on the production direct-damage path. Every argument is named in `BlowFactory.CreateCollision` and validated against the locked 1.3.15 metadata to make signature drift reviewable.
 - `Mission.AddTimeSpeedRequest`, `RemoveTimeSpeedRequest`, `GetRequestedTimeSpeed`
 - `Mission.FindAgentWithIndex(int)`
 - `Mission.IsPositionInsideBoundaries`, `IsPositionInsideHardBoundaries`, blocker-navmesh checks
