@@ -4,15 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'release/v1.0.0.json'
+      - 'release/v1.0.1.json'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: voidstep-v1.0.0-release
+  group: voidstep-v1.0.1-release
   cancel-in-progress: false
+
+env:
+  VERSION: 1.0.1
+  RELEASE_TAG: v1.0.1
 
 jobs:
   release:
@@ -35,13 +39,13 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v1.0.0
         run: |
+          $ErrorActionPreference = 'Stop'
           [xml]$module = Get-Content module/Voidstep/SubModule.xml
           if ($module.Module.Version.value -ne $env:RELEASE_TAG) {
-            throw 'SubModule.xml version does not match v1.0.0.'
+            throw "SubModule.xml version does not match $env:RELEASE_TAG."
           }
-          $marker = Get-Content release/v1.0.0.json -Raw | ConvertFrom-Json
+          $marker = Get-Content "release/$env:RELEASE_TAG.json" -Raw | ConvertFrom-Json
           if ($marker.version -ne $env:RELEASE_TAG) { throw 'Release marker version mismatch.' }
 
           $endpoint = "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG"
@@ -50,51 +54,81 @@ jobs:
           $lookupText = ($lookupOutput | Out-String).Trim()
           if ($lookupExitCode -eq 0) {
             if ($lookupText -ne $env:GITHUB_SHA) {
-              throw "v1.0.0 already points to $lookupText, not this merged source. Refusing to replace release assets."
+              throw "$env:RELEASE_TAG already points to $lookupText, not this merged source."
             }
           } elseif ($lookupText -notmatch 'HTTP 404') {
-            throw "Failed to query the existing v1.0.0 tag: $lookupText"
+            throw "Failed to query the existing tag: $lookupText"
           }
+          exit 0
       - name: Build from merged source
         shell: pwsh
-        run: ./scripts/build-ci.ps1 -Configuration Release
-      - name: Create source archive
+        run: ./scripts/build-ci.ps1 -Configuration Release -Version $env:VERSION
+      - name: Create exact tracked source archive
         shell: pwsh
-        run: ./scripts/package-source.ps1
-      - name: Verify release files
+        run: ./scripts/package-source.ps1 -Version $env:VERSION
+      - name: Verify release files and source cleanliness
         shell: pwsh
         run: |
           $required = @(
-            'dist/Voidstep-v1.0.0-Bannerlord-1.3.15.zip',
-            'dist/Voidstep-v1.0.0-SOURCE.zip',
+            "dist/Voidstep-v$env:VERSION-Bannerlord-1.3.15.zip",
+            "dist/Voidstep-v$env:VERSION-SOURCE.zip",
             'dist/SHA256SUMS.txt',
             'dist/SOURCE_SHA256.txt'
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path -PathType Leaf)) { throw "Missing release file: $path" }
           }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $source = [IO.Compression.ZipFile]::OpenRead("dist/Voidstep-v$env:VERSION-SOURCE.zip")
+          try {
+            $bad = @($source.Entries | Where-Object {
+              $_.FullName -match '(^|/)(bin|obj|artifacts|dist)/' -or
+              $_.FullName -match '\.(dll|pdb)$' -or
+              $_.FullName -like '.github/workflows/finalize-release*'
+            })
+            if ($bad.Count -gt 0) { throw "Source archive contains generated files: $($bad.FullName -join ', ')" }
+          } finally { $source.Dispose() }
       - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v1.0.0
         run: |
+          $ErrorActionPreference = 'Stop'
           $assets = @(
-            'dist/Voidstep-v1.0.0-Bannerlord-1.3.15.zip',
-            'dist/Voidstep-v1.0.0-SOURCE.zip',
+            "dist/Voidstep-v$env:VERSION-Bannerlord-1.3.15.zip",
+            "dist/Voidstep-v$env:VERSION-SOURCE.zip",
             'dist/SHA256SUMS.txt',
             'dist/SOURCE_SHA256.txt'
           )
           gh release view $env:RELEASE_TAG *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $exists = $LASTEXITCODE -eq 0
+          if ($exists) {
             gh release upload $env:RELEASE_TAG @assets --clobber
-            if ($LASTEXITCODE -ne 0) { throw 'Failed to restore assets for the existing same-commit release.' }
-            gh release edit $env:RELEASE_TAG --title 'Voidstep v1.0.0' --notes-file CHANGELOG.md --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to restore release assets.' }
+            gh release edit $env:RELEASE_TAG --title "Voidstep $env:RELEASE_TAG" --notes-file CHANGELOG.md --latest
           } else {
             gh release create $env:RELEASE_TAG @assets `
               --target $env:GITHUB_SHA `
-              --title 'Voidstep v1.0.0' `
+              --title "Voidstep $env:RELEASE_TAG" `
               --notes-file CHANGELOG.md `
               --latest
           }
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish v1.0.0.' }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish $env:RELEASE_TAG." }
+      - name: Verify published assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $verify = Join-Path $PWD 'published-release'
+          New-Item -ItemType Directory -Force -Path $verify | Out-Null
+          gh release download $env:RELEASE_TAG --dir $verify --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to download the published release.' }
+          $checks = @{}
+          foreach ($line in Get-Content (Join-Path $verify 'SHA256SUMS.txt')) {
+            if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$') { $checks[$matches[2]] = $matches[1].ToLowerInvariant() }
+          }
+          foreach ($name in @("Voidstep-v$env:VERSION-Bannerlord-1.3.15.zip", "Voidstep-v$env:VERSION-SOURCE.zip")) {
+            $actual = (Get-FileHash (Join-Path $verify $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($checks[$name] -ne $actual) { throw "Published checksum mismatch for $name" }
+          }
