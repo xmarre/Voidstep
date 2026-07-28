@@ -70,7 +70,7 @@ namespace Voidstep
             }
 
             var normal = Vec3.Up;
-            var ground = _mission.Scene.GetGroundHeightAtPosition(candidate, ref normal, BodyFlags.CommonCollisionExcludeFlagsForAgent);
+            var ground = _mission.Scene.GetGroundHeightAtPosition(candidate, out normal, BodyFlags.CommonCollisionExcludeFlagsForAgent);
             if (float.IsNaN(ground) || float.IsInfinity(ground))
             {
                 reason = "No valid ground surface was found.";
@@ -99,7 +99,7 @@ namespace Voidstep
             }
 
             var navigationProbe = candidate;
-            if (_mission.Scene.GetNearestNavigationMeshForPosition(ref navigationProbe, 1.5f, false) == UIntPtr.Zero)
+            if (_mission.Scene.GetNearestNavigationMeshForPosition(in navigationProbe, 1.5f, false) == UIntPtr.Zero)
             {
                 reason = "The destination is not on accessible navigation geometry.";
                 return false;
@@ -130,9 +130,9 @@ namespace Voidstep
             if (_mission.Scene.RayCastForClosestEntityOrTerrain(
                     candidate + Vec3.Up * 0.15f,
                     head,
-                    ref verticalDistance,
-                    ref closest,
-                    ref entity,
+                    out verticalDistance,
+                    out closest,
+                    out entity,
                     0.25f,
                     BodyFlags.CommonCollisionExcludeFlagsForAgent))
             {
@@ -154,9 +154,9 @@ namespace Voidstep
             return _mission.Scene.RayCastForClosestEntityOrTerrain(
                 source,
                 target,
-                ref distance,
-                ref closest,
-                ref entity,
+                out distance,
+                out closest,
+                out entity,
                 0.22f,
                 BodyFlags.CommonCollisionExcludeFlagsForAgent);
         }

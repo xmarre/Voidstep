@@ -65,9 +65,9 @@ namespace Voidstep
             if (_mission.Scene.RayCastForClosestEntityOrTerrain(
                     source,
                     target,
-                    ref distance,
-                    ref point,
-                    ref entity,
+                    out distance,
+                    out point,
+                    out entity,
                     0.05f,
                     BodyFlags.CommonCollisionExcludeFlagsForAgent))
             {

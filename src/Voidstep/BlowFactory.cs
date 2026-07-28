@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
@@ -8,6 +9,19 @@ namespace Voidstep
 {
     internal sealed class BlowFactory
     {
+        private delegate Blow CreateMeleeBlowDelegate(
+            Mission mission,
+            Agent attackerAgent,
+            Agent victimAgent,
+            in AttackCollisionData collisionData,
+            in MissionWeapon attackerWeapon,
+            CrushThroughState crushThroughState,
+            Vec3 blowDirection,
+            Vec3 swingDirection,
+            bool cancelDamage);
+
+        private static readonly CreateMeleeBlowDelegate CreateNativeMeleeBlow = ResolveCreateMeleeBlow();
+
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
 
@@ -45,11 +59,18 @@ namespace Voidstep
 
                 var impact = victim.GetChestGlobalPosition();
                 var collision = CreateCollision(direction, swing, impact, attackProgress);
-                var blow = _mission.CreateMeleeBlow(
+                if (CreateNativeMeleeBlow == null)
+                {
+                    _logger.Error("Bannerlord's native melee-blow factory could not be resolved.");
+                    return false;
+                }
+
+                var blow = CreateNativeMeleeBlow(
+                    _mission,
                     attacker,
                     victim,
-                    ref collision,
-                    ref weapon,
+                    in collision,
+                    in weapon,
                     CrushThroughState.None,
                     direction,
                     swing,
@@ -114,6 +135,30 @@ namespace Voidstep
                 _logger.Error("Failed to register direct ability damage safely.", ex);
                 return false;
             }
+        }
+
+
+        private static CreateMeleeBlowDelegate ResolveCreateMeleeBlow()
+        {
+            var method = typeof(Mission).GetMethod(
+                "CreateMeleeBlow",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[]
+                {
+                    typeof(Agent),
+                    typeof(Agent),
+                    typeof(AttackCollisionData).MakeByRefType(),
+                    typeof(MissionWeapon).MakeByRefType(),
+                    typeof(CrushThroughState),
+                    typeof(Vec3),
+                    typeof(Vec3),
+                    typeof(bool)
+                },
+                null);
+            return method == null
+                ? null
+                : (CreateMeleeBlowDelegate)method.CreateDelegate(typeof(CreateMeleeBlowDelegate));
         }
 
         private static AttackCollisionData CreateCollision(Vec3 direction, Vec3 swing, Vec3 impact, float progress)
