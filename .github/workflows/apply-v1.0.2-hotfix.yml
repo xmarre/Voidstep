@@ -24,6 +24,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          wc -c .hotfix/v1.0.2.part{00..06}
+          sha256sum .hotfix/v1.0.2.part{00..06}
           cat .hotfix/v1.0.2.part{00..06} > /tmp/voidstep-v1.0.2.b64
           base64 --decode /tmp/voidstep-v1.0.2.b64 > /tmp/voidstep-v1.0.2.zip
           echo '922158352cf5850a42f3f2fc899e5f4a58e1d4a6c737334222a8d348e9ccb2ce  /tmp/voidstep-v1.0.2.zip' | sha256sum --check --strict
