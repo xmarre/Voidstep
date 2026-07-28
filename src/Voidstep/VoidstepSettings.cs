@@ -16,11 +16,50 @@ namespace Voidstep
         {
             "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D0",
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
-            "Z", "X", "C", "V", "B", "N", "M", "Q", "E"
+            "Z", "X", "C", "V", "B", "N", "M", "Q", "E",
+            "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6"
         };
 
         internal static VoidstepSettings Current => Instance ?? Fallback;
         private static readonly VoidstepSettings Fallback = new VoidstepSettings();
+
+        internal bool MigrateLegacyDefaultControls()
+        {
+            if (!RequireControlModifier ||
+                Selected(VoidstepKey) != "D1" || Selected(BlinkKey) != "D2" ||
+                Selected(WindblastKey) != "D3" || Selected(BendTimeKey) != "D4" ||
+                Selected(DominoKey) != "D5" || Selected(DarkVisionKey) != "D6")
+                return false;
+
+            VoidstepKey = new Dropdown<string>(KeyOptions, 31);
+            BlinkKey = new Dropdown<string>(KeyOptions, 32);
+            WindblastKey = new Dropdown<string>(KeyOptions, 33);
+            BendTimeKey = new Dropdown<string>(KeyOptions, 34);
+            DominoKey = new Dropdown<string>(KeyOptions, 35);
+            DarkVisionKey = new Dropdown<string>(KeyOptions, 36);
+            RequireControlModifier = false;
+            return true;
+        }
+
+        internal bool HasNumberRowConflict() =>
+            IsNumberRow(VoidstepKey) || IsNumberRow(BlinkKey) || IsNumberRow(WindblastKey) ||
+            IsNumberRow(BendTimeKey) || IsNumberRow(DominoKey) || IsNumberRow(DarkVisionKey);
+
+        internal string GetControlSummary()
+        {
+            var prefix = RequireControlModifier ? "Ctrl+" : string.Empty;
+            return $"{prefix}{Selected(VoidstepKey)}, {prefix}{Selected(BlinkKey)}, {prefix}{Selected(WindblastKey)}, " +
+                   $"{prefix}{Selected(BendTimeKey)}, {prefix}{Selected(DominoKey)}, {prefix}{Selected(DarkVisionKey)}";
+        }
+
+        private static string Selected(Dropdown<string> setting) =>
+            setting != null && setting.Count > 0 ? setting.SelectedValue : "<unset>";
+
+        private static bool IsNumberRow(Dropdown<string> setting)
+        {
+            var value = Selected(setting);
+            return value.Length == 2 && value[0] == 'D' && value[1] >= '0' && value[1] <= '9';
+        }
 
         [SettingPropertyBool("Enable Voidstep", Order = 0, RequireRestart = false, HintText = "Master switch for all mission abilities.")]
         [SettingPropertyGroup("General", GroupOrder = 0)]
@@ -40,31 +79,31 @@ namespace Voidstep
 
         [SettingPropertyDropdown("Voidstep Cleave key", Order = 0, RequireRestart = false)]
         [SettingPropertyGroup("Controls", GroupOrder = 1)]
-        public Dropdown<string> VoidstepKey { get; set; } = new Dropdown<string>(KeyOptions, 0);
+        public Dropdown<string> VoidstepKey { get; set; } = new Dropdown<string>(KeyOptions, 31);
 
         [SettingPropertyDropdown("Blink key", Order = 1, RequireRestart = false)]
         [SettingPropertyGroup("Controls")]
-        public Dropdown<string> BlinkKey { get; set; } = new Dropdown<string>(KeyOptions, 1);
+        public Dropdown<string> BlinkKey { get; set; } = new Dropdown<string>(KeyOptions, 32);
 
         [SettingPropertyDropdown("Windblast key", Order = 2, RequireRestart = false)]
         [SettingPropertyGroup("Controls")]
-        public Dropdown<string> WindblastKey { get; set; } = new Dropdown<string>(KeyOptions, 2);
+        public Dropdown<string> WindblastKey { get; set; } = new Dropdown<string>(KeyOptions, 33);
 
         [SettingPropertyDropdown("Bend Time key", Order = 3, RequireRestart = false)]
         [SettingPropertyGroup("Controls")]
-        public Dropdown<string> BendTimeKey { get; set; } = new Dropdown<string>(KeyOptions, 3);
+        public Dropdown<string> BendTimeKey { get; set; } = new Dropdown<string>(KeyOptions, 34);
 
         [SettingPropertyDropdown("Domino key", Order = 4, RequireRestart = false)]
         [SettingPropertyGroup("Controls")]
-        public Dropdown<string> DominoKey { get; set; } = new Dropdown<string>(KeyOptions, 4);
+        public Dropdown<string> DominoKey { get; set; } = new Dropdown<string>(KeyOptions, 35);
 
         [SettingPropertyDropdown("Dark Vision key", Order = 5, RequireRestart = false)]
         [SettingPropertyGroup("Controls")]
-        public Dropdown<string> DarkVisionKey { get; set; } = new Dropdown<string>(KeyOptions, 5);
+        public Dropdown<string> DarkVisionKey { get; set; } = new Dropdown<string>(KeyOptions, 36);
 
-        [SettingPropertyBool("Require Ctrl modifier", Order = 6, RequireRestart = false)]
+        [SettingPropertyBool("Require Ctrl modifier", Order = 6, RequireRestart = false, HintText = "Applies Ctrl to all selected ability keys. Number-row keys still trigger Bannerlord formation selection; use numpad or another unused key.")]
         [SettingPropertyGroup("Controls")]
-        public bool RequireControlModifier { get; set; } = true;
+        public bool RequireControlModifier { get; set; } = false;
 
         [SettingPropertyBool("Enable Void Energy", Order = 0, RequireRestart = false)]
         [SettingPropertyGroup("Void Energy", GroupOrder = 2)]

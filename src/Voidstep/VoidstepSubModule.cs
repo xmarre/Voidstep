@@ -11,7 +11,7 @@ namespace Voidstep
         {
             base.OnSubModuleLoad();
             _logger = new VoidstepLogger();
-            _logger.Info("Voidstep v1.0.1 submodule loaded.");
+            _logger.Info("Voidstep v1.0.2 submodule loaded.");
         }
 
         public override void OnMissionBehaviorInitialize(Mission mission)
@@ -22,7 +22,7 @@ namespace Voidstep
             var logger = _logger ?? new VoidstepLogger();
             try
             {
-                logger.Info("Mission bootstrap received; adding Voidstep mission behavior.");
+                logger.Info("Mission bootstrap received; adding Voidstep mission behavior. Runtime initialization will occur during EarlyStart.");
                 mission.AddMissionBehavior(new VoidstepMissionBehavior(logger));
             }
             catch (Exception ex)

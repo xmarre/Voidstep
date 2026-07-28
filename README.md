@@ -18,14 +18,14 @@ Mission-scoped single-player combat abilities for **Mount & Blade II: Bannerlord
 
 | Ability | Default |
 |---|---|
-| Voidstep Cleave | `Ctrl+1` |
-| Blink | `Ctrl+2`, then `Ctrl+2` to confirm |
-| Windblast | `Ctrl+3` |
-| Bend Time | `Ctrl+4` |
-| Domino | `Ctrl+5` |
-| Dark Vision | `Ctrl+6` |
+| Voidstep Cleave | `Numpad1` |
+| Blink | `Numpad2`, then `Numpad2` to confirm |
+| Windblast | `Numpad3` |
+| Bend Time | `Numpad4` |
+| Domino | `Numpad5` |
+| Dark Vision | `Numpad6` |
 
-Keys are editable through MCM. Inputs are ignored while the on-screen keyboard is active, while mission loading is incomplete, while AI ticks are paused, during mission shutdown, without a usable player agent, or while another incompatible ability phase owns the cast state.
+Keys are editable through MCM. The number row is intentionally not used by default because Bannerlord still interprets `1`–`9` as formation-selection input while Ctrl is held. Existing untouched v1.0.1 `Ctrl+1`–`Ctrl+6` defaults are migrated to `Numpad1`–`Numpad6`. Inputs are ignored while the on-screen keyboard is active, while mission loading is incomplete, during mission shutdown, without a usable player agent, or while another incompatible ability phase owns the cast state.
 
 ## Ability details
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed the actual mission-runtime lifecycle bug: Bannerlord 1.3.15 invokes `OnMissionBehaviorInitialize` after the normal `OnBehaviorInitialize` pass, so late-added Voidstep behavior now initializes idempotently during `EarlyStart` with a first-tick fallback.
+- Added lifecycle-stage diagnostics so the log explicitly identifies whether initialization occurred during `OnBehaviorInitialize`, `EarlyStart` or the fallback path.
+- Replaced the conflicting `Ctrl+1` through `Ctrl+6` defaults with `Numpad1` through `Numpad6` and disabled the global Ctrl requirement by default.
+- Automatically migrates the untouched legacy v1.0.1 control set to the new numpad defaults at mission startup.
+- Added a visible and logged warning when a custom number-row binding can also trigger Bannerlord formation selection.
+- Added API and source-invariant checks for the late-added behavior lifecycle and the six numpad key values.
+
 ## 1.0.1
 
 - Fixed ability keys not registering reliably by polling Bannerlord's validated global input state instead of depending on a mission input context.

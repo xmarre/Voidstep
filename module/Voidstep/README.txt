@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.0.1
+VOIDSTEP — ARCANE MELEE ABILITIES v1.0.2
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional compatibility preset: The Old Realms 1.16
 
@@ -15,11 +15,13 @@ UIExtenderEx
 Mod Configuration Menu v5
 
 DEFAULT CONTROLS
-Ctrl+1: Voidstep Cleave
-Ctrl+2: Blink (press once to aim, again to confirm)
-Ctrl+3: Windblast
-Ctrl+4: Bend Time
-Ctrl+5: Domino
-Ctrl+6: Dark Vision
+Numpad1: Voidstep Cleave
+Numpad2: Blink (press once to aim, again to confirm)
+Numpad3: Windblast
+Numpad4: Bend Time
+Numpad5: Domino
+Numpad6: Dark Vision
+
+The number row is not used by default because Bannerlord treats 1-9 as formation-selection input even while Ctrl is held. Controls remain editable in MCM.
 
 Delete any older Modules/Voidstep folder before installing a new version.

@@ -8,13 +8,15 @@ namespace Voidstep
 {
     internal sealed class VoidstepMissionBehavior : MissionLogic
     {
-        private VoidstepLogger _logger;
+        private readonly VoidstepLogger _logger;
         private AbilityManager _manager;
         private InputRouter _input;
         private Agent _lastPlayer;
+        private bool _initializationAttempted;
         private bool _cleaned;
         private bool _wasEnabled;
         private bool _readyNoticeShown;
+        private bool _controlConflictWarningShown;
 
         public VoidstepMissionBehavior(VoidstepLogger logger)
         {
@@ -24,15 +26,35 @@ namespace Voidstep
         public override void OnBehaviorInitialize()
         {
             base.OnBehaviorInitialize();
-            _logger.Info("Mission behavior initialization started.");
+            EnsureInitialized("OnBehaviorInitialize");
+        }
+
+        public override void EarlyStart()
+        {
+            base.EarlyStart();
+            // Bannerlord 1.3.15 calls MBSubModuleBase.OnMissionBehaviorInitialize after
+            // the normal OnBehaviorInitialize pass. Behaviors added by that hook first
+            // receive EarlyStart, so this is the authoritative initialization path.
+            EnsureInitialized("EarlyStart");
+        }
+
+        private void EnsureInitialized(string lifecycleStage)
+        {
+            if (_initializationAttempted || _cleaned) return;
+            _initializationAttempted = true;
+            _logger.Info($"Mission behavior initialization started during {lifecycleStage}.");
             try
             {
+                var settings = VoidstepSettings.Current;
+                if (settings.MigrateLegacyDefaultControls())
+                    _logger.Info("Migrated legacy Ctrl+1 through Ctrl+6 defaults to Numpad1 through Numpad6 to avoid Bannerlord formation-selection commands.");
+
                 var context = new AbilityContext(Mission, _logger);
                 _manager = new AbilityManager(context);
                 _input = new InputRouter(Mission, _logger);
                 _lastPlayer = Mission.MainAgent;
-                _wasEnabled = VoidstepSettings.Current.Enabled;
-                _logger.Info($"Mission behavior initialized. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+                _wasEnabled = settings.Enabled;
+                _logger.Info($"Mission behavior initialized. Controls: {settings.GetControlSummary()}. Log: {_logger.PrimaryPath ?? "engine log only"}.");
             }
             catch (Exception ex)
             {
@@ -46,10 +68,13 @@ namespace Voidstep
         public override void OnMissionTick(float dt)
         {
             base.OnMissionTick(dt);
+            if (!_initializationAttempted)
+                EnsureInitialized("OnMissionTick fallback");
             if (_cleaned || _manager == null) return;
             try
             {
-                var enabled = VoidstepSettings.Current.Enabled;
+                var settings = VoidstepSettings.Current;
+                var enabled = settings.Enabled;
                 if (!enabled)
                 {
                     if (_wasEnabled) _manager.Cleanup(CancelReason.UserCancelled);
@@ -67,15 +92,16 @@ namespace Voidstep
                 if (!_readyNoticeShown && current != null && current.IsActive())
                 {
                     _readyNoticeShown = true;
-                    _logger.Info("Runtime ready. Default controls are Ctrl+1 through Ctrl+6 unless changed in MCM.");
-                    try
-                    {
-                        InformationManager.DisplayMessage(new InformationMessage("Voidstep v1.0.1 active — use Ctrl+1 through Ctrl+6 by default."));
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Debug($"Readiness notification was unavailable: {ex.GetType().Name}.");
-                    }
+                    var controls = settings.GetControlSummary();
+                    _logger.Info($"Runtime ready. Controls: {controls}.");
+                    TryDisplayNotice($"Voidstep v1.0.2 active — {controls}.");
+                }
+                if (!_controlConflictWarningShown && settings.HasNumberRowConflict())
+                {
+                    _controlConflictWarningShown = true;
+                    const string warning = "Number-row Voidstep bindings also trigger Bannerlord formation selection. Rebind them to numpad or another unused key in MCM.";
+                    _logger.Info("Control warning: " + warning);
+                    TryDisplayNotice("Voidstep: " + warning);
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
@@ -93,6 +119,18 @@ namespace Voidstep
             {
                 _logger.Error("A mission tick failed; all owned ability state was cleaned up.", ex);
                 Cleanup(CancelReason.Exception);
+            }
+        }
+
+        private void TryDisplayNotice(string message)
+        {
+            try
+            {
+                InformationManager.DisplayMessage(new InformationMessage(message));
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"Runtime notification was unavailable: {ex.GetType().Name}.");
             }
         }
 
@@ -116,9 +154,7 @@ namespace Voidstep
             {
                 _manager.OnAgentRemoved(affectedAgent, affectorAgent, agentState);
                 if (affectedAgent != null && _lastPlayer != null && affectedAgent.Index == _lastPlayer.Index)
-                {
                     Cleanup(CancelReason.ActorDied);
-                }
             }
             catch (Exception ex) { _logger.Error("Agent-removal cleanup failed safely.", ex); }
         }

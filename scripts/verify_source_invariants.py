@@ -9,6 +9,9 @@ files = {p.name: p.read_text(encoding='utf-8') for p in runtime.glob('*.cs')}
 all_text = '\n'.join(files.values())
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
+    'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs','') and '_initializationAttempted' in files.get('VoidstepMissionBehavior.cs',''),
+    'safe default controls': all(key in files.get('VoidstepSettings.cs','') for key in ('"Numpad1"', '"Numpad2"', '"Numpad3"', '"Numpad4"', '"Numpad5"', '"Numpad6"')) and 'RequireControlModifier { get; set; } = false;' in files.get('VoidstepSettings.cs',''),
+    'legacy formation controls migrate': 'MigrateLegacyDefaultControls' in files.get('VoidstepSettings.cs','') and 'HasNumberRowConflict' in files.get('VoidstepSettings.cs',''),
     'per-cast hit registry': 'HitRegistry<int> _hits' in files.get('CleaveSweepController.cs',''),
     'cleave deterministic cleanup': '_hits.Clear();' in files.get('CleaveSweepController.cs','') and '_snapshotSchedule.Clear();' in files.get('CleaveSweepController.cs',''),
     'time request ownership': 'OwnershipLedger<int>' in files.get('TimeControlService.cs','') and 'RemoveTimeSpeedRequest(requestId)' in files.get('TimeControlService.cs',''),
