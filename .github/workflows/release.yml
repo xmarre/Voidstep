@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.repository == 'xmarre/Voidstep'
+    if: github.repository == 'xmarre/Voidstep' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
     runs-on: windows-2022
@@ -43,12 +43,17 @@ jobs:
           }
           $marker = Get-Content release/v1.0.0.json -Raw | ConvertFrom-Json
           if ($marker.version -ne $env:RELEASE_TAG) { throw 'Release marker version mismatch.' }
-          $existing = gh api "repos/${{ github.repository }}/git/ref/tags/$env:RELEASE_TAG" 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            $tag = $existing | ConvertFrom-Json
-            if ($tag.object.sha -ne '${{ github.sha }}') {
-              throw "v1.0.0 already points to $($tag.object.sha), not this merged source. Refusing to replace release assets."
+
+          $endpoint = "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG"
+          $lookupOutput = @(& gh api $endpoint --jq '.object.sha' 2>&1)
+          $lookupExitCode = $LASTEXITCODE
+          $lookupText = ($lookupOutput | Out-String).Trim()
+          if ($lookupExitCode -eq 0) {
+            if ($lookupText -ne $env:GITHUB_SHA) {
+              throw "v1.0.0 already points to $lookupText, not this merged source. Refusing to replace release assets."
             }
+          } elseif ($lookupText -notmatch 'HTTP 404') {
+            throw "Failed to query the existing v1.0.0 tag: $lookupText"
           }
       - name: Build from merged source
         shell: pwsh
@@ -87,7 +92,7 @@ jobs:
             gh release edit $env:RELEASE_TAG --title 'Voidstep v1.0.0' --notes-file CHANGELOG.md --latest
           } else {
             gh release create $env:RELEASE_TAG @assets `
-              --target '${{ github.sha }}' `
+              --target $env:GITHUB_SHA `
               --title 'Voidstep v1.0.0' `
               --notes-file CHANGELOG.md `
               --latest
