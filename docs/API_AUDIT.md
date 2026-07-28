@@ -5,6 +5,7 @@ The supplied binaries were parsed directly as ECMA-335 metadata and hash-locked 
 Verified Bannerlord surfaces include:
 
 - `MBSubModuleBase.OnMissionBehaviorInitialize(Mission)`
+- `MissionBehavior.EarlyStart()` — required because 1.3.15 invokes the submodule mission-behavior hook after the ordinary behavior-initialization pass
 - `MissionBehavior.OnMissionTick(float)`, `OnEndMission()`, `OnAgentHit(...)`, `OnAgentRemoved(...)`, `OnAgentDeleted(Agent)`, `OnAgentControllerSetToPlayer(Agent)`
 - `Mission.GetNearbyEnemyAgents(Vec2, float, Team, MBList<Agent>)`
 - `Mission.GetNearbyAgents(Vec2, float, MBList<Agent>)`

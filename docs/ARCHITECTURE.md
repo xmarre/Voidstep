@@ -2,7 +2,7 @@
 
 ## Mission lifetime
 
-`VoidstepSubModule.OnMissionBehaviorInitialize` adds one `VoidstepMissionBehavior`. The behavior owns `AbilityManager`, all services and every mutable collection. `OnEndMission` calls one idempotent cleanup path. No campaign behavior, campaign event or global agent patch exists.
+`VoidstepSubModule.OnMissionBehaviorInitialize` adds one `VoidstepMissionBehavior`. Bannerlord 1.3.15 runs that hook after its normal `OnBehaviorInitialize` pass, so the behavior performs idempotent runtime initialization from `EarlyStart`, with `OnBehaviorInitialize` and the first mission tick retained as compatibility/fallback paths. The behavior owns `AbilityManager`, all services and every mutable collection. `OnEndMission` calls one idempotent cleanup path. No campaign behavior, campaign event or global agent patch exists.
 
 ## Ability state machine
 

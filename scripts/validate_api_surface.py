@@ -12,6 +12,7 @@ REQUIRED = {
             "OnMissionBehaviorInitialize": [["TaleWorlds.MountAndBlade.Mission"]],
         },
         "TaleWorlds.MountAndBlade.MissionBehavior": {
+            "EarlyStart": [[]],
             "OnMissionTick": [["float"]],
             "OnEndMission": [[]],
             "OnAgentHit": [["TaleWorlds.MountAndBlade.Agent", "TaleWorlds.MountAndBlade.Agent", "ref TaleWorlds.MountAndBlade.MissionWeapon", "ref TaleWorlds.MountAndBlade.Blow", "ref TaleWorlds.MountAndBlade.AttackCollisionData"]],
@@ -58,6 +59,9 @@ REQUIRED = {
         },
     },
     "TaleWorlds.InputSystem.dll": {
+        "TaleWorlds.InputSystem.InputKey": {
+            "__fields__": ["Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6"],
+        },
         "TaleWorlds.InputSystem.IInputContext": {
             "IsKeyPressed": [["TaleWorlds.InputSystem.InputKey"]],
             "IsKeyDown": [["TaleWorlds.InputSystem.InputKey"]],
