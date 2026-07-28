@@ -1,0 +1,524 @@
+using System;
+using TaleWorlds.Library;
+using TaleWorlds.MountAndBlade;
+using Voidstep.Core;
+
+namespace Voidstep
+{
+    internal sealed class AbilityManager
+    {
+        private readonly AbilityContext _context;
+        private readonly CastStateMachine _state = new CastStateMachine();
+        private readonly TargetingService _targeting;
+        private readonly TeleportValidator _teleportValidator;
+        private readonly AnimationController _animation;
+        private readonly EffectController _effects;
+        private readonly BlowFactory _blows;
+        private readonly CleaveSweepController _cleave;
+        private readonly WindblastController _windblast;
+        private readonly TimeControlService _time;
+        private readonly DominoLinkService _domino;
+        private readonly DarkVisionService _darkVision;
+        private readonly HudService _hud;
+        private readonly BlinkController _blink;
+
+        private CastToken _token;
+        private Vec3 _destination;
+        private int _castActorIndex = -1;
+        private float _configuredMaximum;
+        private bool _fovOwned;
+        private float _previousFov;
+        private float _windupRotationProgress;
+        private float _recoveryRotationProgress;
+        private float _castRecoveryRadians;
+        private int _controlledAgentIndex;
+        private Vec3 _castOriginalLook;
+        private const float OwnedFov = 1.08f;
+
+        public AbilityManager(AbilityContext context)
+        {
+            _context = context;
+            _targeting = new TargetingService(context.Mission);
+            _teleportValidator = new TeleportValidator(context.Mission);
+            _animation = new AnimationController();
+            _effects = new EffectController(context.Mission, context.Logger);
+            _blows = new BlowFactory(context.Mission, context.Logger);
+            _hud = new HudService();
+            _cleave = new CleaveSweepController(context.Mission, _blows, _effects, _animation, context.Logger);
+            _windblast = new WindblastController(context.Mission, _blows, _effects, context.Logger);
+            _time = new TimeControlService(context.Mission, context.Logger);
+            _domino = new DominoLinkService(context.Mission, _blows, _effects, context.Logger);
+            _darkVision = new DarkVisionService(context.Mission, context.Logger);
+            _blink = new BlinkController(context.Mission, _targeting, _teleportValidator, _effects, _hud, context.Logger);
+            _configuredMaximum = VoidstepSettings.Current.MaximumEnergy;
+            _controlledAgentIndex = context.Player != null ? context.Player.Index : -1;
+        }
+
+        public AbilityPhase Phase => _state.Phase;
+        public AbilityId ActiveAbility => _state.Ability;
+        public bool IsBusy => _state.IsCasting;
+
+        public void Tick(float dt)
+        {
+            var settings = VoidstepSettings.Current;
+            if (Math.Abs(settings.MaximumEnergy - _configuredMaximum) > 0.001f)
+            {
+                _configuredMaximum = settings.MaximumEnergy;
+                _context.Energy.ConfigureMaximum(_configuredMaximum, false);
+            }
+
+            _context.Cooldowns.Tick(Math.Max(0f, dt));
+            if (settings.EnergyEnabled && !settings.CooldownOnlyMode && !settings.UnlimitedEnergy)
+                _context.Energy.Regenerate(Math.Max(0f, dt) * Math.Max(0f, settings.EnergyRegeneration));
+
+            _time.Tick(dt);
+            _blink.Tick(dt);
+            _darkVision.Tick(dt);
+            _domino.Tick();
+
+            if (_state.IsCasting)
+            {
+                var actor = _context.Player;
+                if (!IsCurrentCastActorValid(actor))
+                {
+                    CancelCurrent(actor == null ? CancelReason.ActorRemoved : CancelReason.ActorReplaced);
+                }
+                else if (_state.Ability == AbilityId.VoidstepCleave)
+                {
+                    TickVoidstep(actor, dt);
+                }
+                else if (_state.Ability == AbilityId.Blink && _state.Phase == AbilityPhase.Targeting)
+                {
+                    _state.Tick(_token, Math.Max(0f, dt));
+                }
+            }
+
+            _hud.Tick(dt, _context.Energy, _context.Cooldowns, _darkVision.Active, _time.Active);
+        }
+
+        public bool TryActivate(AbilityId ability)
+        {
+            var settings = VoidstepSettings.Current;
+            if (!settings.Enabled)
+                return Fail("Voidstep is disabled in MCM.");
+
+            var player = _context.Player;
+            if (!_context.IsPlayerUsable())
+                return Fail("No active player agent is available.");
+
+            if (ability == AbilityId.Blink && _state.IsCasting && _state.Ability == AbilityId.Blink && _state.Phase == AbilityPhase.Targeting)
+                return ConfirmBlink(player);
+
+            if (_state.IsCasting)
+                return Fail("Another ability is already in progress.");
+
+            if (ability == AbilityId.DarkVision && _darkVision.Active)
+            {
+                _darkVision.Disable();
+                _hud.Show("Dark Vision disabled.");
+                return true;
+            }
+
+            if (!_context.Cooldowns.IsReady(ability))
+                return Fail($"{ability} is on cooldown for {_context.Cooldowns.GetRemaining(ability):0.0}s.");
+            if (!CanPay(ability))
+                return Fail("Not enough Void Energy.");
+
+            try
+            {
+                switch (ability)
+                {
+                    case AbilityId.VoidstepCleave: return BeginVoidstep(player);
+                    case AbilityId.Blink: return BeginBlink(player);
+                    case AbilityId.Windblast: return CastWindblast(player);
+                    case AbilityId.BendTime: return CastBendTime(player);
+                    case AbilityId.Domino: return CastDomino(player);
+                    case AbilityId.DarkVision: return CastDarkVision(player);
+                    default: return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _context.Logger.Error("Ability activation failed and was rolled back.", ex);
+                CancelCurrent(CancelReason.Exception);
+                return Fail("Ability activation failed safely. See the Voidstep log when debug logging is enabled.");
+            }
+        }
+
+        public void OnAgentHit(Agent affectedAgent, Agent affectorAgent, ref Blow blow)
+        {
+            _domino.OnAgentHit(affectedAgent, affectorAgent, ref blow);
+        }
+
+        public void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, TaleWorlds.Core.AgentState state)
+        {
+            _domino.OnAgentRemoved(affectedAgent, affectorAgent, state);
+            if (affectedAgent != null && affectedAgent.Index == _castActorIndex)
+                CancelCurrent(affectedAgent.Health <= 0f ? CancelReason.ActorDied : CancelReason.ActorRemoved);
+            if (affectedAgent != null && affectedAgent.Index == _controlledAgentIndex)
+                CleanupPlayerOwnedState(CancelReason.ActorDied);
+        }
+
+        public void OnAgentDeleted(Agent affectedAgent)
+        {
+            _domino.OnAgentDeleted(affectedAgent);
+            _darkVision.OnAgentDeleted(affectedAgent);
+            if (affectedAgent != null && affectedAgent.Index == _castActorIndex)
+                CancelCurrent(CancelReason.ActorRemoved);
+            if (affectedAgent != null && affectedAgent.Index == _controlledAgentIndex)
+                CleanupPlayerOwnedState(CancelReason.ActorRemoved);
+        }
+
+        public void OnPlayerAgentChanged(Agent previous, Agent current)
+        {
+            if (previous == current) return;
+            CleanupPlayerOwnedState(CancelReason.ActorReplaced);
+            _controlledAgentIndex = current != null ? current.Index : -1;
+            _context.Energy.Reset();
+            _context.Cooldowns.Clear();
+        }
+
+        public void Cleanup(CancelReason reason)
+        {
+            CancelCurrent(reason);
+            _blink.Cancel();
+            _cleave.Cleanup();
+            _time.Cleanup();
+            _domino.Clear();
+            _darkVision.Disable();
+            RestoreFov();
+            _effects.Cleanup();
+            _context.Cooldowns.Clear();
+            _context.Energy.Reset();
+            _hud.Reset();
+        }
+
+        private bool BeginVoidstep(Agent player)
+        {
+            var settings = VoidstepSettings.Current;
+            var requested = ResolveVoidstepDestination(player, settings.VoidstepRange);
+            var validation = _teleportValidator.Validate(player, requested, settings.VoidstepRange, false);
+            if (!validation.Success)
+                return Fail(validation.Reason ?? "No safe Voidstep destination was found.");
+            if (!PayAndStartCooldown(AbilityId.VoidstepCleave))
+                return Fail("Not enough Void Energy.");
+
+            _token = _state.Begin(AbilityId.VoidstepCleave);
+            _castActorIndex = player.Index;
+            _destination = validation.Position;
+            _castOriginalLook = player.LookDirection;
+            _windupRotationProgress = 0f;
+            _recoveryRotationProgress = 0f;
+            _castRecoveryRadians = (settings.CleaveClockwise ? -1f : 1f) * (360f - settings.CleaveSweepDegrees) * (float)Math.PI / 180f;
+            _state.Transition(_token, AbilityPhase.Validating);
+            _state.Transition(_token, AbilityPhase.WindUp);
+            BeginFovPulse();
+            _hud.ShowAbilityResult(AbilityId.VoidstepCleave, _context.Energy, _context.Cooldowns);
+            return true;
+        }
+
+        private void TickVoidstep(Agent player, float dt)
+        {
+            _state.Tick(_token, Math.Max(0f, dt));
+            switch (_state.Phase)
+            {
+                case AbilityPhase.WindUp:
+                    if (_state.PhaseElapsed >= 0.18f)
+                    {
+                        _effects.Departure(player.Position);
+                        _effects.PlaySound("event:/mission/combat/swing/weapon_swing", player.Position);
+                        _state.Transition(_token, AbilityPhase.Departing);
+                    }
+                    break;
+                case AbilityPhase.Departing:
+                    if (_state.PhaseElapsed >= 0.055f)
+                    {
+                        var validation = _teleportValidator.Validate(player, _destination, VoidstepSettings.Current.VoidstepRange, false);
+                        if (!validation.Success)
+                        {
+                            Fail(validation.Reason ?? "The Voidstep destination became invalid.");
+                            CancelCurrent(CancelReason.InvalidDestination);
+                            return;
+                        }
+                        _destination = validation.Position;
+                        TeleportActor(player, _destination, false);
+                        _state.Transition(_token, AbilityPhase.Teleporting);
+                    }
+                    break;
+                case AbilityPhase.Teleporting:
+                    _effects.Arrival(player.Position);
+                    _state.Transition(_token, AbilityPhase.Arriving);
+                    break;
+                case AbilityPhase.Arriving:
+                    if (_state.PhaseElapsed >= 0.08f)
+                    {
+                        _cleave.Begin(player);
+                        _state.Transition(_token, AbilityPhase.Active);
+                    }
+                    break;
+                case AbilityPhase.Active:
+                    if (_cleave.Tick(dt))
+                    {
+                        RestoreFov();
+                        _state.Transition(_token, AbilityPhase.Recovery);
+                    }
+                    break;
+                case AbilityPhase.Recovery:
+                    {
+                        var progress = Math.Min(1f, _state.PhaseElapsed / 0.25f);
+                        var delta = Math.Max(0f, progress - _recoveryRotationProgress);
+                        _animation.RotateActor(player, _castRecoveryRadians * delta);
+                        _recoveryRotationProgress = progress;
+                        if (_state.PhaseElapsed >= 0.25f)
+                            CompleteCurrent();
+                        break;
+                    }
+            }
+        }
+
+        private bool BeginBlink(Agent player)
+        {
+            _token = _state.Begin(AbilityId.Blink);
+            _castActorIndex = player.Index;
+            if (_blink.Begin(player)) return true;
+            CancelCurrent(CancelReason.InvalidActor);
+            return Fail("Blink aiming could not start.");
+        }
+
+        private bool ConfirmBlink(Agent player)
+        {
+            if (!CanPay(AbilityId.Blink)) return Fail("Not enough Void Energy.");
+            if (!_blink.Confirm(out var destination, out var failure))
+                return Fail(failure);
+
+            _state.Transition(_token, AbilityPhase.Validating);
+            if (!PayAndStartCooldown(AbilityId.Blink))
+            {
+                CancelCurrent(CancelReason.Interrupted);
+                return Fail("Not enough Void Energy.");
+            }
+            _state.Transition(_token, AbilityPhase.WindUp);
+            _effects.Departure(player.Position);
+            _state.Transition(_token, AbilityPhase.Departing);
+            TeleportActor(player, destination, VoidstepSettings.Current.BlinkPreserveMomentum);
+            _state.Transition(_token, AbilityPhase.Teleporting);
+            _effects.Arrival(player.Position);
+            _effects.PlaySound("event:/mission/combat/swing/weapon_swing", player.Position);
+            _state.Transition(_token, AbilityPhase.Arriving);
+            _state.Transition(_token, AbilityPhase.Active);
+            _state.Transition(_token, AbilityPhase.Recovery);
+            _hud.ShowAbilityResult(AbilityId.Blink, _context.Energy, _context.Cooldowns);
+            CompleteCurrent();
+            return true;
+        }
+
+        private bool CastWindblast(Agent player)
+        {
+            var hitCount = _windblast.Cast(player);
+            if (hitCount <= 0)
+                return Fail("Windblast found no valid enemy in the cone.");
+            _effects.PlaySound("event:/mission/combat/hit/weapon_hit", player.Position);
+            if (!PayAndStartCooldown(AbilityId.Windblast)) return false;
+            CompleteImmediate(AbilityId.Windblast, player);
+            _hud.Show($"Windblast affected {hitCount} target{(hitCount == 1 ? string.Empty : "s")}.");
+            return true;
+        }
+
+        private bool CastBendTime(Agent player)
+        {
+            var settings = VoidstepSettings.Current;
+            if (!_time.Begin(player, settings.BendTimeFactor, settings.BendTimeDuration, settings.AllowCompleteSuspension))
+                return Fail("Bend Time could not acquire a mission speed request.");
+            if (!PayAndStartCooldown(AbilityId.BendTime))
+            {
+                _time.Release();
+                return false;
+            }
+            _effects.BendTime(player.Position);
+            _effects.PlaySound("event:/mission/ambient/night", player.Position);
+            CompleteImmediate(AbilityId.BendTime, player);
+            _hud.ShowAbilityResult(AbilityId.BendTime, _context.Energy, _context.Cooldowns);
+            return true;
+        }
+
+        private bool CastDomino(Agent player)
+        {
+            var count = _domino.Mark(player);
+            if (count < 2)
+            {
+                _domino.Clear();
+                return Fail("Domino requires at least two valid enemy targets.");
+            }
+            if (!PayAndStartCooldown(AbilityId.Domino))
+            {
+                _domino.Clear();
+                return false;
+            }
+            _effects.PlaySound("event:/mission/combat/hit/weapon_hit", player.Position);
+            CompleteImmediate(AbilityId.Domino, player);
+            _hud.Show($"Domino linked {count} enemies.");
+            return true;
+        }
+
+        private bool CastDarkVision(Agent player)
+        {
+            if (!_darkVision.Toggle(player)) return Fail("Dark Vision could not start.");
+            if (!PayAndStartCooldown(AbilityId.DarkVision))
+            {
+                _darkVision.Disable();
+                return false;
+            }
+            _effects.PlaySound("event:/mission/ambient/night", player.Position);
+            CompleteImmediate(AbilityId.DarkVision, player);
+            _hud.ShowAbilityResult(AbilityId.DarkVision, _context.Energy, _context.Cooldowns);
+            return true;
+        }
+
+        private void CompleteImmediate(AbilityId ability, Agent player)
+        {
+            _token = _state.Begin(ability);
+            _castActorIndex = player.Index;
+            _state.Transition(_token, AbilityPhase.WindUp);
+            _state.Transition(_token, AbilityPhase.Active);
+            _state.Transition(_token, AbilityPhase.Recovery);
+            CompleteCurrent();
+        }
+
+        private void CompleteCurrent()
+        {
+            if (_token != default(CastToken))
+            {
+                _state.Finish(_token);
+                _token = default(CastToken);
+            }
+            _castActorIndex = -1;
+            _destination = Vec3.Invalid;
+            _windupRotationProgress = 0f;
+            _recoveryRotationProgress = 0f;
+            _castRecoveryRadians = 0f;
+            _castOriginalLook = Vec3.Zero;
+            RestoreFov();
+        }
+
+        private void CancelCurrent(CancelReason reason)
+        {
+            if (_token != default(CastToken))
+            {
+                try { _state.Cancel(_token, reason); }
+                catch { _state.ForceReset(reason); }
+                _state.ForceReset(reason);
+            }
+            _blink.Cancel();
+            _cleave.Cleanup();
+            var actor = _context.Player;
+            if (actor != null && actor.IsActive() && actor.Index == _castActorIndex && _castOriginalLook.LengthSquared > 0.001f)
+            {
+                try { actor.LookDirection = _castOriginalLook; } catch { }
+            }
+            _token = default(CastToken);
+            _castActorIndex = -1;
+            _destination = Vec3.Invalid;
+            _windupRotationProgress = 0f;
+            _recoveryRotationProgress = 0f;
+            _castRecoveryRadians = 0f;
+            _castOriginalLook = Vec3.Zero;
+            RestoreFov();
+        }
+
+        private void CleanupPlayerOwnedState(CancelReason reason)
+        {
+            CancelCurrent(reason);
+            _time.Release();
+            _domino.Clear();
+            _darkVision.Disable();
+        }
+
+        private bool IsCurrentCastActorValid(Agent actor) =>
+            actor != null && actor.Index == _castActorIndex && actor.IsActive() && actor.Health > 0f && actor.State == TaleWorlds.Core.AgentState.Active;
+
+        private Vec3 ResolveVoidstepDestination(Agent player, float range)
+        {
+            var locked = _targeting.FindLockedEnemy(player, range, 30f);
+            if (locked != null)
+            {
+                var travel = locked.Position - player.Position;
+                travel.z = 0f;
+                if (travel.Normalize() < 0.001f) travel = player.LookDirection;
+                return locked.Position + travel * 1.5f;
+            }
+            if (_targeting.TryGetAimedGroundPosition(player, range, out var aimed)) return aimed;
+            return _targeting.GetForwardFallback(player, Math.Min(range, 5f));
+        }
+
+        private void TeleportActor(Agent actor, Vec3 position, bool preserveMomentum)
+        {
+            var mount = actor.MountAgent;
+            if (mount != null && mount.IsActive())
+            {
+                mount.TeleportToPosition(position);
+                actor.TeleportToPosition(position + Vec3.Up * 0.4f);
+            }
+            else
+            {
+                actor.TeleportToPosition(position);
+            }
+
+            if (!preserveMomentum)
+            {
+                var zero = Vec2.Zero;
+                actor.MovementInputVector = zero;
+                actor.SetMovementDirection(ref zero);
+                if (mount != null && mount.IsActive())
+                {
+                    mount.MovementInputVector = zero;
+                    mount.SetMovementDirection(ref zero);
+                }
+            }
+        }
+
+        private bool CanPay(AbilityId ability)
+        {
+            var settings = VoidstepSettings.Current;
+            return _context.Energy.CanSpend(settings.Cost(ability), settings.UnlimitedEnergy, !settings.EnergyEnabled || settings.CooldownOnlyMode);
+        }
+
+        private bool PayAndStartCooldown(AbilityId ability)
+        {
+            var settings = VoidstepSettings.Current;
+            if (!_context.Energy.TrySpend(settings.Cost(ability), settings.UnlimitedEnergy, !settings.EnergyEnabled || settings.CooldownOnlyMode))
+                return false;
+            _context.Cooldowns.Start(ability, settings.Cooldown(ability));
+            return true;
+        }
+
+        private bool Fail(string message)
+        {
+            _hud.Show(message);
+            return false;
+        }
+
+        private void BeginFovPulse()
+        {
+            if (!VoidstepSettings.Current.CameraShake || _fovOwned) return;
+            try
+            {
+                _previousFov = _context.Mission.CustomCameraFovMultiplier;
+                _context.Mission.SetCustomCameraFovMultiplier(OwnedFov);
+                _fovOwned = true;
+            }
+            catch (Exception ex) { _context.Logger.Debug("Optional FOV pulse unavailable: " + ex.Message); }
+        }
+
+        private void RestoreFov()
+        {
+            if (!_fovOwned) return;
+            try
+            {
+                if (Math.Abs(_context.Mission.CustomCameraFovMultiplier - OwnedFov) < 0.001f)
+                    _context.Mission.SetCustomCameraFovMultiplier(_previousFov);
+            }
+            catch { }
+            _fovOwned = false;
+        }
+    }
+}

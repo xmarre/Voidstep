@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Voidstep.Core", "src\Voidstep.Core\Voidstep.Core.csproj", "{7899CEB9-42D1-4ED1-8DFC-4D1BEDF3A9AA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Voidstep", "src\Voidstep\Voidstep.csproj", "{FC9A0F96-E8E7-4FB6-8747-EFC327C4EC5B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Voidstep.Core.Tests", "tests\Voidstep.Core.Tests\Voidstep.Core.Tests.csproj", "{A11BAF0E-5AFC-474B-8C3B-901F8AC179DA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7899CEB9-42D1-4ED1-8DFC-4D1BEDF3A9AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7899CEB9-42D1-4ED1-8DFC-4D1BEDF3A9AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7899CEB9-42D1-4ED1-8DFC-4D1BEDF3A9AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7899CEB9-42D1-4ED1-8DFC-4D1BEDF3A9AA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FC9A0F96-E8E7-4FB6-8747-EFC327C4EC5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC9A0F96-E8E7-4FB6-8747-EFC327C4EC5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC9A0F96-E8E7-4FB6-8747-EFC327C4EC5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC9A0F96-E8E7-4FB6-8747-EFC327C4EC5B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A11BAF0E-5AFC-474B-8C3B-901F8AC179DA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A11BAF0E-5AFC-474B-8C3B-901F8AC179DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A11BAF0E-5AFC-474B-8C3B-901F8AC179DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A11BAF0E-5AFC-474B-8C3B-901F8AC179DA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
