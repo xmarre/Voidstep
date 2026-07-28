@@ -40,8 +40,10 @@ namespace Voidstep.Core
 
         public static double ProgressForTarget(double start, double target, double sweepRadians, SweepDirection direction)
         {
-            if (sweepRadians <= 0.0)
+            if (sweepRadians < 0.0)
                 throw new ArgumentOutOfRangeException(nameof(sweepRadians));
+            if (sweepRadians == 0.0)
+                return 0.0;
             var travel = TravelFromStart(start, target, direction);
             return Clamp01(travel / sweepRadians);
         }
