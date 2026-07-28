@@ -66,11 +66,12 @@ namespace Voidstep
             }
         }
 
-        public override void OnAgentHit(Agent affectedAgent, Agent affectorAgent, ref MissionWeapon affectorWeapon, ref Blow blow, ref AttackCollisionData attackCollisionData)
+        public override void OnAgentHit(Agent affectedAgent, Agent affectorAgent, in MissionWeapon affectorWeapon, in Blow blow, in AttackCollisionData attackCollisionData)
         {
-            base.OnAgentHit(affectedAgent, affectorAgent, ref affectorWeapon, ref blow, ref attackCollisionData);
+            base.OnAgentHit(affectedAgent, affectorAgent, in affectorWeapon, in blow, in attackCollisionData);
             if (_cleaned || _manager == null) return;
-            try { _manager.OnAgentHit(affectedAgent, affectorAgent, ref blow); }
+            var propagatedBlow = blow;
+            try { _manager.OnAgentHit(affectedAgent, affectorAgent, ref propagatedBlow); }
             catch (Exception ex)
             {
                 _logger.Error("Domino hit propagation failed safely.", ex);
@@ -116,7 +117,7 @@ namespace Voidstep
             catch (Exception ex) { _logger.Error("Player-agent replacement cleanup failed safely.", ex); }
         }
 
-        public override void OnEndMission()
+        protected override void OnEndMission()
         {
             Cleanup(CancelReason.MissionEnded);
             base.OnEndMission();
