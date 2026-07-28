@@ -45,6 +45,12 @@ namespace Voidstep.Core
             _current = Math.Min(_maximum, _current + amount);
         }
 
+        public void Refund(float amount)
+        {
+            if (amount < 0f) throw new ArgumentOutOfRangeException(nameof(amount));
+            _current = Math.Min(_maximum, _current + amount);
+        }
+
         public void Reset() => _current = _maximum;
     }
 
@@ -76,6 +82,8 @@ namespace Voidstep.Core
                 else _remaining[id] = next;
             }
         }
+
+        public void Clear(AbilityId id) => _remaining.Remove(id);
 
         public void Clear()
         {
