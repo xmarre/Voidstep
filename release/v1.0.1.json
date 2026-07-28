@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.1",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Runtime activation, input polling and bootstrap logging hotfix."
+}

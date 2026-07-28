@@ -9,6 +9,7 @@ namespace Voidstep
     internal sealed class InputRouter
     {
         private readonly Mission _mission;
+        private readonly VoidstepLogger _logger;
         private readonly CachedKey _voidstep = new CachedKey();
         private readonly CachedKey _blink = new CachedKey();
         private readonly CachedKey _windblast = new CachedKey();
@@ -16,28 +17,40 @@ namespace Voidstep
         private readonly CachedKey _domino = new CachedKey();
         private readonly CachedKey _darkVision = new CachedKey();
 
-        public InputRouter(Mission mission) => _mission = mission;
+        public InputRouter(Mission mission, VoidstepLogger logger)
+        {
+            _mission = mission;
+            _logger = logger;
+        }
 
         public AbilityId? PollAbility()
         {
             var settings = VoidstepSettings.Current;
-            var input = _mission.InputManager;
-            if (input == null || Input.IsOnScreenKeyboardActive || !_mission.IsLoadingFinished || _mission.MissionEnded || _mission.MissionIsEnding || _mission.PauseAITick)
+            if (Input.IsOnScreenKeyboardActive || !_mission.IsLoadingFinished || _mission.MissionEnded || _mission.MissionIsEnding)
                 return null;
-            if (settings.RequireControlModifier && !IsControlDown(input))
+            if (settings.RequireControlModifier && !IsControlDown())
                 return null;
 
-            if (_voidstep.Pressed(input, settings.VoidstepKey)) return AbilityId.VoidstepCleave;
-            if (_blink.Pressed(input, settings.BlinkKey)) return AbilityId.Blink;
-            if (_windblast.Pressed(input, settings.WindblastKey)) return AbilityId.Windblast;
-            if (_bendTime.Pressed(input, settings.BendTimeKey)) return AbilityId.BendTime;
-            if (_domino.Pressed(input, settings.DominoKey)) return AbilityId.Domino;
-            if (_darkVision.Pressed(input, settings.DarkVisionKey)) return AbilityId.DarkVision;
+            if (_voidstep.Pressed(settings.VoidstepKey)) return Pressed(AbilityId.VoidstepCleave, settings.VoidstepKey);
+            if (_blink.Pressed(settings.BlinkKey)) return Pressed(AbilityId.Blink, settings.BlinkKey);
+            if (_windblast.Pressed(settings.WindblastKey)) return Pressed(AbilityId.Windblast, settings.WindblastKey);
+            if (_bendTime.Pressed(settings.BendTimeKey)) return Pressed(AbilityId.BendTime, settings.BendTimeKey);
+            if (_domino.Pressed(settings.DominoKey)) return Pressed(AbilityId.Domino, settings.DominoKey);
+            if (_darkVision.Pressed(settings.DarkVisionKey)) return Pressed(AbilityId.DarkVision, settings.DarkVisionKey);
             return null;
         }
 
-        private static bool IsControlDown(IInputContext input) =>
-            input.IsKeyDown(InputKey.LeftControl) || input.IsKeyDown(InputKey.RightControl);
+        private AbilityId Pressed(AbilityId ability, Dropdown<string> setting)
+        {
+            _logger.Debug($"Input accepted: {ability} ({SelectedValue(setting)}), Ctrl required={VoidstepSettings.Current.RequireControlModifier}.");
+            return ability;
+        }
+
+        private static bool IsControlDown() =>
+            Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl);
+
+        private static string SelectedValue(Dropdown<string> setting) =>
+            setting != null && setting.Count > 0 ? setting.SelectedValue : "<unset>";
 
         private sealed class CachedKey
         {
@@ -45,15 +58,15 @@ namespace Voidstep
             private InputKey _key;
             private bool _valid;
 
-            public bool Pressed(IInputContext input, Dropdown<string> setting)
+            public bool Pressed(Dropdown<string> setting)
             {
-                var selected = setting != null && setting.Count > 0 ? setting.SelectedValue : null;
+                var selected = SelectedValue(setting);
                 if (!string.Equals(selected, _selectedValue, StringComparison.Ordinal))
                 {
                     _selectedValue = selected;
-                    _valid = !string.IsNullOrEmpty(selected) && Enum.TryParse(selected, false, out _key);
+                    _valid = !string.IsNullOrEmpty(selected) && selected != "<unset>" && Enum.TryParse(selected, false, out _key);
                 }
-                return _valid && input.IsKeyPressed(_key);
+                return _valid && Input.IsKeyPressed(_key);
             }
         }
     }

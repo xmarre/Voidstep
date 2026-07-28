@@ -1,5 +1,6 @@
 using System;
 using TaleWorlds.Core;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using Voidstep.Core;
 
@@ -13,17 +14,33 @@ namespace Voidstep
         private Agent _lastPlayer;
         private bool _cleaned;
         private bool _wasEnabled;
+        private bool _readyNoticeShown;
+
+        public VoidstepMissionBehavior(VoidstepLogger logger)
+        {
+            _logger = logger ?? new VoidstepLogger();
+        }
 
         public override void OnBehaviorInitialize()
         {
             base.OnBehaviorInitialize();
-            _logger = new VoidstepLogger();
-            var context = new AbilityContext(Mission, _logger);
-            _manager = new AbilityManager(context);
-            _input = new InputRouter(Mission);
-            _lastPlayer = Mission.MainAgent;
-            _wasEnabled = VoidstepSettings.Current.Enabled;
-            _logger.Info("Mission behavior initialized.");
+            _logger.Info("Mission behavior initialization started.");
+            try
+            {
+                var context = new AbilityContext(Mission, _logger);
+                _manager = new AbilityManager(context);
+                _input = new InputRouter(Mission, _logger);
+                _lastPlayer = Mission.MainAgent;
+                _wasEnabled = VoidstepSettings.Current.Enabled;
+                _logger.Info($"Mission behavior initialized. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+            }
+            catch (Exception ex)
+            {
+                _cleaned = true;
+                _manager = null;
+                _input = null;
+                _logger.Error("Mission behavior initialization failed; abilities were disabled for this mission.", ex);
+            }
         }
 
         public override void OnMissionTick(float dt)
@@ -47,6 +64,19 @@ namespace Voidstep
                 }
 
                 var current = Mission.MainAgent;
+                if (!_readyNoticeShown && current != null && current.IsActive())
+                {
+                    _readyNoticeShown = true;
+                    _logger.Info("Runtime ready. Default controls are Ctrl+1 through Ctrl+6 unless changed in MCM.");
+                    try
+                    {
+                        InformationManager.DisplayMessage(new InformationMessage("Voidstep v1.0.1 active — use Ctrl+1 through Ctrl+6 by default."));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug($"Readiness notification was unavailable: {ex.GetType().Name}.");
+                    }
+                }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
                     _manager.OnPlayerAgentChanged(_lastPlayer, current);

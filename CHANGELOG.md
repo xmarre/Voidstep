@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1
+
+- Fixed ability keys not registering reliably by polling Bannerlord's validated global input state instead of depending on a mission input context.
+- Removed the `PauseAITick` input gate that could suppress every spell key in otherwise playable missions.
+- Added submodule, mission-registration and pre-construction bootstrap logging so initialization failures are recorded before the ability manager is created.
+- Added guarded mission initialization with an in-game error message instead of silently leaving MCM available while the runtime is inactive.
+- Added a one-time in-battle activation message showing that Voidstep is ready and reminding players that the defaults are `Ctrl+1` through `Ctrl+6`.
+- Added logging to Bannerlord's engine log, the Documents ModLogs folder and the module folder when writable.
+- Fixed the release workflow's absent-tag handling and source packaging so the published source ZIP is the exact tracked commit without generated `bin` or `obj` files.
+
 ## 1.0.0
 
 - Added Voidstep Cleave with validated teleport placement, angle-synchronised target timing, individual native melee blows, whole-cast target caps and one-hit-per-cast enforcement.

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using TaleWorlds.Library;
 
@@ -6,23 +7,16 @@ namespace Voidstep
 {
     internal sealed class VoidstepLogger
     {
-        private readonly string _path;
-        private readonly object _gate = new object();
+        private static readonly object GlobalGate = new object();
+        private readonly List<string> _paths = new List<string>(2);
 
         public VoidstepLogger()
         {
-            try
-            {
-                var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                var directory = Path.Combine(documents, "Mount and Blade II Bannerlord", "Configs", "ModLogs");
-                Directory.CreateDirectory(directory);
-                _path = Path.Combine(directory, "Voidstep.log");
-            }
-            catch
-            {
-                _path = null;
-            }
+            AddDocumentsPath();
+            AddModulePath();
         }
+
+        public string PrimaryPath => _paths.Count > 0 ? _paths[0] : null;
 
         public void Debug(string message)
         {
@@ -35,23 +29,53 @@ namespace Voidstep
         public void Error(string message, Exception exception)
         {
             Write("ERROR", message, exception);
-            InformationManager.DisplayMessage(new InformationMessage($"Voidstep: {message}", Colors.Red));
+            try { InformationManager.DisplayMessage(new InformationMessage($"Voidstep: {message}", Colors.Red)); }
+            catch { }
+        }
+
+        private void AddDocumentsPath()
+        {
+            try
+            {
+                var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                if (string.IsNullOrWhiteSpace(documents)) return;
+                var directory = Path.Combine(documents, "Mount and Blade II Bannerlord", "Configs", "ModLogs");
+                Directory.CreateDirectory(directory);
+                _paths.Add(Path.Combine(directory, "Voidstep.log"));
+            }
+            catch { }
+        }
+
+        private void AddModulePath()
+        {
+            try
+            {
+                var root = BasePath.Name;
+                if (string.IsNullOrWhiteSpace(root)) return;
+                var directory = Path.Combine(root, "Modules", "Voidstep");
+                if (!Directory.Exists(directory)) return;
+                var path = Path.Combine(directory, "Voidstep.log");
+                if (!_paths.Contains(path)) _paths.Add(path);
+            }
+            catch { }
         }
 
         private void Write(string level, string message, Exception exception)
         {
-            try
+            var line = $"[{DateTime.UtcNow:O}] [{level}] {message}";
+            if (exception != null)
+                line += Environment.NewLine + exception;
+
+            try { TaleWorlds.Library.Debug.Print("[Voidstep] " + line); }
+            catch { }
+
+            lock (GlobalGate)
             {
-                var line = $"[{DateTime.UtcNow:O}] [{level}] {message}";
-                if (exception != null)
-                    line += Environment.NewLine + exception;
-                if (string.IsNullOrEmpty(_path)) return;
-                lock (_gate)
-                    File.AppendAllText(_path, line + Environment.NewLine);
-            }
-            catch
-            {
-                // Logging must never affect combat state.
+                for (var i = 0; i < _paths.Count; i++)
+                {
+                    try { File.AppendAllText(_paths[i], line + Environment.NewLine); }
+                    catch { }
+                }
             }
         }
     }

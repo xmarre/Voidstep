@@ -1,7 +1,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -85,7 +85,7 @@ try {
     Assert-File $Zip
     $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
     try {
-        $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\\', '/') })
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
         $required = @(
             "Modules/Voidstep/SubModule.xml",
             "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll",

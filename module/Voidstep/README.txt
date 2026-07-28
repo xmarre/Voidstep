@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.0.0
+VOIDSTEP — ARCANE MELEE ABILITIES v1.0.1
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional compatibility preset: The Old Realms 1.16
 
