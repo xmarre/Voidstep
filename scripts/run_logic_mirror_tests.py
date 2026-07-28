@@ -16,6 +16,10 @@ def inside(start, target, sweep, direction):
     return travel(start, target, direction) <= sweep + 1e-6
 
 def progress(start, target, sweep, direction):
+    if sweep < 0:
+        raise ValueError("sweep must be non-negative")
+    if sweep == 0:
+        return 0.0
     return min(1.0, max(0.0, travel(start, target, direction) / sweep))
 
 def schedule(candidates, start, sweep, direction, radius, maximum=0):
@@ -31,6 +35,11 @@ class MirrorTests(unittest.TestCase):
     def test_normalise(self):
         self.assertAlmostEqual(norm(-math.pi / 2), 3 * math.pi / 2)
         self.assertAlmostEqual(norm(4 * math.pi), 0)
+
+    def test_zero_sweep_is_noop(self):
+        self.assertEqual(progress(0, 0, 0, CW), 0.0)
+        with self.assertRaises(ValueError):
+            progress(0, 0, -1, CW)
 
     def test_clockwise_order(self):
         result = schedule([('late', math.radians(270), 1), ('early', math.radians(350), 1), ('middle', math.radians(315), 1)], 0, math.radians(100), CW, 2)
