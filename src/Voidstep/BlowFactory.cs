@@ -61,7 +61,9 @@ namespace Voidstep
                 var collision = CreateCollision(direction, swing, impact, attackProgress);
                 if (CreateNativeMeleeBlow == null)
                 {
-                    _logger.Error("Bannerlord's native melee-blow factory could not be resolved.");
+                    _logger.Error(
+                        "Bannerlord's native melee-blow factory could not be resolved.",
+                        new MissingMethodException("Mission.CreateMeleeBlow"));
                     return false;
                 }
 
@@ -92,7 +94,7 @@ namespace Voidstep
                 if (propagated)
                     blow.BlowFlag |= BlowFlags.NoSound;
 
-                victim.RegisterBlow(blow, ref collision);
+                victim.RegisterBlow(blow, in collision);
                 return true;
             }
             catch (Exception ex)
@@ -127,7 +129,7 @@ namespace Voidstep
                     DamageCalculated = true
                 };
                 var collision = CreateCollision(direction, blow.SwingDirection, blow.GlobalPosition, 1f);
-                victim.RegisterBlow(blow, ref collision);
+                victim.RegisterBlow(blow, in collision);
                 return true;
             }
             catch (Exception ex)
@@ -136,7 +138,6 @@ namespace Voidstep
                 return false;
             }
         }
-
 
         private static CreateMeleeBlowDelegate ResolveCreateMeleeBlow()
         {
