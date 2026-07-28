@@ -113,7 +113,7 @@ Get-ChildItem $StageBin -File | Where-Object {
 
 if (-not (Test-Path (Join-Path $StageModule "SubModule.xml"))) { throw "Staged module lacks SubModule.xml" }
 $Forbidden = Get-ChildItem $StageModule -Recurse -File | Where-Object {
-    $_.Name -like "TaleWorlds.*.dll" -or $_.Name -eq "TOR_Core.dll" -or $_.Name -like "MCM*.dll"
+    $_.Name -like "TaleWorlds.*.dll" -or $_.Name -eq "TOR_Core.dll" -or $_.Name -like "MCM*.dll" -or $_.Name -like "Bannerlord.MBOptionScreen*.dll"
 }
 if ($Forbidden) { throw "Forbidden dependency DLLs entered the release module: $($Forbidden.FullName -join ', ')" }
 
@@ -123,7 +123,7 @@ Compress-Archive -Path $StageModules -DestinationPath $ZipPath -CompressionLevel
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::OpenRead($ZipPath)
 try {
-    $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\\', '/') })
+    $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
     $required = @(
         "Modules/Voidstep/SubModule.xml",
         "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll",
@@ -135,7 +135,7 @@ try {
     }
     foreach ($entry in $entries) {
         $leaf = [IO.Path]::GetFileName($entry)
-        if ($leaf -like "TaleWorlds.*.dll" -or $leaf -eq "TOR_Core.dll") {
+        if ($leaf -like "TaleWorlds.*.dll" -or $leaf -eq "TOR_Core.dll" -or $leaf -like "MCM*.dll" -or $leaf -like "Bannerlord.MBOptionScreen*.dll") {
             throw "Release ZIP contains forbidden dependency: $entry"
         }
     }
