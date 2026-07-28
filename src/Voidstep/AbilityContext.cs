@@ -10,7 +10,7 @@ namespace Voidstep
         {
             Mission = mission ?? throw new ArgumentNullException(nameof(mission));
             Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            Energy = new VoidEnergyPool(VoidstepSettings.Current.MaximumEnergy);
+            Energy = new VoidEnergyPool(Math.Max(1f, VoidstepSettings.Current.MaximumEnergy));
             Cooldowns = new CooldownBook();
         }
 

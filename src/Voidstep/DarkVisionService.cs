@@ -19,6 +19,7 @@ namespace Voidstep
         private readonly List<int> _staleBuffer = new List<int>(128);
         private float _refreshRemaining;
         private Agent _player;
+        private bool _visibilityFailureLogged;
 
         public DarkVisionService(Mission mission, VoidstepLogger logger)
         {
@@ -40,6 +41,7 @@ namespace Voidstep
             _player = player;
             Active = true;
             _refreshRemaining = 0f;
+            _visibilityFailureLogged = false;
             return true;
         }
 
@@ -75,6 +77,7 @@ namespace Voidstep
             _nearby.Clear();
             _refreshRemaining = 0f;
             _player = null;
+            _visibilityFailureLogged = false;
             Active = false;
         }
 
@@ -113,12 +116,17 @@ namespace Voidstep
             try
             {
                 if (agent.GetLookAgent() == _player) return EngagedColor;
-                var state = agent.GetLastTargetVisibilityState().ToString();
-                if (state.IndexOf("Visible", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    state.IndexOf("Clear", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (agent.GetLastTargetVisibilityState() == AITargetVisibilityState.TargetIsClear)
                     return AlertedColor;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (!_visibilityFailureLogged)
+                {
+                    _visibilityFailureLogged = true;
+                    _logger.Debug("Dark Vision visibility-state lookup failed: " + ex.Message);
+                }
+            }
             return UnawareColor;
         }
 

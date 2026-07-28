@@ -139,6 +139,7 @@ namespace Voidstep
             }
         }
 
+
         private static CreateMeleeBlowDelegate ResolveCreateMeleeBlow()
         {
             var method = typeof(Mission).GetMethod(

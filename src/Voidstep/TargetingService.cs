@@ -94,7 +94,7 @@ namespace Voidstep
 
         internal static bool IsUsableTarget(Agent player, Agent target, bool enemyOnly)
         {
-            if (target == null || target == player || !target.IsActive() || target.Health <= 0f)
+            if (player == null || target == null || target == player || !target.IsActive() || target.Health <= 0f)
                 return false;
             if (enemyOnly && (player.Team == null || target.Team == null || !player.Team.IsEnemyOf(target.Team)))
                 return false;

@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.0",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "One-shot promotion marker for the initial Voidstep release."
+}

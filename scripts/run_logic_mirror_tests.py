@@ -19,10 +19,12 @@ def progress(start, target, sweep, direction):
     return min(1.0, max(0.0, travel(start, target, direction) / sweep))
 
 def schedule(candidates, start, sweep, direction, radius, maximum=0):
-    rows = [(value, progress(start, angle, sweep, direction), distance2)
-            for value, angle, distance2 in candidates
+    if maximum < 0:
+        raise ValueError("maximum must be non-negative")
+    rows = [(value, progress(start, angle, sweep, direction), distance2, ordinal)
+            for ordinal, (value, angle, distance2) in enumerate(candidates)
             if distance2 <= radius * radius and inside(start, angle, sweep, direction)]
-    rows.sort(key=lambda x: (x[1], x[2]))
+    rows.sort(key=lambda x: (x[1], x[2], x[3]))
     return rows[:maximum or None]
 
 class MirrorTests(unittest.TestCase):
@@ -47,6 +49,14 @@ class MirrorTests(unittest.TestCase):
     def test_damage_timing(self):
         self.assertAlmostEqual(progress(math.radians(10), math.radians(180), math.radians(340), CCW), .5)
         self.assertEqual(progress(0, 0, math.radians(340), CW), 0)
+
+    def test_negative_maximum_is_rejected(self):
+        with self.assertRaises(ValueError):
+            schedule([], 0, math.pi, CCW, 5, -1)
+
+    def test_stable_ordinal_breaks_equal_sweep_ties(self):
+        result = schedule([('first', 0, 1), ('second', 0, 1)], 0, math.pi, CCW, 2, 1)
+        self.assertEqual(result[0][0], 'first')
 
     def test_maximum_hit_registry(self):
         hits = set()

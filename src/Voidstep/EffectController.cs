@@ -41,9 +41,10 @@ namespace Voidstep
 
         public GameEntity CreateMarker(Vec3 position, uint color, bool alwaysVisible)
         {
+            GameEntity entity = null;
             try
             {
-                var entity = GameEntity.CreateEmpty(_mission.Scene, false, false, false);
+                entity = GameEntity.CreateEmpty(_mission.Scene, false, false, false);
                 var frame = MatrixFrame.Identity;
                 frame.origin = position;
                 entity.SetFrame(ref frame, true);
@@ -59,6 +60,11 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
+                if (entity != null)
+                {
+                    try { entity.Remove(0); } catch { }
+                    _ownedEntities.Remove(entity);
+                }
                 _logger.Debug("Marker creation failed: " + ex.Message);
                 return null;
             }

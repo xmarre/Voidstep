@@ -54,6 +54,20 @@ namespace Voidstep.Core.Tests
         }
 
         [Fact]
+        public void EqualProgressAndDistanceUseStableOrdinalBeforeTruncation()
+        {
+            var candidates = new List<SweepTarget<string>>
+            {
+                new SweepTarget<string>("second", 0, 1, 20),
+                new SweepTarget<string>("first", 0, 1, 10)
+            };
+            var result = new List<ScheduledSweepTarget<string>>();
+            SweepPlanner.BuildSchedule(candidates, 0, Math.PI, SweepDirection.CounterClockwise, 2, 1, result);
+            Assert.Single(result);
+            Assert.Equal("first", result[0].Value);
+        }
+
+        [Fact]
         public void SweepGapExcludesTargetOutsideThreeHundredFortyDegrees()
         {
             var start = 10 * Deg;

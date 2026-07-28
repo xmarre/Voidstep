@@ -89,11 +89,14 @@ namespace Voidstep
                 }
                 else if (_state.Ability == AbilityId.Blink && _state.Phase == AbilityPhase.Targeting)
                 {
-                    _state.Tick(_token, Math.Max(0f, dt));
+                    if (!_blink.IsAiming)
+                        CancelCurrent(CancelReason.Interrupted);
+                    else
+                        _state.Tick(_token, Math.Max(0f, dt));
                 }
             }
 
-            _hud.Tick(dt, _context.Energy, _context.Cooldowns, _darkVision.Active, _time.Active);
+            _hud.Tick(dt, _context.Energy, _darkVision.Active, _time.Active);
         }
 
         public bool TryActivate(AbilityId ability)

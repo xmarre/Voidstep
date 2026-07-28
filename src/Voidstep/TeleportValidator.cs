@@ -47,12 +47,12 @@ namespace Voidstep
                 return new TeleportValidationResult(true, exact, null, false);
 
             BuildFallbackCandidates(requested, actor.Position.z);
-            if (DestinationSelector.TrySelectBest(_fallback,
-                    candidate => TryValidateExact(actor, candidate, allowThroughWalls, out _, out _),
-                    out var selected) &&
-                TryValidateExact(actor, selected, allowThroughWalls, out var validated, out _))
+            _fallback.Sort(CompareCandidate);
+            var fallbackChecks = Math.Min(16, _fallback.Count);
+            for (var i = 0; i < fallbackChecks; i++)
             {
-                return new TeleportValidationResult(true, validated, reason, true);
+                if (TryValidateExact(actor, _fallback[i].Value, allowThroughWalls, out var validated, out _))
+                    return new TeleportValidationResult(true, validated, null, true);
             }
 
             return Fail(reason ?? "No safe destination was found.");
@@ -215,6 +215,15 @@ namespace Voidstep
                     _fallback.Add(new CandidateScore<Vec3>(candidate, radius * radius, candidate.z - actorZ, ordinal++));
                 }
             }
+        }
+
+
+        private static int CompareCandidate(CandidateScore<Vec3> left, CandidateScore<Vec3> right)
+        {
+            var horizontal = left.DistanceSquared.CompareTo(right.DistanceSquared);
+            if (horizontal != 0) return horizontal;
+            var vertical = Math.Abs(left.VerticalDelta).CompareTo(Math.Abs(right.VerticalDelta));
+            return vertical != 0 ? vertical : left.Ordinal.CompareTo(right.Ordinal);
         }
 
         private static TeleportValidationResult Fail(string reason) =>

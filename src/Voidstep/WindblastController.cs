@@ -71,7 +71,8 @@ namespace Voidstep
                         count++;
                 }
 
-                _effects.Windblast(player.GetChestGlobalPosition() + forward * 1.2f);
+                if (count > 0)
+                    _effects.Windblast(player.GetChestGlobalPosition() + forward * 1.2f);
                 if (settings.WindblastProjectiles)
                     _logger.Debug("Projectile deflection was requested but remains disabled because Bannerlord 1.3.15 exposes no safe public missile-velocity mutation path.");
             }

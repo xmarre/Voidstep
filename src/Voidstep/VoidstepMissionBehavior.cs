@@ -62,7 +62,7 @@ namespace Voidstep
             catch (Exception ex)
             {
                 _logger.Error("A mission tick failed; all owned ability state was cleaned up.", ex);
-                _manager.Cleanup(CancelReason.Exception);
+                Cleanup(CancelReason.Exception);
             }
         }
 

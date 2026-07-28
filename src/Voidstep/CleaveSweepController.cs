@@ -17,7 +17,7 @@ namespace Voidstep
         private readonly List<SweepTarget<Agent>> _candidates = new List<SweepTarget<Agent>>(128);
         private readonly List<ScheduledSweepTarget<Agent>> _schedule = new List<ScheduledSweepTarget<Agent>>(128);
         private readonly HitRegistry<int> _hits = new HitRegistry<int>();
-        private readonly Dictionary<int, double> _snapshotProgress = new Dictionary<int, double>();
+        private readonly List<ScheduledSweepTarget<int>> _snapshotSchedule = new List<ScheduledSweepTarget<int>>(128);
 
         private Agent _actor;
         private float _elapsed;
@@ -76,7 +76,7 @@ namespace Voidstep
             _active = true;
             _elapsed = 0f;
             _lastProgress = 0f;
-            _animation.BeginCleave(actor, settings.CleaveClockwise);
+            _animation.BeginCleave(actor);
 
             if (_snapshotTargets)
                 CaptureSnapshot();
@@ -135,7 +135,7 @@ namespace Voidstep
             _elapsed = 0f;
             _duration = 0f;
             _lastProgress = 0f;
-            _snapshotProgress.Clear();
+            _snapshotSchedule.Clear();
             _hits.Clear();
             _candidates.Clear();
             _schedule.Clear();
@@ -143,7 +143,7 @@ namespace Voidstep
             _trailAccumulator = 0f;
             _trailBursts = 0;
             if (_actor != null)
-                _animation.Cancel(_actor);
+                _animation.ResetActionSpeed(_actor);
             _actor = null;
         }
 
@@ -153,20 +153,25 @@ namespace Voidstep
             for (var i = 0; i < _schedule.Count; i++)
             {
                 var target = _schedule[i];
-                _snapshotProgress[target.Value.Index] = target.Progress;
+                _snapshotSchedule.Add(new ScheduledSweepTarget<int>(
+                    target.Value.Index,
+                    target.Progress,
+                    target.DistanceSquared,
+                    target.Ordinal));
             }
         }
 
         private void ProcessSnapshot(float progress)
         {
-            if (_snapshotProgress.Count == 0) return;
-            foreach (var pair in _snapshotProgress)
+            if (_snapshotSchedule.Count == 0) return;
+            for (var i = 0; i < _snapshotSchedule.Count; i++)
             {
-                if (pair.Value > progress || _hits.Contains(pair.Key))
+                var planned = _snapshotSchedule[i];
+                if (planned.Progress > progress || _hits.Contains(planned.Value))
                     continue;
-                var target = _mission.FindAgentWithIndex(pair.Key);
+                var target = _mission.FindAgentWithIndex(planned.Value);
                 if (IsEligible(target, false))
-                    TryHit(target, (float)pair.Value);
+                    TryHit(target, (float)planned.Progress);
             }
         }
 
@@ -199,7 +204,7 @@ namespace Voidstep
                 var angle = AngleMath.NormalizeRadians(Math.Atan2(delta.y, delta.x));
                 if (AngleMath.HasSweepPassed(_startAngle, angle, progress, _sweepRadians, _direction))
                     continue;
-                _candidates.Add(new SweepTarget<Agent>(target, angle, distanceSquared));
+                _candidates.Add(new SweepTarget<Agent>(target, angle, distanceSquared, target.Index));
             }
 
             SweepPlanner.BuildSchedule(

@@ -9,7 +9,7 @@ namespace Voidstep
         private float _statusTimer;
         private string _lastStatus;
 
-        public void Tick(float dt, VoidEnergyPool energy, CooldownBook cooldowns, bool darkVisionActive, bool bendTimeActive)
+        public void Tick(float dt, VoidEnergyPool energy, bool darkVisionActive, bool bendTimeActive)
         {
             _statusTimer -= Math.Max(0f, dt);
             if (_statusTimer > 0f) return;
