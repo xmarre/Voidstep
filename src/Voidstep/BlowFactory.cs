@@ -142,67 +142,74 @@ namespace Voidstep
 
         private static CreateMeleeBlowDelegate ResolveCreateMeleeBlow()
         {
-            var method = typeof(Mission).GetMethod(
-                "CreateMeleeBlow",
-                BindingFlags.Instance | BindingFlags.NonPublic,
-                null,
-                new[]
-                {
-                    typeof(Agent),
-                    typeof(Agent),
-                    typeof(AttackCollisionData).MakeByRefType(),
-                    typeof(MissionWeapon).MakeByRefType(),
-                    typeof(CrushThroughState),
-                    typeof(Vec3),
-                    typeof(Vec3),
-                    typeof(bool)
-                },
-                null);
-            return method == null
-                ? null
-                : (CreateMeleeBlowDelegate)method.CreateDelegate(typeof(CreateMeleeBlowDelegate));
+            try
+            {
+                var method = typeof(Mission).GetMethod(
+                    "CreateMeleeBlow",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    null,
+                    new[]
+                    {
+                        typeof(Agent),
+                        typeof(Agent),
+                        typeof(AttackCollisionData).MakeByRefType(),
+                        typeof(MissionWeapon).MakeByRefType(),
+                        typeof(CrushThroughState),
+                        typeof(Vec3),
+                        typeof(Vec3),
+                        typeof(bool)
+                    },
+                    null);
+                return method == null
+                    ? null
+                    : (CreateMeleeBlowDelegate)method.CreateDelegate(typeof(CreateMeleeBlowDelegate));
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static AttackCollisionData CreateCollision(Vec3 direction, Vec3 swing, Vec3 impact, float progress)
         {
             return AttackCollisionData.GetAttackCollisionDataForDebugPurpose(
-                false,
-                false,
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-                true,
-                false,
-                false,
-                false,
-                CombatCollisionResult.StrikeAgent,
-                -1,
-                (int)StrikeType.Swing,
-                (int)DamageTypes.Cut,
-                0,
-                BoneBodyPartType.Chest,
-                -1,
-                Agent.UsageDirection.AttackLeft,
-                0,
-                CombatHitResultFlags.NormalHit,
-                progress,
-                1f,
-                0f,
-                0.2f,
-                0f,
-                0f,
-                0f,
-                0f,
-                Vec3.Up,
-                direction,
-                impact,
-                Vec3.Zero,
-                Vec3.Zero,
-                Vec3.Zero,
-                Vec3.Up);
+                _attackBlockedWithShield: false,
+                _correctSideShieldBlock: false,
+                _isAlternativeAttack: false,
+                _isColliderAgent: true,
+                _collidedWithShieldOnBack: false,
+                _isMissile: false,
+                _isMissileBlockedWithWeapon: false,
+                _missileHasPhysics: false,
+                _entityExists: true,
+                _thrustTipHit: false,
+                _missileGoneUnderWater: false,
+                _missileGoneOutOfBorder: false,
+                collisionResult: CombatCollisionResult.StrikeAgent,
+                affectorWeaponSlotOrMissileIndex: -1,
+                StrikeType: (int)StrikeType.Swing,
+                DamageType: (int)DamageTypes.Cut,
+                CollisionBoneIndex: 0,
+                VictimHitBodyPart: BoneBodyPartType.Chest,
+                AttackBoneIndex: -1,
+                AttackDirection: Agent.UsageDirection.AttackLeft,
+                PhysicsMaterialIndex: 0,
+                CollisionHitResultFlags: CombatHitResultFlags.NormalHit,
+                AttackProgress: progress,
+                CollisionDistanceOnWeapon: 1f,
+                AttackerStunPeriod: 0f,
+                DefenderStunPeriod: 0.2f,
+                MissileTotalDamage: 0f,
+                MissileInitialSpeed: 0f,
+                ChargeVelocity: 0f,
+                FallSpeed: 0f,
+                WeaponRotUp: swing,
+                _weaponBlowDir: direction,
+                CollisionGlobalPosition: impact,
+                MissileVelocity: Vec3.Zero,
+                MissileStartingPosition: Vec3.Zero,
+                VictimAgentCurVelocity: Vec3.Zero,
+                GroundNormal: Vec3.Up);
         }
 
         private static bool IsValid(Agent attacker, Agent victim) =>

@@ -68,6 +68,14 @@ namespace Voidstep.Core.Tests
         }
 
         [Fact]
+        public void ZeroDegreeSweepIsANoOpAndNegativeSweepIsRejected()
+        {
+            Assert.Equal(0d, AngleMath.ProgressForTarget(0d, 0d, 0d, SweepDirection.Clockwise));
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                AngleMath.ProgressForTarget(0d, 0d, -0.01d, SweepDirection.Clockwise));
+        }
+
+        [Fact]
         public void SweepGapExcludesTargetOutsideThreeHundredFortyDegrees()
         {
             var start = 10 * Deg;
@@ -155,6 +163,21 @@ namespace Voidstep.Core.Tests
             Assert.Equal(65, pool.Current);
             Assert.True(pool.TrySpend(70, false, true));
             Assert.Equal(65, pool.Current);
+        }
+
+        [Fact]
+        public void PaymentRollbackRestoresEnergyAndOnlyTheSelectedCooldown()
+        {
+            var pool = new VoidEnergyPool(100);
+            var book = new CooldownBook();
+            Assert.True(pool.TrySpend(25, false, false));
+            book.Start(AbilityId.Windblast, 10);
+            book.Start(AbilityId.Blink, 5);
+            pool.Refund(25);
+            book.Clear(AbilityId.Windblast);
+            Assert.Equal(100, pool.Current);
+            Assert.True(book.IsReady(AbilityId.Windblast));
+            Assert.False(book.IsReady(AbilityId.Blink));
         }
 
         [Fact]

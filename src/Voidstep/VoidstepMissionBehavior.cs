@@ -42,7 +42,7 @@ namespace Voidstep
                 _wasEnabled = true;
                 if (Mission.MissionEnded || Mission.MissionIsEnding)
                 {
-                    _manager.Cleanup(CancelReason.MissionEnded);
+                    Cleanup(CancelReason.MissionEnded);
                     return;
                 }
 
@@ -87,8 +87,7 @@ namespace Voidstep
                 _manager.OnAgentRemoved(affectedAgent, affectorAgent, agentState);
                 if (affectedAgent != null && _lastPlayer != null && affectedAgent.Index == _lastPlayer.Index)
                 {
-                    _manager.Cleanup(CancelReason.ActorDied);
-                    _lastPlayer = null;
+                    Cleanup(CancelReason.ActorDied);
                 }
             }
             catch (Exception ex) { _logger.Error("Agent-removal cleanup failed safely.", ex); }

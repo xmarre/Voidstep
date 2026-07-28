@@ -28,7 +28,6 @@ namespace Voidstep
         private float _configuredMaximum;
         private bool _fovOwned;
         private float _previousFov;
-        private float _windupRotationProgress;
         private float _recoveryRotationProgress;
         private float _castRecoveryRadians;
         private int _controlledAgentIndex;
@@ -210,7 +209,6 @@ namespace Voidstep
             _castActorIndex = player.Index;
             _destination = validation.Position;
             _castOriginalLook = player.LookDirection;
-            _windupRotationProgress = 0f;
             _recoveryRotationProgress = 0f;
             _castRecoveryRadians = (settings.CleaveClockwise ? -1f : 1f) * (360f - settings.CleaveSweepDegrees) * (float)Math.PI / 180f;
             _state.Transition(_token, AbilityPhase.Validating);
@@ -317,11 +315,17 @@ namespace Voidstep
 
         private bool CastWindblast(Agent player)
         {
+            if (!PayAndStartCooldown(AbilityId.Windblast))
+                return Fail("Not enough Void Energy.");
+
             var hitCount = _windblast.Cast(player);
             if (hitCount <= 0)
+            {
+                RollbackPayment(AbilityId.Windblast);
                 return Fail("Windblast found no valid enemy in the cone.");
+            }
+
             _effects.PlaySound("event:/mission/combat/hit/weapon_hit", player.Position);
-            if (!PayAndStartCooldown(AbilityId.Windblast)) return false;
             CompleteImmediate(AbilityId.Windblast, player);
             _hud.Show($"Windblast affected {hitCount} target{(hitCount == 1 ? string.Empty : "s")}.");
             return true;
@@ -396,7 +400,6 @@ namespace Voidstep
             }
             _castActorIndex = -1;
             _destination = Vec3.Invalid;
-            _windupRotationProgress = 0f;
             _recoveryRotationProgress = 0f;
             _castRecoveryRadians = 0f;
             _castOriginalLook = Vec3.Zero;
@@ -421,7 +424,6 @@ namespace Voidstep
             _token = default(CastToken);
             _castActorIndex = -1;
             _destination = Vec3.Invalid;
-            _windupRotationProgress = 0f;
             _recoveryRotationProgress = 0f;
             _castRecoveryRadians = 0f;
             _castOriginalLook = Vec3.Zero;
@@ -470,11 +472,11 @@ namespace Voidstep
             {
                 var zero = Vec2.Zero;
                 actor.MovementInputVector = zero;
-                actor.SetMovementDirection(ref zero);
+                actor.SetMovementDirection(in zero);
                 if (mount != null && mount.IsActive())
                 {
                     mount.MovementInputVector = zero;
-                    mount.SetMovementDirection(ref zero);
+                    mount.SetMovementDirection(in zero);
                 }
             }
         }
@@ -492,6 +494,15 @@ namespace Voidstep
                 return false;
             _context.Cooldowns.Start(ability, settings.Cooldown(ability));
             return true;
+        }
+
+
+        private void RollbackPayment(AbilityId ability)
+        {
+            var settings = VoidstepSettings.Current;
+            if (settings.EnergyEnabled && !settings.CooldownOnlyMode && !settings.UnlimitedEnergy)
+                _context.Energy.Refund(settings.Cost(ability));
+            _context.Cooldowns.Clear(ability);
         }
 
         private bool Fail(string message)

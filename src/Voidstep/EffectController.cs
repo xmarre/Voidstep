@@ -151,6 +151,7 @@ namespace Voidstep
             return -1;
         }
 
-        private static bool UseTorPreset() => Type.GetType("TOR_Core.TOR_CoreSubModule, TOR_Core", false) != null;
+        private static readonly bool TorPresetAvailable = Type.GetType("TOR_Core.TOR_CoreSubModule, TOR_Core", false) != null;
+        private static bool UseTorPreset() => TorPresetAvailable;
     }
 }
