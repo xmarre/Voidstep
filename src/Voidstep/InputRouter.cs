@@ -17,6 +17,7 @@ namespace Voidstep
 
         public AbilityId? PollAbility()
         {
+            InputConflictSuppression.CaptureCurrentModifiers();
             InputConflictSuppression.RefreshLatches();
             if (!VoidstepSubModule.InputSuppressionReady || !VoidstepSubModule.NativeHotkeysReady)
                 return null;

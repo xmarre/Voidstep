@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.6
+
+- Fixed every configured ability chord being rejected because modifier state could remain frozen at the first mission snapshot.
+- Removed the runtime dependency on Bannerlord calling the public static `Input.UpdateKeyData` wrapper before Voidstep evaluates a chord.
+- Refreshes Control, Alt and Shift directly at the actual ability-poll and conflicting-input query points.
+- Added suppression for Bannerlord's real integer `InputContext` GameKey path used by `SelectOrder1` through `SelectOrder6`.
+- Prevented `Ctrl+1` through `Ctrl+6` from also opening or changing native formation commands when those chords are assigned to Voidstep.
+- Preserved plain `1` through `6` and every other unmodified primary key whenever its configured ability modifier is not held.
+- Preserved press-to-release suppression latching so releasing the modifier before the primary key cannot leak a delayed native command.
+
 ## 1.0.5
 
 - Replaced the limited MCM primary-key dropdowns with six native serialized Bannerlord bindings under `Options > Keybindings > Voidstep`.

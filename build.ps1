@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Version = "1.0.5"
+$Version = "1.0.6"
 $Solution = Join-Path $Root "Voidstep.sln"
 $RuntimeProject = Join-Path $Root "src/Voidstep/Voidstep.csproj"
 $TestProject = Join-Path $Root "tests/Voidstep.Core.Tests/Voidstep.Core.Tests.csproj"

@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.6",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Live modifier polling and integer MissionOrder GameKey suppression for configurable ability chords."
+}

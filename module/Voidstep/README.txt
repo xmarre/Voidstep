@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.0.5
+VOIDSTEP — ARCANE MELEE ABILITIES v1.0.6
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional compatibility preset: The Old Realms 1.16
 
@@ -28,6 +28,6 @@ Options > Keybindings > Voidstep
 MODIFIER CONFIGURATION
 MCM > Voidstep > Controls
 
-Primary keys use Bannerlord's native serialized keybinding system and can be changed to any accepted keyboard or mouse button. Each ability has its own optional modifier selection in MCM. While a completed ability chord is active, the same raw key is blocked from Bannerlord's other actions. Suppression remains latched until the primary key is released, even if the modifier is released first. Pressing the primary key without its configured modifier remains native.
+Primary keys use Bannerlord's native serialized keybinding system and can be changed to any accepted keyboard or mouse button. Each ability has its own optional modifier selection in MCM. Modifier state is read live when the chord is evaluated. While a completed ability chord is active, the same raw primary key is blocked from native consumers. For number-row D1-D6 bindings, the corresponding Bannerlord formation GameKey is also blocked. Suppression remains latched until the primary key is released, even if the modifier is released first. Pressing the primary key without its configured modifier remains native.
 
 Enable Debug logging in MCM when reporting an ability problem. The log is written to Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log.
