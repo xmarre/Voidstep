@@ -42,7 +42,7 @@ namespace Voidstep
             _context = context;
             _targeting = new TargetingService(context.Mission);
             _teleportValidator = new TeleportValidator(context.Mission);
-            _animation = new AnimationController();
+            _animation = new AnimationController(context.Logger);
             _effects = new EffectController(context.Mission, context.Logger);
             _blows = new BlowFactory(context.Mission, context.Logger);
             _hud = new HudService();
@@ -59,6 +59,8 @@ namespace Voidstep
         public AbilityPhase Phase => _state.Phase;
         public AbilityId ActiveAbility => _state.Ability;
         public bool IsBusy => _state.IsCasting;
+        internal bool IsDarkVisionActive => _darkVision.Active;
+        internal VoidstepLogger Logger => _context.Logger;
 
         public void Tick(float dt)
         {
@@ -168,7 +170,6 @@ namespace Voidstep
         public void OnAgentDeleted(Agent affectedAgent)
         {
             _domino.OnAgentDeleted(affectedAgent);
-            _darkVision.OnAgentDeleted(affectedAgent);
             if (affectedAgent != null && affectedAgent.Index == _castActorIndex)
                 CancelCurrent(CancelReason.ActorRemoved);
             if (affectedAgent != null && affectedAgent.Index == _controlledAgentIndex)
@@ -177,355 +178,248 @@ namespace Voidstep
 
         public void OnPlayerAgentChanged(Agent previous, Agent current)
         {
-            if (previous == current) return;
+            if (ReferenceEquals(previous, current)) return;
             CleanupPlayerOwnedState(CancelReason.ActorReplaced);
+            _context.Player = current;
             _controlledAgentIndex = current != null ? current.Index : -1;
-            _context.Energy.Reset();
-            _context.Cooldowns.Clear();
+            _configuredMaximum = VoidstepSettings.Current.MaximumEnergy;
+            _context.Energy.ConfigureMaximum(_configuredMaximum, true);
+            _context.Logger.Info($"Controlled agent changed from {previous?.Index.ToString() ?? "none"} to {current?.Index.ToString() ?? "none"}; all prior agent-owned state was cleared.");
         }
 
         public void Cleanup(CancelReason reason)
         {
-            CancelCurrent(reason);
-            _blink.Cancel();
-            _cleave.Cleanup();
-            _time.Cleanup();
-            _domino.Clear();
-            _darkVision.Disable();
-            RestoreFov();
-            RemoveCleaveMarker();
+            CleanupPlayerOwnedState(reason);
             _effects.Cleanup();
-            _context.Cooldowns.Clear();
-            _context.Energy.Reset();
-            _hud.Reset();
+            _hud.Clear();
         }
 
         private bool BeginVoidstep(Agent player)
         {
-            var wieldedWeapon = player.WieldedWeapon;
-            if (!WeaponValidation.IsUsableMeleeWeapon(wieldedWeapon))
-                return Fail("Voidstep Cleave requires a currently wielded melee weapon.");
-            _cleaveWeapon = wieldedWeapon;
-
             var settings = VoidstepSettings.Current;
-            var requested = ResolveVoidstepDestination(player, settings.VoidstepRange);
-            var validation = _teleportValidator.Validate(player, requested, settings.VoidstepRange, false);
-            if (!validation.Success)
-                return Fail(validation.Reason ?? "No safe Voidstep destination was found.");
-            if (!PayAndStartCooldown(AbilityId.VoidstepCleave))
-                return Fail("Not enough Void Energy.");
+            if (!WeaponValidation.IsUsableMeleeWeapon(player.WieldedWeapon))
+                return Fail("Voidstep Cleave requires an equipped melee weapon.");
 
-            _token = _state.Begin(AbilityId.VoidstepCleave);
-            _castActorIndex = player.Index;
+            var locked = _targeting.FindLockedEnemy(player, settings.TeleportRange);
+            Vec3 requested;
+            if (locked != null)
+            {
+                var away = locked.Position - player.Position;
+                away.z = 0f;
+                if (away.Normalize() < 0.001f) away = _targeting.GetAimDirection(player);
+                requested = locked.Position - away * 1.15f;
+                _context.Logger.Debug($"Voidstep Cleave locked enemy={locked.Index}, enemyPosition={Format(locked.Position)}, requested={Format(requested)}.");
+            }
+            else if (_targeting.TryGetAimedGroundPosition(player, settings.TeleportRange, out var aimed))
+            {
+                requested = aimed;
+                _context.Logger.Debug($"Voidstep Cleave used camera ground aim requested={Format(requested)}.");
+            }
+            else
+            {
+                requested = _targeting.GetForwardFallback(player, Math.Min(settings.TeleportRange, 4f));
+                _context.Logger.Debug($"Voidstep Cleave used forward fallback requested={Format(requested)}.");
+            }
+
+            var validation = _teleportValidator.Validate(player, requested, settings.TeleportRange, settings.TeleportThroughWalls);
+            _context.Logger.Debug($"Voidstep Cleave validation success={validation.Success}, fallback={validation.UsedFallback}, destination={Format(validation.Position)}, reason={validation.Reason ?? "none"}.");
+            if (!validation.Success)
+                return Fail("Voidstep destination rejected: " + validation.Reason);
+
+            _cleaveWeapon = player.WieldedWeapon;
             _destination = validation.Position;
+            _token = _state.Start(AbilityId.VoidstepCleave, AbilityPhase.WindUp, 0.16f);
+            _castActorIndex = player.Index;
             _castOriginalLook = player.LookDirection;
             _recoveryRotationProgress = 0f;
-            _castRecoveryRadians = (settings.CleaveClockwise ? -1f : 1f) * (360f - settings.CleaveSweepDegrees) * (float)Math.PI / 180f;
-            _state.Transition(_token, AbilityPhase.Validating);
-            _state.Transition(_token, AbilityPhase.WindUp);
-            _cleaveMarker = _effects.CreateWorldMarker(_destination + Vec3.Up * 0.2f, 0x60E080FFu);
-            BeginFovPulse();
-            _context.Logger.Debug($"Voidstep Cleave locked destination={Format(_destination)}, fallback={validation.UsedFallback}.");
-            _hud.ShowAbilityResult(AbilityId.VoidstepCleave, _context.Energy, _context.Cooldowns);
+            _castRecoveryRadians = 0f;
+            _cleaveMarker = _effects.CreateWorldMarker(_destination + Vec3.Up * 0.15f, 0x60E080FFu);
+            if (_cleaveMarker == null)
+                _context.Logger.Debug("Voidstep Cleave placement reticle was unavailable; cast will continue without it.");
+            EmphasizeCamera();
+            _effects.Departure(player.Position);
+            _context.Logger.Debug($"Voidstep Cleave wind-up started token={_token}, destination={Format(_destination)}, weapon={FormatWeapon(_cleaveWeapon)}.");
             return true;
-        }
-
-        private void TickVoidstep(Agent player, float dt)
-        {
-            _state.Tick(_token, Math.Max(0f, dt));
-            switch (_state.Phase)
-            {
-                case AbilityPhase.WindUp:
-                    if (_state.PhaseElapsed >= 0.24f)
-                    {
-                        _effects.Departure(player.Position);
-                        _effects.PlaySound("event:/mission/combat/swing/weapon_swing", player.Position);
-                        _state.Transition(_token, AbilityPhase.Departing);
-                    }
-                    break;
-                case AbilityPhase.Departing:
-                    if (_state.PhaseElapsed >= 0.055f)
-                    {
-                        var validation = _teleportValidator.Validate(player, _destination, VoidstepSettings.Current.VoidstepRange, false);
-                        if (!validation.Success)
-                        {
-                            RollbackPayment(AbilityId.VoidstepCleave);
-                            Fail(validation.Reason ?? "The Voidstep destination became invalid.");
-                            CancelCurrent(CancelReason.InvalidDestination);
-                            return;
-                        }
-                        _destination = validation.Position;
-                        TeleportActor(player, _destination, false);
-                        RemoveCleaveMarker();
-                        _context.Logger.Debug($"Voidstep Cleave teleported actor to {Format(player.Position)}.");
-                        _state.Transition(_token, AbilityPhase.Teleporting);
-                    }
-                    break;
-                case AbilityPhase.Teleporting:
-                    _effects.Arrival(player.Position);
-                    _state.Transition(_token, AbilityPhase.Arriving);
-                    break;
-                case AbilityPhase.Arriving:
-                    if (_state.PhaseElapsed >= 0.08f)
-                    {
-                        if (!_cleave.Begin(player, _cleaveWeapon, out var failure))
-                        {
-                            RollbackPayment(AbilityId.VoidstepCleave);
-                            Fail(failure ?? "Cleave execution could not start.");
-                            CancelCurrent(CancelReason.Interrupted);
-                            return;
-                        }
-                        _state.Transition(_token, AbilityPhase.Active);
-                    }
-                    break;
-                case AbilityPhase.Active:
-                    if (_cleave.Tick(dt))
-                    {
-                        _context.Logger.Debug($"Voidstep Cleave active phase finished; hits={_cleave.SuccessfulHits}.");
-                        RestoreFov();
-                        _state.Transition(_token, AbilityPhase.Recovery);
-                    }
-                    break;
-                case AbilityPhase.Recovery:
-                    var progress = Math.Min(1f, _state.PhaseElapsed / 0.25f);
-                    var delta = Math.Max(0f, progress - _recoveryRotationProgress);
-                    _animation.RotateActor(player, _castRecoveryRadians * delta);
-                    _recoveryRotationProgress = progress;
-                    if (_state.PhaseElapsed >= 0.25f)
-                        CompleteCurrent();
-                    break;
-            }
         }
 
         private bool BeginBlink(Agent player)
         {
-            _token = _state.Begin(AbilityId.Blink);
+            if (!_blink.Begin(player))
+                return Fail("Blink targeting could not start.");
+            _token = _state.Start(AbilityId.Blink, AbilityPhase.Targeting, 8f);
             _castActorIndex = player.Index;
-            if (_blink.Begin(player)) return true;
-            CancelCurrent(CancelReason.InvalidActor);
-            return Fail("Blink aiming could not start.");
+            EmphasizeCamera();
+            return true;
         }
 
         private bool ConfirmBlink(Agent player)
         {
-            if (!CanPay(AbilityId.Blink)) return Fail("Not enough Void Energy.");
             if (!_blink.Confirm(out var destination, out var failure))
-                return Fail(failure);
-
-            _state.Transition(_token, AbilityPhase.Validating);
+                return Fail(failure ?? "Blink destination is invalid.");
+            _context.Logger.Debug($"Blink destination accepted destination={Format(destination)}.");
             if (!PayAndStartCooldown(AbilityId.Blink))
+                return Fail("Blink could not pay its cost.");
+            var original = player.Position;
+            _effects.Departure(original);
+            if (!TryTeleportActor(player, destination, VoidstepSettings.Current.BlinkPreserveMomentum, out var actual))
             {
-                CancelCurrent(CancelReason.Interrupted);
-                return Fail("Not enough Void Energy.");
+                RollbackPayment(AbilityId.Blink);
+                return Fail("Blink teleport failed safely.");
             }
-            _state.Transition(_token, AbilityPhase.WindUp);
-            _effects.Departure(player.Position);
-            _state.Transition(_token, AbilityPhase.Departing);
-            TeleportActor(player, destination, VoidstepSettings.Current.BlinkPreserveMomentum);
-            _state.Transition(_token, AbilityPhase.Teleporting);
-            _effects.Arrival(player.Position);
-            _effects.PlaySound("event:/mission/combat/swing/weapon_swing", player.Position);
-            _state.Transition(_token, AbilityPhase.Arriving);
-            _state.Transition(_token, AbilityPhase.Active);
-            _state.Transition(_token, AbilityPhase.Recovery);
-            _context.Logger.Debug($"Blink completed at {Format(player.Position)}.");
-            _hud.ShowAbilityResult(AbilityId.Blink, _context.Energy, _context.Cooldowns);
-            CompleteCurrent();
+            _effects.Arrival(actual);
+            _context.Logger.Debug($"Blink completed origin={Format(original)}, destination={Format(actual)}.");
+            _state.Cancel(_token);
+            _token = default(CastToken);
+            _castActorIndex = -1;
+            RestoreCamera();
             return true;
         }
 
         private bool CastWindblast(Agent player)
         {
-            if (!PayAndStartCooldown(AbilityId.Windblast))
-                return Fail("Not enough Void Energy.");
-            var hitCount = _windblast.Cast(player);
-            if (hitCount <= 0)
-            {
-                RollbackPayment(AbilityId.Windblast);
-                return Fail("Windblast found no valid enemy in the aimed cone.");
-            }
-            _effects.PlaySound("event:/mission/combat/hit/weapon_hit", player.Position);
-            CompleteImmediate(AbilityId.Windblast, player);
-            _hud.Show($"Windblast affected {hitCount} target{(hitCount == 1 ? string.Empty : "s")}.");
+            if (!PayAndStartCooldown(AbilityId.Windblast)) return false;
+            _effects.Windblast(player.Position);
+            _windblast.Cast(player);
             return true;
         }
 
         private bool CastBendTime(Agent player)
         {
             var settings = VoidstepSettings.Current;
-            if (!_time.Begin(player, settings.BendTimeFactor, settings.BendTimeDuration, settings.AllowCompleteSuspension))
-                return Fail("Bend Time could not acquire a mission speed request.");
-            if (!PayAndStartCooldown(AbilityId.BendTime))
+            if (!PayAndStartCooldown(AbilityId.BendTime)) return false;
+            if (!_time.Begin(player, settings.BendTimeFactor, settings.BendTimeDuration, false))
             {
-                _time.Release();
-                return false;
+                RollbackPayment(AbilityId.BendTime);
+                return Fail("Bend Time request could not be acquired.");
             }
             _effects.BendTime(player.Position);
-            _effects.PlaySound("event:/mission/ambient/night", player.Position);
-            CompleteImmediate(AbilityId.BendTime, player);
             _context.Logger.Debug($"Bend Time started factor={settings.BendTimeFactor:0.00}, duration={settings.BendTimeDuration:0.00}.");
-            _hud.ShowAbilityResult(AbilityId.BendTime, _context.Energy, _context.Cooldowns);
             return true;
         }
 
         private bool CastDomino(Agent player)
         {
+            if (!PayAndStartCooldown(AbilityId.Domino)) return false;
             var count = _domino.Mark(player);
-            _context.Logger.Debug($"Domino targeting selected {count} valid enemies.");
-            if (count < 2)
+            if (count == 0)
             {
-                _domino.Clear();
-                return Fail("Domino requires at least two valid enemy targets.");
+                RollbackPayment(AbilityId.Domino);
+                return Fail("Domino found no valid hostile humans.");
             }
-            if (!PayAndStartCooldown(AbilityId.Domino))
-            {
-                _domino.Clear();
-                return false;
-            }
-            _effects.PlaySound("event:/mission/combat/hit/weapon_hit", player.Position);
-            CompleteImmediate(AbilityId.Domino, player);
-            _hud.Show($"Domino linked {count} enemies.");
+            _context.Logger.Debug($"Domino linked {count} hostile agents.");
+            _hud.Show($"Domino linked {count} targets.");
             return true;
         }
 
         private bool CastDarkVision(Agent player)
         {
-            if (!_darkVision.Toggle(player)) return Fail("Dark Vision could not start.");
-            if (!PayAndStartCooldown(AbilityId.DarkVision))
-            {
-                _darkVision.Disable();
-                return false;
-            }
-            _effects.PlaySound("event:/mission/ambient/night", player.Position);
-            CompleteImmediate(AbilityId.DarkVision, player);
-            _hud.ShowAbilityResult(AbilityId.DarkVision, _context.Energy, _context.Cooldowns);
+            if (!PayAndStartCooldown(AbilityId.DarkVision)) return false;
+            _darkVision.Enable(player);
+            _context.Logger.Debug($"Dark Vision enabled range={VoidstepSettings.Current.DarkVisionRange:0.0}.");
             return true;
         }
 
-        private void CompleteImmediate(AbilityId ability, Agent player)
+        private void TickVoidstep(Agent actor, float dt)
         {
-            _token = _state.Begin(ability);
-            _castActorIndex = player.Index;
-            _state.Transition(_token, AbilityPhase.WindUp);
-            _state.Transition(_token, AbilityPhase.Active);
-            _state.Transition(_token, AbilityPhase.Recovery);
-            CompleteCurrent();
-        }
-
-        private void CompleteCurrent()
-        {
-            if (_token != default(CastToken))
+            var settings = VoidstepSettings.Current;
+            if (_state.Phase == AbilityPhase.WindUp)
             {
-                _state.Finish(_token);
-                _token = default(CastToken);
-            }
-            _castActorIndex = -1;
-            _destination = Vec3.Invalid;
-            _recoveryRotationProgress = 0f;
-            _castRecoveryRadians = 0f;
-            _castOriginalLook = Vec3.Zero;
-            _cleaveWeapon = default(MissionWeapon);
-            RemoveCleaveMarker();
-            RestoreFov();
-        }
-
-        private void CancelCurrent(CancelReason reason)
-        {
-            if (_token != default(CastToken))
-            {
-                try { _state.Cancel(_token, reason); }
-                catch { _state.ForceReset(reason); }
-                _state.ForceReset(reason);
-            }
-            _blink.Cancel();
-            _cleave.Cleanup();
-            var actor = _context.Player;
-            if (actor != null && actor.IsActive() && actor.Index == _castActorIndex && _castOriginalLook.LengthSquared > 0.001f)
-            {
-                try { actor.LookDirection = _castOriginalLook; } catch { }
-            }
-            _context.Logger.Debug($"Ability state cancelled reason={reason}.");
-            _token = default(CastToken);
-            _castActorIndex = -1;
-            _destination = Vec3.Invalid;
-            _recoveryRotationProgress = 0f;
-            _castRecoveryRadians = 0f;
-            _castOriginalLook = Vec3.Zero;
-            _cleaveWeapon = default(MissionWeapon);
-            RemoveCleaveMarker();
-            RestoreFov();
-        }
-
-        private void CleanupPlayerOwnedState(CancelReason reason)
-        {
-            CancelCurrent(reason);
-            _time.Release();
-            _domino.Clear();
-            _darkVision.Disable();
-        }
-
-        private bool IsCurrentCastActorValid(Agent actor) =>
-            actor != null && actor.Index == _castActorIndex && actor.IsActive() && actor.Health > 0f && actor.State == TaleWorlds.Core.AgentState.Active;
-
-        private Vec3 ResolveVoidstepDestination(Agent player, float range)
-        {
-            var locked = _targeting.FindLockedEnemy(player, range, 30f);
-            if (locked != null)
-            {
-                var travel = locked.Position - player.Position;
-                travel.z = 0f;
-                if (travel.Normalize() < 0.001f) travel = _targeting.GetAimDirection(player);
-                _context.Logger.Debug($"Voidstep Cleave locked enemy={locked.Index} at {Format(locked.Position)}.");
-                return locked.Position + travel * 1.5f;
-            }
-            if (_targeting.TryGetAimedGroundPosition(player, range, out var aimed))
-            {
-                _context.Logger.Debug($"Voidstep Cleave selected aimed ground {Format(aimed)}.");
-                return aimed;
-            }
-            var fallback = _targeting.GetForwardFallback(player, Math.Min(range, 5f));
-            _context.Logger.Debug($"Voidstep Cleave used forward fallback {Format(fallback)}.");
-            return fallback;
-        }
-
-        private void TeleportActor(Agent actor, Vec3 position, bool preserveMomentum)
-        {
-            var mount = actor.MountAgent;
-            if (mount != null && mount.IsActive())
-            {
-                mount.TeleportToPosition(position);
-                actor.TeleportToPosition(position + Vec3.Up * 0.4f);
-            }
-            else
-            {
-                actor.TeleportToPosition(position);
-            }
-
-            if (!preserveMomentum)
-            {
-                var zero = Vec2.Zero;
-                actor.MovementInputVector = zero;
-                actor.SetMovementDirection(in zero);
-                if (mount != null && mount.IsActive())
+                var transition = _state.Tick(_token, Math.Max(0f, dt));
+                if (transition == StateTransition.Completed)
                 {
-                    mount.MovementInputVector = zero;
-                    mount.SetMovementDirection(in zero);
+                    if (!PayAndStartCooldown(AbilityId.VoidstepCleave))
+                    {
+                        CancelCurrent(CancelReason.UserCancelled);
+                        return;
+                    }
+                    var validation = _teleportValidator.Validate(actor, _destination, settings.TeleportRange, settings.TeleportThroughWalls);
+                    _context.Logger.Debug($"Voidstep pre-teleport revalidation success={validation.Success}, fallback={validation.UsedFallback}, destination={Format(validation.Position)}, reason={validation.Reason ?? "none"}.");
+                    if (!validation.Success)
+                    {
+                        RollbackPayment(AbilityId.VoidstepCleave);
+                        Fail("Voidstep destination became unsafe: " + validation.Reason);
+                        CancelCurrent(CancelReason.Interrupted);
+                        return;
+                    }
+                    _destination = validation.Position;
+                    RemoveCleaveMarker();
+                    var origin = actor.Position;
+                    if (!TryTeleportActor(actor, _destination, settings.PreserveMomentum, out var actual))
+                    {
+                        RollbackPayment(AbilityId.VoidstepCleave);
+                        Fail("Voidstep teleport failed safely.");
+                        CancelCurrent(CancelReason.Exception);
+                        return;
+                    }
+                    _destination = actual;
+                    _effects.Arrival(actual);
+                    _context.Logger.Debug($"Voidstep teleport completed origin={Format(origin)}, destination={Format(actual)}, actor={actor.Index}.");
+
+                    if (!_cleave.Begin(actor, _cleaveWeapon, _targeting.GetAimDirection(actor), settings))
+                    {
+                        RollbackPayment(AbilityId.VoidstepCleave);
+                        Fail("Voidstep Cleave could not start its active sweep.");
+                        CancelCurrent(CancelReason.Exception);
+                        return;
+                    }
+                    _token = _state.Start(AbilityId.VoidstepCleave, AbilityPhase.Active, 0.72f);
+                }
+                return;
+            }
+
+            if (_state.Phase == AbilityPhase.Active)
+            {
+                var elapsed = Math.Max(0f, _state.Duration - _state.Remaining);
+                var progress = Math.Min(1f, elapsed / Math.Max(0.01f, _state.Duration));
+                _cleave.Tick(actor, progress);
+                var transition = _state.Tick(_token, Math.Max(0f, dt));
+                if (transition == StateTransition.Completed)
+                {
+                    _cleave.Complete();
+                    _recoveryRotationProgress = 0f;
+                    _castRecoveryRadians = 0f;
+                    var currentLook = actor.LookDirection;
+                    currentLook.z = 0f;
+                    var originalLook = _castOriginalLook;
+                    originalLook.z = 0f;
+                    if (currentLook.Normalize() >= 0.001f && originalLook.Normalize() >= 0.001f)
+                    {
+                        var cross = currentLook.x * originalLook.y - currentLook.y * originalLook.x;
+                        var dot = Math.Max(-1f, Math.Min(1f, Vec3.DotProduct(currentLook, originalLook)));
+                        _castRecoveryRadians = (float)Math.Atan2(cross, dot);
+                    }
+                    _token = _state.Start(AbilityId.VoidstepCleave, AbilityPhase.Recovery, 0.18f);
+                }
+                return;
+            }
+
+            if (_state.Phase == AbilityPhase.Recovery)
+            {
+                var before = _state.Remaining;
+                var transition = _state.Tick(_token, Math.Max(0f, dt));
+                var consumed = Math.Max(0f, before - _state.Remaining);
+                var total = Math.Max(0.01f, _state.Duration);
+                var targetProgress = Math.Min(1f, _recoveryRotationProgress + consumed / total);
+                var deltaProgress = targetProgress - _recoveryRotationProgress;
+                if (deltaProgress > 0f && Math.Abs(_castRecoveryRadians) > 0.0001f)
+                    _animation.RotateActor(actor, _castRecoveryRadians * deltaProgress);
+                _recoveryRotationProgress = targetProgress;
+                if (transition == StateTransition.Completed)
+                {
+                    actor.LookDirection = _castOriginalLook;
+                    CancelCurrent(CancelReason.Completed);
                 }
             }
         }
 
-        private bool CanPay(AbilityId ability)
-        {
-            var settings = VoidstepSettings.Current;
-            return _context.Energy.CanSpend(settings.Cost(ability), settings.UnlimitedEnergy, !settings.EnergyEnabled || settings.CooldownOnlyMode);
-        }
-
         private bool PayAndStartCooldown(AbilityId ability)
         {
+            if (!CanPay(ability)) return false;
             var settings = VoidstepSettings.Current;
-            if (!_context.Energy.TrySpend(settings.Cost(ability), settings.UnlimitedEnergy, !settings.EnergyEnabled || settings.CooldownOnlyMode))
-                return false;
-            _context.Cooldowns.Start(ability, settings.Cooldown(ability));
+            if (settings.EnergyEnabled && !settings.CooldownOnlyMode && !settings.UnlimitedEnergy)
+                _context.Energy.TrySpend(settings.GetCost(ability));
+            _context.Cooldowns.Start(ability, settings.GetCooldown(ability));
+            _context.Logger.Debug($"Paid ability={ability}, energy={_context.Energy.Current:0.0}, cooldown={settings.GetCooldown(ability):0.0}.");
             return true;
         }
 
@@ -533,39 +427,87 @@ namespace Voidstep
         {
             var settings = VoidstepSettings.Current;
             if (settings.EnergyEnabled && !settings.CooldownOnlyMode && !settings.UnlimitedEnergy)
-                _context.Energy.Refund(settings.Cost(ability));
-            _context.Cooldowns.Clear(ability);
+                _context.Energy.Add(settings.GetCost(ability));
+            _context.Cooldowns.Reset(ability);
+            _context.Logger.Debug($"Rolled back ability payment for {ability}.");
         }
 
-        private bool Fail(string message)
+        private bool CanPay(AbilityId ability)
         {
-            _context.Logger.Debug("Ability rejected: " + message);
-            _hud.Show(message);
-            return false;
+            var settings = VoidstepSettings.Current;
+            return settings.CooldownOnlyMode || !settings.EnergyEnabled || settings.UnlimitedEnergy ||
+                   _context.Energy.Current >= settings.GetCost(ability);
         }
 
-        private void BeginFovPulse()
+        private bool TryTeleportActor(Agent actor, Vec3 destination, bool preserveMomentum, out Vec3 actual)
         {
-            if (!VoidstepSettings.Current.CameraShake || _fovOwned) return;
+            actual = destination;
             try
             {
-                _previousFov = _context.Mission.CustomCameraFovMultiplier;
+                Vec2 velocity = Vec2.Zero;
+                if (preserveMomentum)
+                    velocity = actor.Velocity.AsVec2;
+                actor.TeleportToPosition(destination);
+                actual = actor.Position;
+                if (preserveMomentum)
+                    actor.SetMovementDirection(in velocity);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _context.Logger.Error("Teleport failed.", ex);
+                return false;
+            }
+        }
+
+        private void EmphasizeCamera()
+        {
+            if (!VoidstepSettings.Current.CameraEmphasis || _fovOwned) return;
+            try
+            {
+                _previousFov = _context.Mission.GetCameraFov();
                 _context.Mission.SetCustomCameraFovMultiplier(OwnedFov);
                 _fovOwned = true;
             }
-            catch (Exception ex) { _context.Logger.Debug("Optional FOV pulse unavailable: " + ex.Message); }
+            catch (Exception ex) { _context.Logger.Debug("Camera emphasis unavailable: " + ex.Message); }
         }
 
-        private void RestoreFov()
+        private void RestoreCamera()
         {
             if (!_fovOwned) return;
-            try
-            {
-                if (Math.Abs(_context.Mission.CustomCameraFovMultiplier - OwnedFov) < 0.001f)
-                    _context.Mission.SetCustomCameraFovMultiplier(_previousFov);
-            }
-            catch { }
+            try { _context.Mission.SetCustomCameraFovMultiplier(1f); }
+            catch (Exception ex) { _context.Logger.Debug("Camera cleanup failed: " + ex.Message); }
             _fovOwned = false;
+            _previousFov = 0f;
+        }
+
+        private bool IsCurrentCastActorValid(Agent actor) =>
+            actor != null && actor.IsActive() && actor.Health > 0f && actor.Index == _castActorIndex;
+
+        private void CancelCurrent(CancelReason reason)
+        {
+            _blink.Cancel();
+            _cleave.Cancel();
+            RemoveCleaveMarker();
+            RestoreCamera();
+            if (_state.IsCasting)
+                _state.Cancel(_token);
+            _token = default(CastToken);
+            _castActorIndex = -1;
+            _destination = Vec3.Invalid;
+            _recoveryRotationProgress = 0f;
+            _castRecoveryRadians = 0f;
+            _cleaveWeapon = default(MissionWeapon);
+            _context.Logger.Debug("Current cast cancelled: " + reason);
+        }
+
+        private void CleanupPlayerOwnedState(CancelReason reason)
+        {
+            CancelCurrent(reason);
+            _time.Cleanup();
+            _domino.Clear();
+            _darkVision.Disable();
+            _controlledAgentIndex = -1;
         }
 
         private void RemoveCleaveMarker()
@@ -575,6 +517,20 @@ namespace Voidstep
             _cleaveMarker = null;
         }
 
+        private bool Fail(string message)
+        {
+            _hud.Show(message);
+            _context.Logger.Debug("Activation rejected: " + message);
+            return false;
+        }
+
         private static string Format(Vec3 value) => $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
+
+        private static string FormatWeapon(MissionWeapon weapon)
+        {
+            if (weapon.IsEmpty) return "empty";
+            try { return weapon.Item?.StringId ?? "unknown"; }
+            catch { return "unknown"; }
+        }
     }
 }
