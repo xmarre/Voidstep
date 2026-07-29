@@ -18,6 +18,7 @@ namespace Voidstep
         private bool _playerCompensationApplied;
         private bool _playerDrivenSnapshotCaptured;
         private bool _mountDrivenSnapshotCaptured;
+        private bool _actionSpeedFailureLogged;
         private bool _cleanupPending;
 
         private float _originalMaxSpeedMultiplier;
@@ -69,6 +70,7 @@ namespace Voidstep
             _remaining = duration;
             _player = player;
             _mount = player.MountAgent != null && player.MountAgent.IsActive() ? player.MountAgent : null;
+            _actionSpeedFailureLogged = false;
             CaptureDrivenPropertySnapshots();
 
             try
@@ -258,14 +260,14 @@ namespace Voidstep
                     mountDriven.MountDashAccelerationMultiplier = _appliedMountDashAcceleration;
                 }
 
-                for (var channel = 0; channel < 4; channel++)
-                    _player.SetCurrentActionSpeed(channel, compensation);
                 _playerCompensationApplied = true;
             }
             catch (Exception ex)
             {
-                _logger.Debug("Bend Time player compensation failed: " + ex.Message);
+                _logger.Debug("Bend Time driven-property compensation failed: " + ex.Message);
             }
+
+            SetActionSpeeds(compensation);
         }
 
         private void RestorePlayerCompensation()
@@ -295,18 +297,33 @@ namespace Voidstep
                     if (Approximately(mountDriven.MountManeuver, _appliedMountManeuver)) mountDriven.MountManeuver = _originalMountManeuver;
                     if (Approximately(mountDriven.MountDashAccelerationMultiplier, _appliedMountDashAcceleration)) mountDriven.MountDashAccelerationMultiplier = _originalMountDashAcceleration;
                 }
-
-                if (_player != null && _player.IsActive())
-                    for (var channel = 0; channel < 4; channel++)
-                        _player.SetCurrentActionSpeed(channel, 1f);
             }
             catch (Exception ex)
             {
-                _logger.Debug("Player time-compensation cleanup failed: " + ex.Message);
+                _logger.Debug("Player driven-property cleanup failed: " + ex.Message);
             }
-            finally
+
+            SetActionSpeeds(1f);
+            _playerCompensationApplied = false;
+        }
+
+        private void SetActionSpeeds(float speed)
+        {
+            if (_player == null || !_player.IsActive())
+                return;
+
+            for (var channel = 0; channel < 4; channel++)
             {
-                _playerCompensationApplied = false;
+                try
+                {
+                    _player.SetCurrentActionSpeed(channel, speed);
+                }
+                catch (Exception ex)
+                {
+                    if (_actionSpeedFailureLogged) continue;
+                    _actionSpeedFailureLogged = true;
+                    _logger.Debug($"Player action-speed channel {channel} unavailable: {ex.Message}");
+                }
             }
         }
 
@@ -315,6 +332,7 @@ namespace Voidstep
             RestorePlayerCompensation();
             _playerDrivenSnapshotCaptured = false;
             _mountDrivenSnapshotCaptured = false;
+            _actionSpeedFailureLogged = false;
             _player = null;
             _mount = null;
             _factor = 1f;
