@@ -10,10 +10,19 @@ namespace Voidstep
     {
         private static IEnumerable<MethodBase> TargetMethods()
         {
-            yield return AccessTools.Method(typeof(Input), nameof(Input.IsKeyPressed), new[] { typeof(InputKey) });
-            yield return AccessTools.Method(typeof(Input), nameof(Input.IsKeyDown), new[] { typeof(InputKey) });
-            yield return AccessTools.Method(typeof(Input), nameof(Input.IsKeyDownImmediate), new[] { typeof(InputKey) });
-            yield return AccessTools.Method(typeof(Input), nameof(Input.IsKeyReleased), new[] { typeof(InputKey) });
+            var names = new[]
+            {
+                nameof(Input.IsKeyPressed),
+                nameof(Input.IsKeyDown),
+                nameof(Input.IsKeyDownImmediate),
+                nameof(Input.IsKeyReleased)
+            };
+            for (var i = 0; i < names.Length; i++)
+            {
+                var method = AccessTools.Method(typeof(Input), names[i], new[] { typeof(InputKey) });
+                if (method != null)
+                    yield return method;
+            }
         }
 
         private static void Postfix(InputKey __0, ref bool __result)
