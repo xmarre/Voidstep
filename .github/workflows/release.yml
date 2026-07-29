@@ -113,8 +113,7 @@ jobs:
               --notes-file CHANGELOG.md `
               --latest
           }
-          if ($LASTEXITCODE -ne 0) { throw "Failed to publish $env:RELEASE_TAG."
-          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish $env:RELEASE_TAG." }
       - name: Verify published assets
         shell: pwsh
         env:
