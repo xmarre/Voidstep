@@ -46,11 +46,24 @@ namespace Voidstep
             {
                 try
                 {
-                    _mission.RemoveTimeSpeedRequest(AimTimeRequestId);
-                    _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0.35f, AimTimeRequestId));
-                    _ownsTimeRequest = true;
+                    float existingFactor = 0f;
+                    if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, ref existingFactor))
+                    {
+                        _logger.Debug("Blink aim slowdown skipped because its reserved mission speed request ID is already active.");
+                    }
+                    else
+                    {
+                        // Mark ownership before adding so a partially completed
+                        // native call is still cleaned through the verified release path.
+                        _ownsTimeRequest = true;
+                        _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0.35f, AimTimeRequestId));
+                    }
                 }
-                catch (Exception ex) { _logger.Debug("Blink aim slowdown unavailable: " + ex.Message); }
+                catch (Exception ex)
+                {
+                    ReleaseAimTimeRequest();
+                    _logger.Debug("Blink aim slowdown unavailable: " + ex.Message);
+                }
             }
             RefreshPreview();
             _hud.Show("Blink aiming — press the Blink key again to confirm.");
@@ -149,12 +162,22 @@ namespace Voidstep
                 _effects.RemoveMarker(_preview);
                 _preview = null;
             }
-            if (_ownsTimeRequest)
+            ReleaseAimTimeRequest();
+        }
+
+        private void ReleaseAimTimeRequest()
+        {
+            if (!_ownsTimeRequest) return;
+            _ownsTimeRequest = false;
+            try
             {
-                try { _mission.RemoveTimeSpeedRequest(AimTimeRequestId); }
-                catch (Exception ex) { _logger.Debug("Blink aim time cleanup failed: " + ex.Message); }
-                _ownsTimeRequest = false;
+                // RemoveTimeSpeedRequest throws when its ID is absent, so always
+                // confirm that the owned request still exists before removing it.
+                float requestedFactor = 0f;
+                if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, ref requestedFactor))
+                    _mission.RemoveTimeSpeedRequest(AimTimeRequestId);
             }
+            catch (Exception ex) { _logger.Debug("Blink aim time cleanup failed: " + ex.Message); }
         }
     }
 }
