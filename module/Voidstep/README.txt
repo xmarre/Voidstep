@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.0.6
+VOIDSTEP — ARCANE MELEE ABILITIES v1.0.7
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional compatibility preset: The Old Realms 1.16
 
@@ -29,5 +29,12 @@ MODIFIER CONFIGURATION
 MCM > Voidstep > Controls
 
 Primary keys use Bannerlord's native serialized keybinding system and can be changed to any accepted keyboard or mouse button. Each ability has its own optional modifier selection in MCM. Modifier state is read live when the chord is evaluated. While a completed ability chord is active, the same raw primary key is blocked from native consumers. For number-row D1-D6 bindings, the corresponding Bannerlord formation GameKey is also blocked. Suppression remains latched until the primary key is released, even if the modifier is released first. Pressing the primary key without its configured modifier remains native.
+
+CASTING FEEDBACK
+Blink, Voidstep Cleave and Domino use procedural double-ring casting sigils with particle clusters. Windblast and Bend Time use radial cast pulses. Dark Vision uses hostile-agent contours. Arrow geometry is not used for casting indicators.
+
+TIME CONTROL
+Blink freezes mission time while destination targeting is active. Preview movement, confirmation, cancellation and expiry remain responsive through application-time updates.
+Bend Time slows the outside world while compensating the controlled player for locomotion, combat movement, swing, ready, reload and action-channel speed. The controlled mount receives corresponding speed and maneuver compensation. Cleanup restores only values still owned by Voidstep.
 
 Enable Debug logging in MCM when reporting an ability problem. The log is written to Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log.
