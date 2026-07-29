@@ -32,7 +32,7 @@ namespace Voidstep
         {
             RefreshSuppressionLatches();
             _selection.Tick(dt);
-            _tor.Tick();
+            _tor.Tick(dt);
             HandleWheelAvailabilityTransition();
 
             if (!_tor.IsAvailable)
