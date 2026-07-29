@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 
 root = Path(__file__).resolve().parents[1]
@@ -11,16 +12,6 @@ def read(relative):
 
 def compact(value):
     return ' '.join(value.split())
-
-
-def appears_in_order(value, tokens):
-    offset = 0
-    for token in tokens:
-        offset = value.find(token, offset)
-        if offset < 0:
-            return False
-        offset += len(token)
-    return True
 
 
 coordinator = read('src/Voidstep/AbilityWheelCoordinator.cs')
@@ -50,6 +41,17 @@ prefab_order = (
     '@DominoText',
     '@DarkVisionText',
 )
+
+ability_block = re.search(
+    r'internal\s+static\s+readonly\s+AbilityId\[\]\s+Abilities\s*=\s*\{(?P<body>.*?)\};',
+    bindings,
+    re.DOTALL)
+registered_abilities = tuple(re.findall(
+    r'\bAbilityId\.[A-Za-z_]\w*\b',
+    ability_block.group('body') if ability_block else ''))
+prefab_bindings = tuple(re.findall(
+    r'Text="(@(?:Cleave|Blink|Windblast|BendTime|Domino|DarkVision)Text)"',
+    prefab))
 
 checks = {
     'coordinator passes mission delta time to TOR adapter': '_tor.Tick(dt);' in coordinator and '_tor.Tick();' not in coordinator,
@@ -109,7 +111,8 @@ checks = {
         'nameof(InputContext.GetGameKeyState)')),
     'selection casts only after confirmation': '_manager.TryActivate(ability);' in selection and 'internal bool Confirm()' in selection and '_manager.TryActivate(ability.Value)' not in mission,
     'Blink targeting begins on selection but animation waits for confirmation': '_manager.TryActivate(AbilityId.Blink)' in selection and 'enteringBlinkTargeting' in cast_animation and 'confirmingBlink' in cast_animation,
-    'registry and standalone prefab share stable six-slot order': appears_in_order(bindings, ability_order) and appears_in_order(prefab, prefab_order),
+    'registry and standalone prefab share exact six-slot order':
+        registered_abilities == ability_order and prefab_bindings == prefab_order,
 }
 
 failed = [name for name, passed in checks.items() if not passed]
