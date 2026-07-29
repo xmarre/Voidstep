@@ -12,6 +12,27 @@ namespace Voidstep
 
         public TargetingService(Mission mission) => _mission = mission;
 
+        public Vec3 GetAimDirection(Agent player)
+        {
+            try
+            {
+                var camera = _mission.GetCameraFrame();
+                var direction = camera.rotation.f;
+                direction.z = 0f;
+                if (direction.Normalize() >= 0.001f)
+                    return direction;
+            }
+            catch
+            {
+            }
+
+            var fallback = player != null ? player.LookDirection : Vec3.Forward;
+            fallback.z = 0f;
+            if (fallback.Normalize() < 0.001f)
+                fallback = Vec3.Forward;
+            return fallback;
+        }
+
         public Agent FindLockedEnemy(Agent player, float range, float halfAngleDegrees = 28f)
         {
             if (player == null || player.Team == null)
@@ -19,11 +40,7 @@ namespace Voidstep
 
             _nearby.Clear();
             _mission.GetNearbyEnemyAgents(player.Position.AsVec2, range, player.Team, _nearby);
-            var forward = player.LookDirection;
-            forward.z = 0f;
-            if (forward.Normalize() < 0.001f)
-                forward = Vec3.Forward;
-
+            var forward = GetAimDirection(player);
             var minimumDot = (float)Math.Cos(halfAngleDegrees * Math.PI / 180.0);
             Agent best = null;
             var bestScore = float.MaxValue;
@@ -32,7 +49,7 @@ namespace Voidstep
                 var candidate = _nearby[i];
                 if (!IsUsableTarget(player, candidate, true))
                     continue;
-                var delta = candidate.Position - player.Position;
+                var delta = candidate.GetChestGlobalPosition() - player.GetChestGlobalPosition();
                 delta.z = 0f;
                 var distance = delta.Normalize();
                 if (distance <= 0.001f)
@@ -56,9 +73,15 @@ namespace Voidstep
             if (player == null)
                 return false;
 
-            var camera = _mission.GetCameraFrame();
-            var source = camera.origin;
-            var target = source + camera.rotation.f * range;
+            var direction = GetAimDirection(player);
+            Vec3 source;
+            try { source = _mission.GetCameraFrame().origin; }
+            catch { source = player.GetEyeGlobalPosition(); }
+
+            var sourceOffset = source - player.Position;
+            sourceOffset.z = 0f;
+            var rayLength = range + Math.Min(8f, sourceOffset.Length) + 3f;
+            var target = source + direction * rayLength;
             var distance = 1f;
             var point = target;
             WeakGameEntity entity = default(WeakGameEntity);
@@ -71,10 +94,11 @@ namespace Voidstep
                     0.05f,
                     BodyFlags.CommonCollisionExcludeFlagsForAgent))
             {
-                position = point;
+                position = ClampToRange(player.Position, point, range);
                 return true;
             }
 
+            target = player.Position + direction * range;
             var terrain = _mission.Scene.GetGroundHeightAtPosition(target, BodyFlags.CommonCollisionExcludeFlagsForAgent);
             if (float.IsNaN(terrain) || float.IsInfinity(terrain))
                 return false;
@@ -83,14 +107,8 @@ namespace Voidstep
             return true;
         }
 
-        public Vec3 GetForwardFallback(Agent player, float range)
-        {
-            var forward = player.LookDirection;
-            forward.z = 0f;
-            if (forward.Normalize() < 0.001f)
-                forward = Vec3.Forward;
-            return player.Position + forward * range;
-        }
+        public Vec3 GetForwardFallback(Agent player, float range) =>
+            player.Position + GetAimDirection(player) * range;
 
         internal static bool IsUsableTarget(Agent player, Agent target, bool enemyOnly)
         {
@@ -99,6 +117,18 @@ namespace Voidstep
             if (enemyOnly && (player.Team == null || target.Team == null || !player.Team.IsEnemyOf(target.Team)))
                 return false;
             return target.IsHuman || target.IsMount;
+        }
+
+        private static Vec3 ClampToRange(Vec3 origin, Vec3 requested, float range)
+        {
+            var delta = requested - origin;
+            delta.z = 0f;
+            var planar = delta.Length;
+            if (planar <= range || planar <= 0.001f)
+                return requested;
+            var clamped = origin + delta * (range / planar);
+            clamped.z = requested.z;
+            return clamped;
         }
     }
 }
