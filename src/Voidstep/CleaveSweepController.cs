@@ -63,9 +63,9 @@ namespace Voidstep
                 failure = "No active player is available for the cleave.";
                 return false;
             }
-            if (weapon.IsEmpty)
+            if (!WeaponValidation.IsUsableMeleeWeapon(weapon))
             {
-                failure = "Voidstep Cleave requires a wielded melee weapon.";
+                failure = "Voidstep Cleave requires a currently wielded melee weapon.";
                 return false;
             }
 
@@ -245,7 +245,7 @@ namespace Voidstep
                 _sweepRadians,
                 _direction,
                 _radius,
-                _maximumTargets,
+                0,
                 _schedule);
         }
 
