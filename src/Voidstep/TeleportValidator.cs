@@ -32,7 +32,12 @@ namespace Voidstep
 
         public TeleportValidator(Mission mission) => _mission = mission;
 
-        public TeleportValidationResult Validate(Agent actor, Vec3 requested, float maximumRange, bool allowThroughWalls)
+        public TeleportValidationResult Validate(
+            Agent actor,
+            Vec3 requested,
+            float maximumRange,
+            bool allowThroughWalls,
+            int fallbackCandidateBudget = 0)
         {
             if (actor == null || !actor.IsActive())
                 return Fail("No active controlled agent.");
@@ -48,7 +53,10 @@ namespace Voidstep
 
             BuildFallbackCandidates(requested, actor.Position.z);
             _fallback.Sort(CompareCandidate);
-            for (var i = 0; i < _fallback.Count; i++)
+            var fallbackLimit = fallbackCandidateBudget > 0
+                ? Math.Min(fallbackCandidateBudget, _fallback.Count)
+                : _fallback.Count;
+            for (var i = 0; i < fallbackLimit; i++)
             {
                 var candidate = _fallback[i].Value;
                 var candidateDelta = candidate - actor.Position;
