@@ -29,7 +29,7 @@ namespace Voidstep
 
         protected override void OnSubModuleUnloaded()
         {
-            try { Harmony.UnpatchAll(HarmonyId); }
+            try { _harmony?.UnpatchAll(HarmonyId); }
             catch (Exception ex) { _logger?.Debug("Harmony cleanup failed: " + ex.Message); }
             _harmony = null;
             base.OnSubModuleUnloaded();
