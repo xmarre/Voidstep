@@ -32,9 +32,6 @@ namespace Voidstep
         public override void EarlyStart()
         {
             base.EarlyStart();
-            // Bannerlord 1.3.15 calls MBSubModuleBase.OnMissionBehaviorInitialize after
-            // the normal OnBehaviorInitialize pass. Behaviors added by that hook first
-            // receive EarlyStart, so this is the authoritative initialization path.
             EnsureInitialized("EarlyStart");
         }
 
@@ -47,7 +44,7 @@ namespace Voidstep
             {
                 var settings = VoidstepSettings.Current;
                 if (settings.MigrateLegacyDefaultControls())
-                    _logger.Info("Migrated legacy Ctrl+1 through Ctrl+6 defaults to Numpad1 through Numpad6 to avoid Bannerlord formation-selection commands.");
+                    _logger.Info("Migrated the v1.0.2/v1.0.3 Numpad defaults to Ctrl+1 through Ctrl+6. Plain number-row formation controls remain active.");
 
                 var context = new AbilityContext(Mission, _logger);
                 _manager = new AbilityManager(context);
@@ -94,12 +91,12 @@ namespace Voidstep
                     _readyNoticeShown = true;
                     var controls = settings.GetControlSummary();
                     _logger.Info($"Runtime ready. Controls: {controls}.");
-                    TryDisplayNotice($"Voidstep v1.0.3 active — {controls}.");
+                    TryDisplayNotice($"Voidstep v1.0.4 active — {controls}.");
                 }
                 if (!_controlConflictWarningShown && settings.HasNumberRowConflict())
                 {
                     _controlConflictWarningShown = true;
-                    const string warning = "Number-row Voidstep bindings also trigger Bannerlord formation selection. Rebind them to numpad or another unused key in MCM.";
+                    const string warning = "Number-row bindings without Ctrl also trigger Bannerlord formation selection. Enable the Ctrl modifier or choose another key.";
                     _logger.Info("Control warning: " + warning);
                     TryDisplayNotice("Voidstep: " + warning);
                 }
@@ -110,7 +107,6 @@ namespace Voidstep
                 }
 
                 _manager.Tick(dt);
-
                 var ability = _input.PollAbility();
                 if (ability.HasValue)
                     _manager.TryActivate(ability.Value);
@@ -124,14 +120,8 @@ namespace Voidstep
 
         private void TryDisplayNotice(string message)
         {
-            try
-            {
-                InformationManager.DisplayMessage(new InformationMessage(message));
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug($"Runtime notification was unavailable: {ex.GetType().Name}.");
-            }
+            try { InformationManager.DisplayMessage(new InformationMessage(message)); }
+            catch (Exception ex) { _logger.Debug($"Runtime notification was unavailable: {ex.GetType().Name}."); }
         }
 
         public override void OnAgentHit(Agent affectedAgent, Agent affectorAgent, in MissionWeapon affectorWeapon, in Blow blow, in AttackCollisionData attackCollisionData)
@@ -140,10 +130,7 @@ namespace Voidstep
             if (_cleaned || _manager == null) return;
             var propagatedBlow = blow;
             try { _manager.OnAgentHit(affectedAgent, affectorAgent, ref propagatedBlow); }
-            catch (Exception ex)
-            {
-                _logger.Error("Domino hit propagation failed safely.", ex);
-            }
+            catch (Exception ex) { _logger.Error("Domino hit propagation failed safely.", ex); }
         }
 
         public override void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState agentState, KillingBlow blow)
