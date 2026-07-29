@@ -23,7 +23,7 @@ namespace Voidstep
             _standalone = new StandaloneAbilityWheel(logger, ability => _selection.Select(ability, "standalone Q cast wheel"));
             _tor = new TorAbilityWheelAdapter(mission, _selection, logger);
             _wasUsingTorWheel = _tor.IsAvailable;
-            VoidstepWheelRuntime.Attach(this);
+            VoidstepWheelRuntime.Attach(this, logger);
         }
 
         internal bool UsesTorWheel => _tor.IsAvailable;
@@ -85,7 +85,7 @@ namespace Voidstep
         internal bool ShouldSuppress(InputKey key)
         {
             if (key == InputKey.Q)
-                return !_tor.IsAvailable;
+                return !_tor.IsAvailable && (_standalone.IsOpen || _selection.HasSelection);
             if (key == InputKey.RightMouseButton)
                 return _selection.HasSelection || _suppressRightMouseUntilRelease;
             if (key == InputKey.Escape)
