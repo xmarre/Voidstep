@@ -37,7 +37,7 @@ Any keyboard or mouse button accepted by Bannerlord's keybinding screen can be s
 MCM > Voidstep > Controls
 ```
 
-Available modifier combinations are None, Control, Alt, Shift and their combinations. When the completed ability chord is active, Voidstep suppresses the same underlying raw key from the rest of Bannerlord for that press. This prevents formations, weapon slots, movement, attacks or another native action bound to the primary key from also firing. When a modifier is configured, pressing the primary key without that modifier remains completely native.
+Available modifier combinations are None, Control, Alt, Shift and their combinations. When the completed ability chord is active, Voidstep suppresses the same underlying raw key from the rest of Bannerlord for that press. Suppression remains latched until the primary key is released, even if the modifier is released first. This prevents formations, weapon slots, movement, attacks or another native action bound to the primary key from also firing. When a modifier is configured, pressing the primary key without that modifier remains completely native.
 
 ## Ability details
 
@@ -107,7 +107,7 @@ MCM exposes the six per-ability modifier combinations, master switch, Void Energ
 
 ## Presentation approach
 
-Voidstep does not force a fabricated or victim-reaction animation onto the player. Cleave presentation is built from validated teleport phases, a visible destination marker, actor rotation, weapon-trail effects, impacts, sound and angle-synchronised native blows. This preserves Bannerlord's current melee weapon and combat-action ownership while keeping the combat effect independent from a future authored skeletal animation asset.
+Voidstep does not force a fabricated or victim-reaction animation onto the player. Cleave presentation is built from validated teleport phases, a visible destination marker, actor rotation, weapon-trail effects, impacts, sound and angle-synchronised native blows. This preserves Bannerlord's current melee weapon and combat-action ownership while keeping the combat effect independent from a future-authored skeletal animation asset.
 
 ## Diagnostics
 
