@@ -35,9 +35,12 @@ python scripts/validate_api_surface.py references/runtime
 
 A release must record pass/fail and logs for:
 
-- `Ctrl+1` through `Ctrl+6` activate only the corresponding Voidstep ability
+- `Ctrl+1` through `Ctrl+6` each produce exactly one `Input accepted` log and activate only the corresponding Voidstep ability
+- `Ctrl+1` through `Ctrl+6` do not open the order interface, select a formation or execute a native formation command
 - plain `1` through `6` still select formations with the default Control modifiers
 - releasing Control before releasing the number key does not trigger a delayed formation command
+- changing one modifier in MCM during a mission, such as Cleave from Control to Alt, immediately makes `Alt+1` active and leaves plain `1` native
+- exact modifier matching rejects additional unconfigured modifiers, such as `Ctrl+Alt+1` when only Control is configured
 - rebinding an ability primary key under `Options > Keybindings > Voidstep` persists after restarting the game
 - binding to a weapon-slot key suppresses only that weapon-slot action while the complete ability chord is active
 - binding to a movement key suppresses movement while the complete chord is active and preserves ordinary movement without the configured modifier
