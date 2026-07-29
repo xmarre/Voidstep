@@ -94,7 +94,7 @@ namespace Voidstep
                     _readyNoticeShown = true;
                     var controls = settings.GetControlSummary();
                     _logger.Info($"Runtime ready. Controls: {controls}.");
-                    TryDisplayNotice($"Voidstep v1.0.2 active — {controls}.");
+                    TryDisplayNotice($"Voidstep v1.0.3 active — {controls}.");
                 }
                 if (!_controlConflictWarningShown && settings.HasNumberRowConflict())
                 {
