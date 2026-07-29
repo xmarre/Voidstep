@@ -24,10 +24,10 @@ namespace Voidstep
 
         internal int SelectedIndex => _selectedIndex;
 
-        internal void SetSelected(int index)
+        internal bool SetSelected(int index)
         {
             if (index < 0 || index >= VoidstepInputBindings.Abilities.Length)
-                index = 0;
+                return false;
             _selectedIndex = index;
             var selected = VoidstepInputBindings.Abilities[index];
             CleaveText = Decorate(AbilityId.VoidstepCleave, selected);
@@ -38,6 +38,7 @@ namespace Voidstep
             DarkVisionText = Decorate(AbilityId.DarkVision, selected);
             SelectedName = AbilityPresentation.Name(selected);
             SelectedDescription = AbilityPresentation.Description(selected);
+            return true;
         }
 
         private static string Decorate(AbilityId ability, AbilityId selected) =>
