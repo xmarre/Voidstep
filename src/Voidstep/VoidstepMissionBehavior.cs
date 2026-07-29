@@ -13,6 +13,7 @@ namespace Voidstep
         private readonly VoidstepLogger _logger;
         private AbilityManager _manager;
         private InputRouter _input;
+        private AbilityWheelCoordinator _wheel;
         private Agent _lastPlayer;
         private bool _initializationAttempted;
         private bool _cleaned;
@@ -54,15 +55,18 @@ namespace Voidstep
                 var context = new AbilityContext(Mission, _logger);
                 _manager = new AbilityManager(context);
                 _input = new InputRouter(Mission, _logger);
+                _wheel = new AbilityWheelCoordinator(Mission, _manager, _input, _logger);
                 _lastPlayer = Mission.MainAgent;
                 _wasEnabled = settings.Enabled;
                 _bindingRefreshRemaining = BindingRefreshInterval;
-                _logger.Info($"Mission behavior initialized. Controls: {VoidstepInputBindings.GetSummary()}. Primary keys: Options > Keybindings > Voidstep. Modifiers: MCM > Controls. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+                _logger.Info($"Mission behavior initialized. Q opens the ability wheel; Right Mouse Button confirms the selected cast. Direct bindings select abilities: {VoidstepInputBindings.GetSummary()}. Primary keys: Options > Keybindings > Voidstep. Modifiers: MCM > Controls. Log: {_logger.PrimaryPath ?? "engine log only"}.");
                 CheckBindingConflict();
             }
             catch (Exception ex)
             {
                 _cleaned = true;
+                try { _wheel?.Cleanup(); } catch { }
+                _wheel = null;
                 _manager = null;
                 _input = null;
                 _logger.Error("Mission behavior initialization failed; abilities were disabled for this mission.", ex);
@@ -74,7 +78,7 @@ namespace Voidstep
             base.OnMissionTick(dt);
             if (!_initializationAttempted)
                 EnsureInitialized("OnMissionTick fallback");
-            if (_cleaned || _manager == null) return;
+            if (_cleaned || _manager == null || _wheel == null) return;
             try
             {
                 var settings = VoidstepSettings.Current;
@@ -99,9 +103,9 @@ namespace Voidstep
                 if (!_readyNoticeShown && current != null && current.IsActive())
                 {
                     _readyNoticeShown = true;
-                    var controls = VoidstepInputBindings.GetSummary();
-                    _logger.Info($"Runtime ready. Controls: {controls}.");
-                    TryDisplayNotice($"Voidstep v1.0.9 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
+                    var wheelName = _wheel.UsesTorWheel ? "TOR Q cast wheel" : "Voidstep Q cast wheel";
+                    _logger.Info($"Runtime ready. Selection: {wheelName}; confirm=RightMouseButton. Direct selectors: {VoidstepInputBindings.GetSummary()}.");
+                    TryDisplayNotice($"Voidstep v1.1.0 active — Q selects an ability; Right Mouse Button casts. Using {wheelName}.");
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
@@ -110,9 +114,7 @@ namespace Voidstep
                 }
 
                 _manager.Tick(dt);
-                var ability = _input.PollAbility();
-                if (ability.HasValue)
-                    _manager.TryActivate(ability.Value);
+                _wheel.Tick(dt);
             }
             catch (Exception ex)
             {
@@ -131,7 +133,7 @@ namespace Voidstep
             if (!VoidstepInputBindings.RefreshCacheIfChanged())
                 return;
 
-            _logger.Info("Control bindings refreshed. Controls: " + VoidstepInputBindings.GetSummary() + ".");
+            _logger.Info("Control bindings refreshed. Direct ability selectors: " + VoidstepInputBindings.GetSummary() + ".");
             CheckBindingConflict();
         }
 
@@ -150,7 +152,7 @@ namespace Voidstep
             if (string.IsNullOrEmpty(conflict))
             {
                 if (hadConflict)
-                    _logger.Info("Voidstep ability-chord conflicts cleared.");
+                    _logger.Info("Voidstep ability-selector chord conflicts cleared.");
                 return;
             }
 
@@ -219,11 +221,14 @@ namespace Voidstep
         {
             if (_cleaned) return;
             _cleaned = true;
+            try { _wheel?.Cleanup(); }
+            catch (Exception ex) { _logger?.Error("Ability-wheel cleanup encountered an error.", ex); }
             try { _manager?.Cleanup(reason); }
             catch (Exception ex) { _logger?.Error("Mission cleanup encountered an error.", ex); }
             try { _input?.Cleanup(); }
             catch (Exception ex) { _logger?.Error("Input cleanup encountered an error.", ex); }
             _logger?.Info("Mission behavior cleaned up.");
+            _wheel = null;
             _manager = null;
             _input = null;
             _lastPlayer = null;
