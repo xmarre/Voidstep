@@ -10,27 +10,39 @@ namespace Voidstep
         private static VoidstepLogger _logger;
         private static Harmony _harmony;
 
+        internal static bool InputSuppressionReady { get; private set; }
+
         protected override void OnSubModuleLoad()
         {
             base.OnSubModuleLoad();
             _logger = new VoidstepLogger();
             _logger.Info("Voidstep v1.0.4 submodule loaded.");
+            InputSuppressionReady = false;
             try
             {
                 _harmony = new Harmony(HarmonyId);
                 _harmony.PatchAll(typeof(VoidstepSubModule).Assembly);
+                InputSuppressionReady = true;
                 _logger.Info("Ctrl+number formation-input suppression patches installed.");
             }
             catch (Exception ex)
             {
-                _logger.Error("Voidstep input-conflict patches could not be installed.", ex);
+                _logger.Error("Voidstep input-conflict patches could not be installed; ability input is disabled.", ex);
+                TryCleanFailedInstallation();
             }
         }
 
         protected override void OnSubModuleUnloaded()
         {
-            try { _harmony?.UnpatchAll(HarmonyId); }
-            catch (Exception ex) { _logger?.Debug("Harmony cleanup failed: " + ex.Message); }
+            InputSuppressionReady = false;
+            if (_harmony != null && !TryUnpatchOwnedPatches())
+            {
+                _logger?.Error(
+                    "Harmony cleanup failed after retry; submodule unload was aborted while Voidstep-owned patches may remain.",
+                    new InvalidOperationException("Unable to remove Harmony patches owned by " + HarmonyId + "."));
+                return;
+            }
+
             _harmony = null;
             base.OnSubModuleUnloaded();
         }
@@ -41,6 +53,14 @@ namespace Voidstep
             if (mission == null) return;
 
             var logger = _logger ?? new VoidstepLogger();
+            if (!InputSuppressionReady || _harmony == null)
+            {
+                logger.Error(
+                    "Mission runtime was not registered because Ctrl+number formation-input suppression is unavailable.",
+                    new InvalidOperationException("Voidstep input suppression is not ready."));
+                return;
+            }
+
             try
             {
                 logger.Info("Mission bootstrap received; adding Voidstep mission behavior. Runtime initialization will occur during EarlyStart.");
@@ -50,6 +70,33 @@ namespace Voidstep
             {
                 logger.Error("Mission behavior registration failed.", ex);
             }
+        }
+
+        private static void TryCleanFailedInstallation()
+        {
+            InputSuppressionReady = false;
+            if (_harmony == null)
+                return;
+
+            if (TryUnpatchOwnedPatches())
+                _harmony = null;
+        }
+
+        private static bool TryUnpatchOwnedPatches()
+        {
+            for (var attempt = 1; attempt <= 2; attempt++)
+            {
+                try
+                {
+                    _harmony.UnpatchAll(HarmonyId);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.Error($"Harmony cleanup attempt {attempt} failed.", ex);
+                }
+            }
+            return false;
         }
     }
 }
