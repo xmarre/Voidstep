@@ -20,6 +20,7 @@ namespace Voidstep
         private readonly List<ScheduledSweepTarget<int>> _snapshotSchedule = new List<ScheduledSweepTarget<int>>(128);
 
         private Agent _actor;
+        private MissionWeapon _weapon;
         private float _elapsed;
         private float _duration;
         private double _startAngle;
@@ -37,6 +38,8 @@ namespace Voidstep
         private bool _snapshotTargets;
         private float _trailAccumulator;
         private int _trailBursts;
+        private int _successfulHits;
+        private int _largestCandidateSet;
 
         public CleaveSweepController(Mission mission, BlowFactory blows, EffectController effects, AnimationController animation, VoidstepLogger logger)
         {
@@ -49,11 +52,25 @@ namespace Voidstep
 
         public bool Active => _active;
         public float Progress => _duration <= 0f ? 1f : Math.Min(1f, _elapsed / _duration);
+        public int SuccessfulHits => _successfulHits;
 
-        public void Begin(Agent actor)
+        public bool Begin(Agent actor, MissionWeapon weapon, out string failure)
         {
             Cleanup();
+            failure = null;
+            if (actor == null || !actor.IsActive())
+            {
+                failure = "No active player is available for the cleave.";
+                return false;
+            }
+            if (weapon.IsEmpty)
+            {
+                failure = "Voidstep Cleave requires a wielded melee weapon.";
+                return false;
+            }
+
             _actor = actor;
+            _weapon = weapon;
             var settings = VoidstepSettings.Current;
             _duration = 0.72f;
             _sweepRadians = settings.CleaveSweepDegrees * Math.PI / 180.0;
@@ -68,6 +85,8 @@ namespace Voidstep
             _snapshotTargets = settings.CleaveSnapshotTargets;
             _trailAccumulator = 0f;
             _trailBursts = 0;
+            _successfulHits = 0;
+            _largestCandidateSet = 0;
             var look = actor.LookDirection;
             look.z = 0f;
             if (look.Normalize() < 0.001f) look = Vec3.Forward;
@@ -80,6 +99,9 @@ namespace Voidstep
 
             if (_snapshotTargets)
                 CaptureSnapshot();
+
+            _logger.Debug($"Cleave started actor={actor.Index}, radius={_radius:0.00}, sweep={settings.CleaveSweepDegrees:0}, snapshot={_snapshotTargets}.");
+            return true;
         }
 
         public bool Tick(float dt)
@@ -123,13 +145,16 @@ namespace Voidstep
             _lastProgress = progress;
             if (progress >= 1f)
             {
-                Cleanup();
+                _logger.Debug($"Cleave completed hits={_successfulHits}, largestCandidateSet={_largestCandidateSet}.");
+                Cleanup(false);
                 return true;
             }
             return false;
         }
 
-        public void Cleanup()
+        public void Cleanup() => Cleanup(true);
+
+        private void Cleanup(bool resetMetrics)
         {
             _active = false;
             _elapsed = 0f;
@@ -145,6 +170,12 @@ namespace Voidstep
             if (_actor != null)
                 _animation.ResetActionSpeed(_actor);
             _actor = null;
+            _weapon = default(MissionWeapon);
+            if (resetMetrics)
+            {
+                _successfulHits = 0;
+                _largestCandidateSet = 0;
+            }
         }
 
         private void CaptureSnapshot()
@@ -207,6 +238,7 @@ namespace Voidstep
                 _candidates.Add(new SweepTarget<Agent>(target, angle, distanceSquared, target.Index));
             }
 
+            _largestCandidateSet = Math.Max(_largestCandidateSet, _candidates.Count);
             SweepPlanner.BuildSchedule(
                 _candidates,
                 _startAngle,
@@ -234,18 +266,21 @@ namespace Voidstep
         {
             if (!IsEligible(target, true))
                 return;
-            if (!_hits.TryRegister(target.Index, _maximumTargets))
+            if (_maximumTargets > 0 && _successfulHits >= _maximumTargets)
                 return;
-            if (_blows.ApplyMeleeBlow(
+            if (!_blows.ApplyMeleeBlow(
                     _actor,
                     target,
+                    _weapon,
                     _damageMultiplier,
                     _knockback,
                     _knockdownThreshold,
                     expectedProgress))
-            {
-                _effects.Impact(target.GetChestGlobalPosition());
-            }
+                return;
+
+            _hits.TryRegister(target.Index);
+            _successfulHits++;
+            _effects.Impact(target.GetChestGlobalPosition());
         }
     }
 }
