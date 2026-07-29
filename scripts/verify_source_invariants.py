@@ -33,7 +33,7 @@ checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
     'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs',''),
     'ctrl number defaults': all(f'new Dropdown<string>(KeyOptions, {i})' in files.get('VoidstepSettings.cs','') for i in range(6)) and 'RequireControlModifier { get; set; } = true;' in files.get('VoidstepSettings.cs',''),
-    'formation input suppressed only through game keys': 'SelectOrder1' in files.get('MissionOrderInputSuppression.cs','') and 'InputContext' in files.get('MissionOrderInputSuppression.cs','') and 'IsControlDown()' in files.get('MissionOrderInputSuppression.cs',''),
+    'formation input suppressed only through game keys': 'SelectOrder1' in files.get('VoidstepSettings.cs','') and 'InputContext' in files.get('MissionOrderInputSuppression.cs','') and 'IsControlDown()' in files.get('MissionOrderInputSuppression.cs',''),
     'legacy numpad defaults migrate': 'MigrateLegacyDefaultControls' in files.get('VoidstepSettings.cs','') and '"Numpad1"' in files.get('VoidstepSettings.cs',''),
     'camera aligned targeting': 'GetCameraFrame()' in files.get('TargetingService.cs','') and 'GetAimDirection' in files.get('TargetingService.cs',''),
     'visible marker mesh': 'Mesh.GetFromResource' in files.get('EffectController.cs','') and 'entity.AddMesh' in files.get('EffectController.cs',''),
