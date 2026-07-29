@@ -14,7 +14,7 @@ namespace Voidstep
     /// </summary>
     internal static class TorRadialMenuRefresh
     {
-        private const string HarmonyId = "xmarre.voidstep.torrefresh";
+        private const string HarmonyId = "xmarre.voidstep";
         private const int ExpectedVoidstepAbilityCount = 6;
         private static readonly object Sync = new object();
         private static readonly VoidstepLogger Logger = new VoidstepLogger();
@@ -83,19 +83,6 @@ namespace Voidstep
                 {
                     Logger.Error("TOR Q-wheel live repair could not be installed.", Unwrap(ex));
                 }
-            }
-        }
-
-        internal static void Cleanup()
-        {
-            lock (Sync)
-            {
-                try { new Harmony(HarmonyId).UnpatchAll(HarmonyId); }
-                catch (Exception ex) { Logger.Debug("TOR Q-wheel repair cleanup failed safely: " + Unwrap(ex).Message); }
-                _lastMission = null;
-                _lastKnownCount = -1;
-                _lastVoidstepCount = -1;
-                _lastRadialCount = -1;
             }
         }
 
