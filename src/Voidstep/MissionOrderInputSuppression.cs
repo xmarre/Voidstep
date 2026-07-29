@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using MCM.Common;
 using TaleWorlds.InputSystem;
 
 namespace Voidstep
@@ -13,9 +14,35 @@ namespace Voidstep
                 return false;
 
             var settings = VoidstepSettings.Current;
-            return settings.Enabled && settings.RequireControlModifier &&
-                   settings.ShouldSuppressFormationOrder(gameKey.StringId);
+            if (!settings.Enabled || !settings.RequireControlModifier)
+                return false;
+
+            var key = ToNumberRowKey(gameKey.StringId);
+            return key != null &&
+                   (IsSelected(settings.VoidstepKey, key) ||
+                    IsSelected(settings.BlinkKey, key) ||
+                    IsSelected(settings.WindblastKey, key) ||
+                    IsSelected(settings.BendTimeKey, key) ||
+                    IsSelected(settings.DominoKey, key) ||
+                    IsSelected(settings.DarkVisionKey, key));
         }
+
+        private static string ToNumberRowKey(string gameKeyId)
+        {
+            switch (gameKeyId)
+            {
+                case "SelectOrder1": return "D1";
+                case "SelectOrder2": return "D2";
+                case "SelectOrder3": return "D3";
+                case "SelectOrder4": return "D4";
+                case "SelectOrder5": return "D5";
+                case "SelectOrder6": return "D6";
+                default: return null;
+            }
+        }
+
+        private static bool IsSelected(Dropdown<string> setting, string value) =>
+            setting != null && setting.Count > 0 && setting.SelectedValue == value;
 
         private static bool IsControlDown() =>
             Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl);
@@ -42,13 +69,9 @@ namespace Voidstep
             }
         }
 
-        private static void Postfix(object[] __args, ref bool __result)
+        private static void Postfix(GameKey __0, ref bool __result)
         {
-            if (!__result || __args == null || __args.Length == 0)
-                return;
-
-            var gameKey = __args[0] as GameKey;
-            if (MissionOrderInputSuppression.ShouldSuppress(gameKey))
+            if (__result && MissionOrderInputSuppression.ShouldSuppress(__0))
                 __result = false;
         }
     }
