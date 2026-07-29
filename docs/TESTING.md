@@ -50,6 +50,23 @@ A release must record pass/fail and logs for:
 - opening text input or the on-screen keyboard disables ability polling and suppression
 - mission end, player death and disabling Voidstep clear every latched input key
 
+## Required ability presentation and time-control matrix
+
+A release must record pass/fail and logs for:
+
+- Blink displays a double-ring casting sigil at the current destination, never an arrow model
+- Domino displays the same casting-sigil language above each linked human target and never marks missiles or arrow entities
+- Voidstep Cleave displays a destination sigil during wind-up
+- Windblast and Bend Time display visible radial cast pulses
+- Dark Vision immediately applies hostile-agent contours
+- Blink destination selection freezes mission actors, missiles and animation while camera movement, preview movement and the confirmation chord remain responsive
+- Blink confirmation and cancellation remove only the owned zero-speed request
+- Blink targeting still expires after eight seconds of application time while mission time is frozen
+- Bend Time leaves outside actors slowed by the configured factor while the player can move, turn, attack, ready, reload and recover materially faster
+- mounted Bend Time compensates the controlled mount's speed, maneuver and acceleration
+- ending Bend Time restores only values still equal to Voidstep's applied compensation
+- player death, replacement, mission end and disabling Voidstep clean up every owned time request and compensation value
+
 ## Required Bannerlord runtime matrix
 
 A release must record pass/fail and logs for:
@@ -63,6 +80,8 @@ A release must record pass/fail and logs for:
 - player death during wind-up, teleport and recovery
 - mission end during Bend Time
 - walls, cliffs, props, water and occupied destinations
+- a locked Cleave enemy surrounded by a dense formation, verifying the complete fallback field finds a safe point or reports the final safety failure
+- Cleave fallback never exceeds the configured teleport range
 - player mounted and mount near destination
 - friendlies in radius with friendly fire off and on
 - shielded enemies
