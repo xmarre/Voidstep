@@ -12,6 +12,7 @@ blink = files.get('BlinkController.cs', '')
 ability_manager = files.get('AbilityManager.cs', '')
 cleave = files.get('CleaveSweepController.cs', '')
 submodule = files.get('VoidstepSubModule.cs', '')
+mission_behavior = files.get('VoidstepMissionBehavior.cs', '')
 input_router = files.get('InputRouter.cs', '')
 input_bindings = files.get('VoidstepInputBindings.cs', '')
 hotkey_context = files.get('VoidstepHotKeyContext.cs', '')
@@ -46,12 +47,13 @@ uncapped_cleave_schedule = re.search(
 
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
-    'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs',''),
+    'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in mission_behavior and 'EnsureInitialized("EarlyStart")' in mission_behavior,
     'native serialized hotkeys shown in options': 'AuxiliarySerializedAndShownInOptions' in hotkey_context and hotkey_context.count('RegisterHotKey(new HotKey(') == 6 and 'HotKeyManager.RegisterContext(context, false, true)' in hotkey_context,
     'native hotkey localization registered': 'str_hotkey_category_name' in hotkey_context and 'str_hotkey_name' in hotkey_context and 'str_hotkey_description' in hotkey_context,
     'arbitrary primary keys replace hardcoded key list': 'KeyOptions' not in settings and 'VoidstepKey' not in settings and 'RequireControlModifier' not in settings and 'ModifierOptions' in settings,
     'per ability modifiers configurable': all(name in settings for name in ('VoidstepModifier', 'BlinkModifier', 'WindblastModifier', 'BendTimeModifier', 'DominoModifier', 'DarkVisionModifier')),
     'input router polls live native bindings': 'VoidstepInputBindings.TryGetPressedKey' in input_router and 'InputConflictSuppression.Latch' in input_router and 'Enum.TryParse' not in input_router,
+    'duplicate chords rejected and reported': 'IsAmbiguousChord' in input_bindings and 'GetConflictWarning' in input_bindings and 'The duplicate chord is disabled.' in input_bindings and 'CheckBindingConflict()' in mission_behavior,
     'generic raw input boolean suppression': all(name in input_bindings for name in ('nameof(Input.IsKeyPressed)', 'nameof(Input.IsKeyDown)', 'nameof(Input.IsKeyDownImmediate)', 'nameof(Input.IsKeyReleased)')),
     'generic raw input axis suppression': 'nameof(Input.GetKeyState)' in input_bindings and '__result = Vec2.Zero;' in input_bindings,
     'suppression preserves own polling through bypass': '[ThreadStatic]' in input_bindings and 'EnterBypass()' in input_bindings and 'IsBypassed' in input_bindings,
@@ -76,8 +78,8 @@ checks = {
     'dark vision counts successful contours only': 'if (TrySetContour(agent, color))' in dark_vision and 'private static bool ClearContour' in dark_vision and 'if (ClearContour(' in dark_vision,
     'no campaign behavior': 'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
     'no global agent collection': not re.search(r'\bstatic\s+readonly\s+.*(?:\bAgent\b|\bList<Agent>\b|\bHashSet<Agent>\b)', all_text),
-    'no full all-agent scan': 'AllAgents' not in files.get('VoidstepMissionBehavior.cs','') and 'Agents)' not in files.get('VoidstepMissionBehavior.cs',''),
-    'mission end cleanup': 'Cleanup(CancelReason.MissionEnded)' in files.get('VoidstepMissionBehavior.cs',''),
+    'no full all-agent scan': 'AllAgents' not in mission_behavior and 'Agents)' not in mission_behavior,
+    'mission end cleanup': 'Cleanup(CancelReason.MissionEnded)' in mission_behavior,
     'missing effects are nonfatal': 'Optional particle failed' in files.get('EffectController.cs','') and 'return -1;' in files.get('EffectController.cs',''),
     'whole-cast target cap': '_successfulHits >= _maximumTargets' in cleave,
     'dark vision reuses stale buffer': 'List<int> _staleBuffer' in dark_vision and 'new List<int>' not in dark_vision.split('private void Refresh()',1)[-1],
