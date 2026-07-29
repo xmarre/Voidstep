@@ -202,9 +202,10 @@ namespace Voidstep
 
         private bool BeginVoidstep(Agent player)
         {
-            _cleaveWeapon = player.WieldedWeapon;
-            if (_cleaveWeapon.IsEmpty)
-                return Fail("Voidstep Cleave requires a wielded melee weapon.");
+            var wieldedWeapon = player.WieldedWeapon;
+            if (!WeaponValidation.IsUsableMeleeWeapon(wieldedWeapon))
+                return Fail("Voidstep Cleave requires a currently wielded melee weapon.");
+            _cleaveWeapon = wieldedWeapon;
 
             var settings = VoidstepSettings.Current;
             var requested = ResolveVoidstepDestination(player, settings.VoidstepRange);
@@ -248,6 +249,7 @@ namespace Voidstep
                         var validation = _teleportValidator.Validate(player, _destination, VoidstepSettings.Current.VoidstepRange, false);
                         if (!validation.Success)
                         {
+                            RollbackPayment(AbilityId.VoidstepCleave);
                             Fail(validation.Reason ?? "The Voidstep destination became invalid.");
                             CancelCurrent(CancelReason.InvalidDestination);
                             return;
@@ -268,6 +270,7 @@ namespace Voidstep
                     {
                         if (!_cleave.Begin(player, _cleaveWeapon, out var failure))
                         {
+                            RollbackPayment(AbilityId.VoidstepCleave);
                             Fail(failure ?? "Cleave execution could not start.");
                             CancelCurrent(CancelReason.Interrupted);
                             return;
