@@ -12,6 +12,7 @@ namespace Voidstep
     internal sealed class AbilitySelectionController
     {
         private const float PreviewRefreshInterval = 0.075f;
+        private const int MaximumPreviewCreationFailures = 3;
         private readonly Mission _mission;
         private readonly AbilityManager _manager;
         private readonly TargetingService _targeting;
@@ -26,6 +27,8 @@ namespace Voidstep
         private AbilityId? _selected;
         private float _previewRefreshRemaining;
         private bool _blinkTargetingOwned;
+        private int _previewCreationFailures;
+        private bool _previewCreationDisabled;
 
         internal AbilitySelectionController(Mission mission, AbilityManager manager, VoidstepLogger logger)
         {
@@ -36,6 +39,8 @@ namespace Voidstep
             _teleportValidator = new TeleportValidator(mission);
             _effects = new EffectController(mission, logger);
             _cancelCurrent = typeof(AbilityManager).GetMethod("CancelCurrent", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (_cancelCurrent == null)
+                _logger.Info("Blink selection is unavailable because the owned AbilityManager cancellation method could not be resolved.");
         }
 
         internal bool HasSelection => _selected.HasValue;
@@ -43,6 +48,20 @@ namespace Voidstep
 
         internal bool Select(AbilityId ability, string source)
         {
+            var player = _mission.MainAgent;
+            if (player == null || !player.IsActive() || player.Health <= 0f)
+            {
+                Show("No active player agent is available.");
+                return false;
+            }
+
+            if (ability == AbilityId.Blink && _cancelCurrent == null)
+            {
+                Show("Blink targeting is unavailable because its owned cancellation path could not be initialized.");
+                _logger.Debug($"Ability selection rejected ability={ability}, source={source}: cancellation ownership is unavailable.");
+                return false;
+            }
+
             if (_selected.HasValue && _selected.Value == ability)
                 return true;
 
@@ -51,7 +70,8 @@ namespace Voidstep
                 if (_blinkTargetingOwned && _manager.ActiveAbility == AbilityId.Blink &&
                     _manager.Phase == AbilityPhase.Targeting)
                 {
-                    Cancel(true);
+                    if (!Cancel(true))
+                        return false;
                 }
                 else
                 {
@@ -60,21 +80,16 @@ namespace Voidstep
                     return false;
                 }
             }
-            else
+            else if (!Cancel(false))
             {
-                Cancel(false);
-            }
-
-            var player = _mission.MainAgent;
-            if (player == null || !player.IsActive() || player.Health <= 0f)
-            {
-                Show("No active player agent is available.");
                 return false;
             }
 
             _selected = ability;
             _previewRefreshRemaining = 0f;
             _blinkTargetingOwned = false;
+            _previewCreationFailures = 0;
+            _previewCreationDisabled = false;
             if (ability == AbilityId.Blink)
             {
                 if (!_manager.TryActivate(AbilityId.Blink))
@@ -139,6 +154,8 @@ namespace Voidstep
                 return;
             }
 
+            if (_previewCreationDisabled)
+                return;
             _previewRefreshRemaining -= Math.Max(0f, dt);
             if (_previewRefreshRemaining > 0f)
                 return;
@@ -146,16 +163,39 @@ namespace Voidstep
             RefreshPreview(player);
         }
 
-        internal void Cancel(bool cancelPendingBlink)
+        internal bool Cancel(bool cancelPendingBlink)
         {
-            if (!_selected.HasValue && _markers.Count == 0)
-                return;
+            if (!_selected.HasValue && _markers.Count == 0 && !_blinkTargetingOwned)
+                return true;
 
             if (cancelPendingBlink && _blinkTargetingOwned && _manager.IsBusy &&
                 _manager.ActiveAbility == AbilityId.Blink && _manager.Phase == AbilityPhase.Targeting)
             {
-                try { _cancelCurrent?.Invoke(_manager, new object[] { CancelReason.UserCancelled }); }
-                catch (Exception ex) { _logger.Debug("Blink selection cancellation failed safely: " + Unwrap(ex).Message); }
+                if (_cancelCurrent == null)
+                {
+                    _logger.Debug("Blink selection cancellation was refused because the owned cancellation method is unavailable.");
+                    Show("Blink targeting could not be cancelled safely.");
+                    return false;
+                }
+
+                try
+                {
+                    _cancelCurrent.Invoke(_manager, new object[] { CancelReason.UserCancelled });
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Blink selection cancellation failed safely: " + Unwrap(ex).Message);
+                    Show("Blink targeting could not be cancelled safely.");
+                    return false;
+                }
+
+                if (_manager.IsBusy && _manager.ActiveAbility == AbilityId.Blink &&
+                    _manager.Phase == AbilityPhase.Targeting)
+                {
+                    _logger.Debug("Blink selection cancellation returned without releasing targeting ownership.");
+                    Show("Blink targeting could not be cancelled safely.");
+                    return false;
+                }
             }
 
             if (_selected.HasValue)
@@ -163,6 +203,7 @@ namespace Voidstep
             _selected = null;
             _blinkTargetingOwned = false;
             ClearSelectionVisuals();
+            return true;
         }
 
         internal void Cleanup()
@@ -176,7 +217,7 @@ namespace Voidstep
 
         private void RefreshPreview(Agent player)
         {
-            if (!_selected.HasValue)
+            if (!_selected.HasValue || _previewCreationDisabled)
                 return;
 
             _positions.Clear();
@@ -289,13 +330,22 @@ namespace Voidstep
 
         private void ApplyPreview(List<Vec3> positions, uint color)
         {
-            while (_markers.Count < positions.Count)
-                _markers.Add(_effects.CreateWorldMarker(Vec3.Zero, color));
             while (_markers.Count > positions.Count)
             {
                 var last = _markers.Count - 1;
                 _effects.RemoveMarker(_markers[last]);
                 _markers.RemoveAt(last);
+            }
+
+            while (_markers.Count < positions.Count)
+            {
+                var marker = _effects.CreateWorldMarker(positions[_markers.Count], color);
+                if (marker == null)
+                {
+                    RecordPreviewCreationFailure();
+                    return;
+                }
+                _markers.Add(marker);
             }
 
             for (var i = 0; i < positions.Count; i++)
@@ -304,6 +354,11 @@ namespace Voidstep
                 if (marker == null)
                 {
                     marker = _effects.CreateWorldMarker(positions[i], color);
+                    if (marker == null)
+                    {
+                        RecordPreviewCreationFailure();
+                        return;
+                    }
                     _markers[i] = marker;
                 }
                 else
@@ -312,6 +367,18 @@ namespace Voidstep
                     _effects.SetMarkerColor(marker, color);
                 }
             }
+
+            _previewCreationFailures = 0;
+        }
+
+        private void RecordPreviewCreationFailure()
+        {
+            _previewCreationFailures++;
+            if (_previewCreationFailures < MaximumPreviewCreationFailures)
+                return;
+            _previewCreationDisabled = true;
+            _logger.Info("Cast-indicator creation failed repeatedly; preview retries are disabled for the current selection.");
+            Show("Cast indicator unavailable for this selection. Escape to cancel or Mouse 2 to attempt the cast.");
         }
 
         private void ClearSelectionVisuals()
@@ -320,6 +387,8 @@ namespace Voidstep
                 _effects.RemoveMarker(_markers[i]);
             _markers.Clear();
             _positions.Clear();
+            _previewCreationFailures = 0;
+            _previewCreationDisabled = false;
         }
 
         private static void Show(string message)
