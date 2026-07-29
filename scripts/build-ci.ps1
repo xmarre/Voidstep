@@ -1,7 +1,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.9"
+    [string]$Version = "1.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,7 +88,9 @@ try {
         $required = @(
             "Modules/Voidstep/SubModule.xml",
             "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll",
-            "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.Core.dll"
+            "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.Core.dll",
+            "Modules/Voidstep/README.txt",
+            "Modules/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml"
         )
         foreach ($entry in $required) {
             if ($entries -notcontains $entry) { throw "Package is missing: $entry" }
