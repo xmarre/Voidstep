@@ -38,10 +38,10 @@ namespace Voidstep
 
             try
             {
-                float existingFactor = 0f;
-                if (_mission.GetRequestedTimeSpeed(RequestId, ref existingFactor))
+                float existingFactor;
+                if (_mission.GetRequestedTimeSpeed(RequestId, out existingFactor))
                 {
-                    _logger.Error("Bend Time found an existing mission speed request with its reserved ID; refusing to replace a request it does not own.");
+                    _logger.Info("Bend Time found an existing mission speed request with its reserved ID; refusing to replace a request it does not own.");
                     ReleaseLocalState();
                     return false;
                 }
@@ -93,8 +93,8 @@ namespace Voidstep
             {
                 try
                 {
-                    float requestedFactor = 0f;
-                    if (_mission.GetRequestedTimeSpeed(requestId, ref requestedFactor))
+                    float requestedFactor;
+                    if (_mission.GetRequestedTimeSpeed(requestId, out requestedFactor))
                         _mission.RemoveTimeSpeedRequest(requestId);
                 }
                 catch (Exception ex) { _logger.Debug("Owned time request cleanup failed: " + ex.Message); }
