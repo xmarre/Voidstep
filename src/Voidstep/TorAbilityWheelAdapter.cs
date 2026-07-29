@@ -209,13 +209,7 @@ namespace Voidstep
                 }
 
                 _harmony = new Harmony(HarmonyId);
-                var prefix = new HarmonyMethod(typeof(TorAbilityWheelAdapter).GetMethod(
-                    nameof(IsDisabledPrefix), BindingFlags.Static | BindingFlags.NonPublic));
-                var baseDisabled = _abilityType.GetMethod("IsDisabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                var spellDisabled = _spellType.GetMethod("IsDisabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-                if (baseDisabled != null) _harmony.Patch(baseDisabled, prefix: prefix);
-                if (spellDisabled != null && spellDisabled != baseDisabled) _harmony.Patch(spellDisabled, prefix: prefix);
-
+                PatchProxyGuards();
                 _apiReady = true;
                 _available = false;
                 _attachRetryRemaining = 0f;
@@ -229,6 +223,32 @@ namespace Voidstep
                 _harmony = null;
                 _logger.Error("TOR ability-wheel integration failed; the standalone Voidstep Q wheel will be used instead.", Unwrap(ex));
             }
+        }
+
+        private void PatchProxyGuards()
+        {
+            var disabledPrefix = new HarmonyMethod(typeof(TorAbilityWheelAdapter).GetMethod(
+                nameof(IsDisabledPrefix), BindingFlags.Static | BindingFlags.NonPublic));
+            var tryCastPrefix = new HarmonyMethod(typeof(TorAbilityWheelAdapter).GetMethod(
+                nameof(TryCastPrefix), BindingFlags.Static | BindingFlags.NonPublic));
+            var doCastPrefix = new HarmonyMethod(typeof(TorAbilityWheelAdapter).GetMethod(
+                nameof(DoCastPrefix), BindingFlags.Static | BindingFlags.NonPublic));
+
+            var baseDisabled = _abilityType.GetMethod("IsDisabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var spellDisabled = _spellType.GetMethod("IsDisabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            var tryCast = _abilityType.GetMethod("TryCast", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var baseDoCast = _abilityType.GetMethod("DoCast", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var spellDoCast = _spellType.GetMethod("DoCast", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+
+            if (baseDisabled == null || tryCast == null || baseDoCast == null)
+                throw new MissingMethodException("TOR ability cast guard methods are unavailable.");
+            _harmony.Patch(baseDisabled, prefix: disabledPrefix);
+            if (spellDisabled != null && spellDisabled != baseDisabled)
+                _harmony.Patch(spellDisabled, prefix: disabledPrefix);
+            _harmony.Patch(tryCast, prefix: tryCastPrefix);
+            _harmony.Patch(baseDoCast, prefix: doCastPrefix);
+            if (spellDoCast != null && spellDoCast != baseDoCast)
+                _harmony.Patch(spellDoCast, prefix: doCastPrefix);
         }
 
         private void AttachToAgent(Agent agent)
@@ -422,6 +442,21 @@ namespace Voidstep
                 return true;
             __result = false;
             return false;
+        }
+
+        private static bool TryCastPrefix(object __instance, ref bool __result)
+        {
+            var runtime = VoidstepWheelRuntime.Current;
+            if (runtime == null || !runtime.IsTorProxy(__instance))
+                return true;
+            __result = false;
+            return false;
+        }
+
+        private static bool DoCastPrefix(object __instance)
+        {
+            var runtime = VoidstepWheelRuntime.Current;
+            return runtime == null || !runtime.IsTorProxy(__instance);
         }
 
         private static Exception Unwrap(Exception exception)
