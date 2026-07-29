@@ -20,6 +20,7 @@ namespace Voidstep
         private float _refreshRemaining;
         private Agent _player;
         private bool _visibilityFailureLogged;
+        private int _lastLoggedCount = -1;
 
         public DarkVisionService(Mission mission, VoidstepLogger logger)
         {
@@ -42,6 +43,9 @@ namespace Voidstep
             Active = true;
             _refreshRemaining = 0f;
             _visibilityFailureLogged = false;
+            _lastLoggedCount = -1;
+            Refresh();
+            _logger.Debug($"Dark Vision started; initial highlights={_highlighted.Count}.");
             return true;
         }
 
@@ -67,6 +71,7 @@ namespace Voidstep
 
         public void Disable()
         {
+            var cleared = _highlighted.Count;
             _staleBuffer.Clear();
             foreach (var id in _highlighted) _staleBuffer.Add(id);
             for (var i = 0; i < _staleBuffer.Count; i++)
@@ -78,7 +83,9 @@ namespace Voidstep
             _refreshRemaining = 0f;
             _player = null;
             _visibilityFailureLogged = false;
+            _lastLoggedCount = -1;
             Active = false;
+            if (cleared > 0) _logger.Debug($"Dark Vision disabled; cleared={cleared}.");
         }
 
         private void Refresh()
@@ -109,6 +116,12 @@ namespace Voidstep
                 _highlighted.Remove(_staleBuffer[i]);
             }
             _staleBuffer.Clear();
+
+            if (_lastLoggedCount != _highlighted.Count)
+            {
+                _logger.Debug($"Dark Vision refresh nearby={_nearby.Count}, highlighted={_highlighted.Count}.");
+                _lastLoggedCount = _highlighted.Count;
+            }
         }
 
         private uint ClassifyColor(Agent agent)
