@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.7",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Ability cast sigils, Blink time freeze, crowded Cleave fallback, and player-compensated Bend Time."
+}
