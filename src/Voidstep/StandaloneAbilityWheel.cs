@@ -180,9 +180,10 @@ namespace Voidstep
                 if (_layer == null)
                     throw new MissingMethodException("No compatible GauntletLayer constructor was found.");
 
-                SetPropertyIfPresent(_layer, "IsFocusLayer", true);
-                ConfigureInputRestrictions(_layer);
-
+                // This layer renders the radial overlay only. Voidstep reads Q and pointer position
+                // through its mission input router, so the Gauntlet layer must never take focus or
+                // install input restrictions. Doing so captures mouse-wheel input through a full
+                // input mask and can disable native weapon cycling for the rest of the mission.
                 var loadMovie = gauntletLayerType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
                     .FirstOrDefault(method =>
                     {
@@ -204,7 +205,7 @@ namespace Voidstep
                 addLayer.Invoke(_screen, new[] { _layer });
                 _layerAdded = true;
 
-                InvokeStaticLayerMethod(screenManagerType, "TrySetFocus", _layer);
+                _logger.Debug("Standalone ability-wheel overlay attached as a display-only Gauntlet layer; native input remains unowned.");
                 return true;
             }
             catch (Exception ex)
@@ -223,20 +224,6 @@ namespace Voidstep
                 _screen = null;
                 _layerAdded = false;
                 return true;
-            }
-
-            if (_layerAdded)
-            {
-                try
-                {
-                    var screenManagerType = FindType("TaleWorlds.ScreenSystem.ScreenManager");
-                    if (screenManagerType != null)
-                        InvokeStaticLayerMethod(screenManagerType, "TryLoseFocus", _layer);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Debug("Standalone wheel focus release failed safely: " + Unwrap(ex).Message);
-                }
             }
 
             if (_movie != null)
@@ -312,60 +299,6 @@ namespace Voidstep
                 catch { }
             }
             return null;
-        }
-
-        private static void ConfigureInputRestrictions(object layer)
-        {
-            try
-            {
-                var restrictions = layer.GetType().GetProperty("InputRestrictions", BindingFlags.Instance | BindingFlags.Public)?.GetValue(layer, null);
-                if (restrictions == null) return;
-                var method = restrictions.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                    .FirstOrDefault(candidate => candidate.Name == "SetInputRestrictions" && candidate.GetParameters().Length >= 1);
-                if (method == null) return;
-                var parameters = method.GetParameters();
-                var arguments = new object[parameters.Length];
-                for (var i = 0; i < parameters.Length; i++)
-                {
-                    var type = parameters[i].ParameterType;
-                    if (type == typeof(bool))
-                    {
-                        arguments[i] = true;
-                    }
-                    else if (type.IsEnum)
-                    {
-                        var allName = Enum.GetNames(type).FirstOrDefault(name => string.Equals(name, "All", StringComparison.Ordinal));
-                        if (allName == null)
-                            return;
-                        arguments[i] = Enum.Parse(type, allName, false);
-                    }
-                    else if (parameters[i].HasDefaultValue)
-                    {
-                        arguments[i] = parameters[i].DefaultValue;
-                    }
-                    else
-                    {
-                        return;
-                    }
-                }
-                method.Invoke(restrictions, arguments);
-            }
-            catch { }
-        }
-
-        private static void SetPropertyIfPresent(object instance, string name, object value)
-        {
-            var property = instance.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (property != null && property.CanWrite)
-                property.SetValue(instance, value, null);
-        }
-
-        private static void InvokeStaticLayerMethod(Type type, string name, object layer)
-        {
-            var method = type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .FirstOrDefault(candidate => candidate.Name == name && candidate.GetParameters().Length == 1 &&
-                                             candidate.GetParameters()[0].ParameterType.IsInstanceOfType(layer));
-            method?.Invoke(null, new[] { layer });
         }
 
         private static Type FindType(string fullName)
