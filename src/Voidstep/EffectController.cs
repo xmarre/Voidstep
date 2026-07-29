@@ -28,10 +28,10 @@ namespace Voidstep
         private static readonly Vec3[] MarkerOffsets =
         {
             Vec3.Zero,
-            new Vec3(0.32f, 0f, 0f, 1f),
-            new Vec3(-0.32f, 0f, 0f, 1f),
-            new Vec3(0f, 0.32f, 0f, 1f),
-            new Vec3(0f, -0.32f, 0f, 1f)
+            new Vec3(0.58f, 0f, 0.05f, 1f),
+            new Vec3(-0.58f, 0f, 0.05f, 1f),
+            new Vec3(0f, 0.58f, 0.05f, 1f),
+            new Vec3(0f, -0.58f, 0.05f, 1f)
         };
 
         public EffectController(Mission mission, VoidstepLogger logger)
@@ -60,8 +60,12 @@ namespace Voidstep
                 entity.SetFrame(ref frame, true);
 
                 var sigil = CreateCastingSigilMesh(entity, color);
+                entity.EntityVisibilityFlags = EntityVisibilityFlags.NoShadow;
+                entity.SetVisibilityExcludeParents(true);
                 entity.SetContourColor(color, alwaysVisible);
                 entity.SetDoNotCheckVisibility(true);
+                entity.SetForceNotAffectedBySeason(true);
+                entity.SetAlpha(1f);
                 entity.SetReadyToRender(true);
 
                 var particleId = ResolveFirst(UseTorPreset() ? TorMarker : NativeMarker);
@@ -81,7 +85,7 @@ namespace Voidstep
 
                 _ownedEntities.Add(entity);
                 if (sigil != null) _markerMeshes[entity] = sigil;
-                _logger.Debug($"Created cast indicator at {Format(position)}; sigil={sigil != null}, particles={attachedParticles}, particleId={particleId}.");
+                _logger.Debug($"Created cast reticle at {Format(position)}; mesh={sigil != null}, particles={attachedParticles}, particleId={particleId}.");
                 return entity;
             }
             catch (Exception ex)
@@ -92,7 +96,7 @@ namespace Voidstep
                     _ownedEntities.Remove(entity);
                     _markerMeshes.Remove(entity);
                 }
-                _logger.Debug("Cast indicator creation failed: " + ex.Message);
+                _logger.Debug("Cast reticle creation failed: " + ex.Message);
                 return null;
             }
         }
@@ -108,7 +112,7 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                _logger.Debug("Cast indicator move failed: " + ex.Message);
+                _logger.Debug("Cast reticle move failed: " + ex.Message);
             }
         }
 
@@ -118,13 +122,16 @@ namespace Voidstep
             try
             {
                 marker.SetContourColor(color, true);
+                marker.SetFactorColor(color);
                 if (_markerMeshes.TryGetValue(marker, out var mesh))
                 {
                     mesh.Color = color;
                     mesh.Color2 = color;
+                    mesh.SetColorAndStroke(color, color, true);
+                    mesh.SetColorAlpha(255u);
                 }
             }
-            catch (Exception ex) { _logger.Debug("Cast indicator colour update failed: " + ex.Message); }
+            catch (Exception ex) { _logger.Debug("Cast reticle colour update failed: " + ex.Message); }
         }
 
         public void RemoveMarker(GameEntity marker)
@@ -174,13 +181,24 @@ namespace Voidstep
 
                     mesh = Mesh.CreateMeshWithMaterial(material);
                     if (mesh == null) continue;
+                    mesh.Name = "voidstep_cast_reticle";
+                    mesh.CullingMode = MBMeshCullingMode.None;
                     mesh.Color = color;
                     mesh.Color2 = color;
+                    mesh.SetColorAndStroke(color, color, true);
+                    mesh.SetColorAlpha(255u);
+                    mesh.SetMeshRenderOrder(1000);
+                    mesh.SetVisibilityMask(VisibilityMaskFlags.Final);
+                    mesh.SetAsNotEffectedBySeason();
+
                     var handle = mesh.LockEditDataWrite();
                     try
                     {
-                        AddRing(mesh, handle, color, false);
-                        AddRing(mesh, handle, color, true);
+                        AddRing(mesh, handle, color, false, 1.02f, 0.82f, 36);
+                        AddRing(mesh, handle, color, false, 0.57f, 0.43f, 28);
+                        AddRing(mesh, handle, color, true, 0.86f, 0.68f, 32);
+                        AddRadialSpikes(mesh, handle, color);
+                        AddVerticalDiamond(mesh, handle, color);
                     }
                     finally
                     {
@@ -191,6 +209,7 @@ namespace Voidstep
                     mesh.RecomputeBoundingBox();
                     mesh.PreloadForRendering();
                     entity.AddMesh(mesh, false);
+                    entity.SetFactorColor(color);
                     return mesh;
                 }
                 catch (Exception ex)
@@ -198,17 +217,14 @@ namespace Voidstep
                     // Mesh exposes no public release method in the locked 1.3.15 API.
                     // Drop the wrapper immediately so a failed donor cannot remain owned here.
                     mesh = null;
-                    _logger.Debug($"Cast sigil material donor '{MarkerMaterialDonors[i]}' unavailable: {ex.Message}");
+                    _logger.Debug($"Cast reticle material donor '{MarkerMaterialDonors[i]}' unavailable: {ex.Message}");
                 }
             }
             return null;
         }
 
-        private static void AddRing(Mesh mesh, UIntPtr handle, uint color, bool vertical)
+        private static void AddRing(Mesh mesh, UIntPtr handle, uint color, bool vertical, float outerRadius, float innerRadius, int segments)
         {
-            const int segments = 24;
-            const float outerRadius = 0.42f;
-            const float innerRadius = 0.29f;
             var uv = Vec2.Zero;
             for (var i = 0; i < segments; i++)
             {
@@ -223,13 +239,44 @@ namespace Voidstep
             }
         }
 
+        private static void AddRadialSpikes(Mesh mesh, UIntPtr handle, uint color)
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                var angle = i * Math.PI * 2.0 / 8.0;
+                var forward = new Vec3((float)Math.Cos(angle), (float)Math.Sin(angle), 0.02f, 1f);
+                var side = new Vec3(-forward.y, forward.x, 0f, 0f);
+                var baseCenter = forward * 0.98f;
+                var tip = forward * 1.30f;
+                var left = baseCenter + side * 0.11f;
+                var right = baseCenter - side * 0.11f;
+                mesh.AddTriangle(left, tip, right, Vec2.Zero, Vec2.Zero, Vec2.Zero, color, handle);
+            }
+        }
+
+        private static void AddVerticalDiamond(Mesh mesh, UIntPtr handle, uint color)
+        {
+            const float halfWidth = 0.18f;
+            var bottom = new Vec3(0f, 0f, 0.18f, 1f);
+            var top = new Vec3(0f, 0f, 1.72f, 1f);
+            var leftX = new Vec3(-halfWidth, 0f, 0.95f, 1f);
+            var rightX = new Vec3(halfWidth, 0f, 0.95f, 1f);
+            var leftY = new Vec3(0f, -halfWidth, 0.95f, 1f);
+            var rightY = new Vec3(0f, halfWidth, 0.95f, 1f);
+            var uv = Vec2.Zero;
+            mesh.AddTriangle(bottom, leftX, top, uv, uv, uv, color, handle);
+            mesh.AddTriangle(bottom, top, rightX, uv, uv, uv, color, handle);
+            mesh.AddTriangle(bottom, leftY, top, uv, uv, uv, color, handle);
+            mesh.AddTriangle(bottom, top, rightY, uv, uv, uv, color, handle);
+        }
+
         private static Vec3 RingPoint(double angle, float radius, bool vertical)
         {
             var first = (float)Math.Cos(angle) * radius;
             var second = (float)Math.Sin(angle) * radius;
             return vertical
-                ? new Vec3(first, 0f, second, 1f)
-                : new Vec3(first, second, 0f, 1f);
+                ? new Vec3(first, 0f, second + 0.86f, 1f)
+                : new Vec3(first, second, 0.02f, 1f);
         }
 
         private void RadialBurst(string[] candidates, Vec3 center, float radius, int count)

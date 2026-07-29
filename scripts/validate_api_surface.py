@@ -36,6 +36,7 @@ REQUIRED = {
             "FindAgentWithIndex": [["int"]],
         },
         "TaleWorlds.MountAndBlade.Agent": {
+            "get_Main": [[]],
             "TeleportToPosition": [["TaleWorlds.Library.Vec3"]],
             "SetActionChannel": [["int", "ref TaleWorlds.MountAndBlade.ActionIndexCache", "bool", "TaleWorlds.MountAndBlade.AnimFlags", "float", "float", "float", "float", "float", "bool", "float", "int", "bool"]],
             "SetCurrentActionProgress": [["int", "float"]],
@@ -70,7 +71,8 @@ REQUIRED = {
             "GetAttackCollisionDataForDebugPurpose": None,
         },
         "TaleWorlds.MountAndBlade.ActionIndexCache": {
-            "__fields__": ["act_strike_bent_over"],
+            "Create": [["string"]],
+            "get_Index": [[]],
         },
     },
     "TaleWorlds.Engine.dll": {
@@ -84,6 +86,13 @@ REQUIRED = {
         "TaleWorlds.Engine.GameEntity": {
             "CreateEmpty": [["TaleWorlds.Engine.Scene", "bool", "bool", "bool"]],
             "SetContourColor": [["System.Nullable`1<uint>", "bool"]],
+            "SetFactorColor": [["uint"]],
+            "SetAlpha": [["float"]],
+            "SetVisibilityExcludeParents": [["bool"]],
+            "SetReadyToRender": [["bool"]],
+            "set_EntityVisibilityFlags": [["TaleWorlds.Engine.EntityVisibilityFlags"]],
+            "SetDoNotCheckVisibility": [["bool"]],
+            "SetForceNotAffectedBySeason": [["bool"]],
             "AddMesh": None,
             "Remove": [["int"]],
         },
@@ -91,8 +100,15 @@ REQUIRED = {
             "GetFromResource": None,
             "CreateMeshWithMaterial": None,
             "GetMaterial": None,
+            "set_Name": [["string"]],
             "set_Color": None,
             "set_Color2": None,
+            "set_CullingMode": [["TaleWorlds.Engine.MBMeshCullingMode"]],
+            "SetColorAndStroke": [["uint", "uint", "bool"]],
+            "SetColorAlpha": [["uint"]],
+            "SetMeshRenderOrder": [["int"]],
+            "SetVisibilityMask": [["TaleWorlds.Engine.VisibilityMaskFlags"]],
+            "SetAsNotEffectedBySeason": [[]],
             "LockEditDataWrite": None,
             "AddTriangle": None,
             "UnlockEditDataWrite": None,
@@ -103,6 +119,15 @@ REQUIRED = {
         },
         "TaleWorlds.Engine.ParticleSystem": {
             "CreateParticleSystemAttachedToEntity": None,
+        },
+        "TaleWorlds.Engine.MBMeshCullingMode": {
+            "__fields__": ["None"],
+        },
+        "TaleWorlds.Engine.VisibilityMaskFlags": {
+            "__fields__": ["Final"],
+        },
+        "TaleWorlds.Engine.EntityVisibilityFlags": {
+            "__fields__": ["NoShadow"],
         },
     },
     "TaleWorlds.InputSystem.dll": {

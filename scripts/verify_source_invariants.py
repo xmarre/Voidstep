@@ -26,6 +26,8 @@ targeting = files.get('TargetingService.cs', '')
 teleport_validator = files.get('TeleportValidator.cs', '')
 windblast = files.get('WindblastController.cs', '')
 domino = files.get('DominoLinkService.cs', '')
+animation = files.get('AnimationController.cs', '')
+cast_animation_patch = files.get('AbilityCastAnimationPatch.cs', '')
 mirror_tests = (root / 'scripts' / 'run_logic_mirror_tests.py').read_text(encoding='utf-8')
 
 time_release_guard = re.search(
@@ -66,6 +68,25 @@ hot_path_order = re.search(
     input_bindings,
     re.DOTALL)
 
+domino_hit_callback = re.search(
+    r'public void OnAgentHit\(.*?\n\s*\}\n\n\s*public void OnAgentRemoved',
+    domino,
+    re.DOTALL)
+domino_removed_callback = re.search(
+    r'public void OnAgentRemoved\(.*?\n\s*\}\n\n\s*public void OnAgentDeleted',
+    domino,
+    re.DOTALL)
+domino_hit_text = domino_hit_callback.group(0) if domino_hit_callback else ''
+domino_removed_text = domino_removed_callback.group(0) if domino_removed_callback else ''
+
+cleave_partial_ownership = re.search(
+    r'SetCurrentActionSpeed\(1, 0\.01f\);\s*'
+    r'_cleaveActor = actor;\s*'
+    r'_cleaveActionOwned = true;\s*'
+    r'actor\.SetCurrentActionProgress\(1, 0f\);',
+    animation,
+    re.DOTALL)
+
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
     'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in mission_behavior and 'EnsureInitialized("EarlyStart")' in mission_behavior,
@@ -97,10 +118,15 @@ checks = {
     'camera aligned targeting': 'GetCameraFrame()' in targeting and 'GetCameraRayDirection' in targeting,
     'projectile entities are skipped during Blink ray targeting': 'IsTransientProjectileEntity' in targeting and 'BodyFlags.MissileOnly' in targeting and 'BodyFlags.DroppedItem' in targeting and 'MaximumIgnoredRayHits' in targeting,
     'projectile name filtering is allocation free': 'ProjectileNameFragments' in targeting and 'StringComparison.OrdinalIgnoreCase' in targeting and 'ToLowerInvariant()' not in targeting,
-    'procedural cast sigil replaces arrow geometry': 'Mesh.CreateMeshWithMaterial' in effects and 'private static void AddRing' in effects and 'entity.AddMesh(mesh, false)' in effects and 'entity.AddMesh(donor' not in effects and 'entity.AddMesh(source' not in effects,
-    'failed cast sigil donors release local ownership': 'Mesh mesh = null;' in effects and 'mesh = null;' in effects,
-    'cast sigil color updates own mesh and contour': '_markerMeshes.TryGetValue(marker, out var mesh)' in effects and 'mesh.Color = color;' in effects and 'marker.SetContourColor(color, true)' in effects,
+    'cast reticle is generated and never attaches donor geometry': 'Mesh.CreateMeshWithMaterial' in effects and 'AddRadialSpikes' in effects and 'AddVerticalDiamond' in effects and 'entity.AddMesh(mesh, false)' in effects and 'entity.AddMesh(donor' not in effects and 'entity.AddMesh(source' not in effects,
+    'cast reticle is large and forced visible': '1.02f, 0.82f, 36' in effects and 'MBMeshCullingMode.None' in effects and 'SetMeshRenderOrder(1000)' in effects and 'EntityVisibilityFlags.NoShadow' in effects and 'SetDoNotCheckVisibility(true)' in effects,
+    'failed cast reticle donors release local ownership': 'Mesh mesh = null;' in effects and 'mesh = null;' in effects,
+    'cast reticle color updates mesh contour and factor': '_markerMeshes.TryGetValue(marker, out var mesh)' in effects and 'mesh.SetColorAndStroke(color, color, true)' in effects and 'marker.SetContourColor(color, true)' in effects and 'marker.SetFactorColor(color)' in effects,
     'marker particle count respects effect intensity': 'var intensity = VoidstepSettings.Current.EffectIntensity;' in effects and 'var offsetCount = intensity >= 1f ? MarkerOffsets.Length : 1;' in effects,
+    'successful activations play logged native cast actions': '[HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.TryActivate))]' in cast_animation_patch and 'AnimationController.PlayAbilityCast(actor, ability, __instance.Logger);' in cast_animation_patch and 'internal VoidstepLogger Logger => _context.Logger;' in ability_manager and 'SetActionChannel(1, action)' in animation,
+    'dark vision disable skips cast action': 'out bool __state' in cast_animation_patch and 'ability == AbilityId.DarkVision && __instance.IsDarkVisionActive' in cast_animation_patch and 'if (!__result || __state) return;' in cast_animation_patch and 'internal bool IsDarkVisionActive => _darkVision.Active;' in ability_manager,
+    'cleave execution owns speed before progress initialization': cleave_partial_ownership is not None and 'ResetActionSpeed(actor);' in animation,
+    'cleave execution owns and restores action progress': 'BeginCleave(actor);' in cleave and 'SetCleaveProgress(_actor, progress);' in cleave and 'SetCurrentActionProgress(1' in animation and 'ResetActionSpeed(_actor);' in cleave,
     'all six abilities expose cast feedback': 'CreateWorldMarker' in ability_manager and 'CreateWorldMarker' in blink and 'CreateWorldMarker' in domino and '_effects.Windblast' in windblast and '_effects.BendTime' in ability_manager and 'SetContourColor' in dark_vision,
     'blink targeting freezes mission time': 'new Mission.TimeSpeedRequest(0f, AimTimeRequestId)' in blink and 'MBCommon.GetApplicationTime()' in blink and 'realDt' in blink,
     'blink preview bounds fallback work': 'PreviewFallbackCandidateBudget = 24' in blink and 'fallbackCandidateBudget' in teleport_validator and 'fallbackLimit' in teleport_validator,
@@ -117,13 +143,17 @@ checks = {
     'cleave refunds paid pre-effect failures': ability_manager.count('RollbackPayment(AbilityId.VoidstepCleave)') >= 2,
     'cleave schedules all candidates before successful cap': uncapped_cleave_schedule is not None and '_successfulHits >= _maximumTargets' in cleave,
     'cleave uses public swing damage API': 'weapon.GetModifiedSwingDamageForCurrentUsage()' in blow_factory and 'GetSwingDamage' not in blow_factory,
-    'cleave does not force victim action': 'act_strike_bent_over' not in files.get('AnimationController.cs','') and 'SetActionChannel' not in files.get('AnimationController.cs',''),
+    'cleave animation never uses victim reaction action': 'act_strike_bent_over' not in animation and 'act_release_heavy_thrown' in animation,
     'per-cast hit registry': 'HitRegistry<int> _hits' in cleave,
     'cleave deterministic cleanup': '_hits.Clear();' in cleave and '_snapshotSchedule.Clear();' in cleave,
     'time request ownership retained through cleanup': '_cleanupPending' in time_control and '_ownership.TryGet(_token, out requestId)' in time_control and time_release_guard is not None and time_control.count('RemoveTimeSpeedRequest(') == 1,
     'blink request ownership retained through cleanup': '_timeCleanupPending' in blink and blink_release_guard is not None and blink.count('RemoveTimeSpeedRequest(') == 1,
     'domino index storage': 'Dictionary<int, Agent> _linked' in domino and 'FindAgentWithIndex' in domino,
-    'domino recursion guard': 'RecursionGuard<int>' in domino and '(blow.BlowFlag & BlowFlags.NoSound) != 0' in domino,
+    'domino hit callback only queues propagation': domino_hit_callback is not None and '_pending.Add(new PendingPropagation' in domino_hit_text and 'ApplyDirectBlow' not in domino_hit_text,
+    'domino removal callback only queues propagation': domino_removed_callback is not None and '_pending.Add(new PendingPropagation' in domino_removed_text and 'ApplyDirectBlow' not in domino_removed_text,
+    'domino propagation dispatches after callback on mission tick': 'DispatchPendingPropagations();' in domino and '_blows.ApplyDirectBlow' in domino and 'after the native hit callback completed' in domino,
+    'domino propagated deaths cannot recurse': '_propagatedDeathSuppression' in domino and 'ConsumePropagatedDeathSuppression' in domino and 'PropagatedDeathSuppressionTicks' in domino and 'var mayKill = entry.Lethal || entry.Damage >= Math.Ceiling(target.Health);' in domino,
+    'domino propagated callbacks remain tagged': '(blow.BlowFlag & BlowFlags.NoSound) != 0' in domino and 'BlowFlags.NoSound' in domino,
     'dark vision immediate and throttled': 'Refresh();' in dark_vision and 'DarkVisionRefreshInterval' in dark_vision,
     'dark vision counts successful contours only': 'if (TrySetContour(agent, color))' in dark_vision and 'private static bool ClearContour' in dark_vision and 'if (ClearContour(' in dark_vision,
     'no campaign behavior': 'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,

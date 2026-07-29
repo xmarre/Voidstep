@@ -42,7 +42,7 @@ namespace Voidstep
             _context = context;
             _targeting = new TargetingService(context.Mission);
             _teleportValidator = new TeleportValidator(context.Mission);
-            _animation = new AnimationController();
+            _animation = new AnimationController(context.Logger);
             _effects = new EffectController(context.Mission, context.Logger);
             _blows = new BlowFactory(context.Mission, context.Logger);
             _hud = new HudService();
@@ -59,6 +59,8 @@ namespace Voidstep
         public AbilityPhase Phase => _state.Phase;
         public AbilityId ActiveAbility => _state.Ability;
         public bool IsBusy => _state.IsCasting;
+        internal bool IsDarkVisionActive => _darkVision.Active;
+        internal VoidstepLogger Logger => _context.Logger;
 
         public void Tick(float dt)
         {

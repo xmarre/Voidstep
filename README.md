@@ -6,13 +6,14 @@ Mission-scoped single-player combat abilities for **Mount & Blade II: Bannerlord
 
 ## Features
 
-- **Voidstep Cleave** teleports the player to a collision-validated position and performs a timed 340-degree rotating melee sweep. It captures the wielded melee weapon before teleporting and applies one calculated native blow to every eligible enemy reached by the sweep.
-- **Blink** uses a two-stage camera-aimed flow with a procedural green/red casting sigil, terrain and wall checks, enemy-relative placement, complete mission-time freeze during targeting and safe cancellation.
+- **Voidstep Cleave** teleports the player to a collision-validated position and performs a timed 340-degree rotating melee sweep. It captures the wielded melee weapon before teleporting, drives a native execution action through the sweep and applies one calculated native blow to every eligible enemy reached by the sweep.
+- **Blink** uses a two-stage camera-aimed flow with a large green/red placement reticle, terrain and wall checks, enemy-relative placement, complete mission-time freeze during targeting and safe cancellation.
 - **Windblast** processes a camera-aligned forward cone once per cast, applying centre-weighted force, distance falloff, knockback, optional knockdown and optional damage to individual agents.
 - **Bend Time** uses a Voidstep-owned Bannerlord mission time-speed request and compensates the controlled player and mount so they remain materially faster than the slowed outside world.
-- **Domino** stores linked human-agent indices, displays procedural casting sigils, propagates damage or death under a recursion guard and removes invalid members deterministically.
+- **Domino** stores linked human-agent indices, displays large target reticles and defers propagated damage or death until the native hit/removal callback has completed.
 - **Dark Vision** immediately highlights nearby hostiles and refreshes them at a configurable low frequency. It never performs a full-agent scan every frame and clears every contour it applies.
 - **Void Energy** is mission-local, configurable, regenerating and supports cooldown-only or unlimited modes.
+- **Native cast actions** play on every successful ability activation, with suitable quick, heavy, vision and mounted fallbacks.
 
 ## Controls
 
@@ -45,17 +46,17 @@ Available modifier combinations are None, Control, Alt, Shift and their combinat
 
 Targeting prioritises a hostile agent in the camera aiming cone, then the aimed scene position, then a short forward fallback. Destination validation checks mission boundaries, terrain height and normal, water level, blocker navmeshes, nearby navigation geometry, sealed collision, standing clearance, nearby agents and mounts, and eight cliff probes. It searches the complete bounded fallback field, including outer rings, when the exact point is invalid.
 
-The ability captures the currently wielded melee weapon before any teleport or delayed work. A procedural double-ring sigil shows the chosen destination during wind-up. The active sweep starts from the arrival-facing direction and rotates the actor through the configured arc without forcing or replacing Bannerlord's weapon-action channels. Each target's horizontal angle is mapped to sweep progress, and each accepted target receives a separately registered native melee blow using the captured weapon.
+The ability captures the currently wielded melee weapon before any teleport or delayed work. A large no-cull reticle shows the chosen destination during wind-up. After arrival, a native heavy execution action is paused and advanced by the same progress value that rotates the actor and schedules targets. Each accepted target receives a separately registered native melee blow using the captured weapon. Cleanup restores only the action speed owned by the sweep.
 
 Live targeting allows an enemy entering an unpassed section of the sweep to be hit. Snapshot mode stores only agent indices and expected progress. A per-cast registry enforces one successful hit per agent and applies the configured whole-cast target cap.
 
 ### Blink
 
-Press once to enter aiming and display a procedural double-ring casting sigil. Green means the current validated destination is usable; red means validation failed. Mission time is frozen while targeting, while camera movement, preview updates and the confirmation chord remain responsive through application-time updates. Move the camera to reposition the target, then press the Blink chord again to confirm. Enemy-relative Blink places the requested point beyond the target and lets the common teleport validator select a safe nearby fallback. The owned zero-speed request is removed on confirmation, cancellation, timeout, death, replacement or mission end.
+Press once to enter aiming and display a large placement reticle containing two ground rings, a vertical ring, directional spikes and a raised diamond. Green means the current validated destination is usable; red means validation failed. Mission time is frozen while targeting, while camera movement, preview updates and the confirmation chord remain responsive through application-time updates. Move the camera to reposition the target, then press the Blink chord again to confirm. Enemy-relative Blink places the requested point beyond the target and lets the common teleport validator select a safe nearby fallback. The owned zero-speed request is removed on confirmation, cancellation, timeout, death, replacement or mission end.
 
 ### Windblast
 
-Windblast uses a nearby-enemy query only when cast. The cone follows camera aim rather than only actor facing. Force is strongest near the cone centre and near the player. Each target is processed once. Mount handling is configurable. A radial cast pulse identifies the activation before target impacts resolve.
+Windblast uses a nearby-enemy query only when cast. The cone follows camera aim rather than only actor facing. Force is strongest near the cone centre and near the player. Each target is processed once. Mount handling is configurable. A heavy native cast action and radial cast pulse identify activation before target impacts resolve.
 
 ### Bend Time
 
@@ -63,7 +64,7 @@ Bend Time adds one `Mission.TimeSpeedRequest` and removes it by its own request 
 
 ### Domino
 
-Domino links the nearest valid hostile humans up to the configured limit. Links are stored as agent indices and resolved through `Mission.FindAgentWithIndex`. Every linked target receives a procedural double-ring casting sigil; missiles and scene arrow entities are never target candidates. Propagated blows retain the player as affector where the API permits. A per-mission recursion guard blocks propagation from recursively creating another propagation pass.
+Domino links the nearest valid hostile humans up to the configured limit. Links are stored as agent indices and resolved through `Mission.FindAgentWithIndex`. Every linked target receives a large casting reticle; missiles and scene arrow entities are never target candidates. A hit or removal callback only queues identity-checked propagation records. The actual `RegisterBlow` path runs on the following mission tick after Bannerlord's native callback has unwound. Propagated hits remain tagged, and propagated lethal removals are consumed by a short-lived suppression ledger so they cannot start another death chain.
 
 ### Dark Vision
 
@@ -107,11 +108,11 @@ MCM exposes the six per-ability modifier combinations, master switch, Void Energ
 
 ## Presentation approach
 
-Voidstep does not force a fabricated or victim-reaction animation onto the player. Ability presentation uses procedural double-ring sigils, particle clusters, radial cast pulses, validated teleport phases, actor rotation, weapon trails, impacts, sound and angle-synchronised native blows. Arrow resources provide only a guaranteed material for generated sigil geometry; no arrow mesh is attached or rendered as a cast indicator.
+Every successful ability activation requests a suitable native Bannerlord upper-body action. Cleave additionally owns a native heavy-release action for the duration of its sweep and drives its progress in sync with rotation and target timing. Placement feedback uses generated geometry with no back-face culling, high render order, synchronized mesh/factor/contour colours and optional particles. Arrow resources provide only a material donor; no arrow mesh is attached or rendered.
 
 ## Diagnostics
 
-Enable **Debug logging** in MCM when testing. The log records the resolved native chord for every accepted input and every ability stage, including camera aim, selected destination, validation result, teleport completion, candidate counts, registered Cleave hits, Windblast hits, Bend Time request acquisition, Domino links and Dark Vision highlight counts.
+Enable **Debug logging** in MCM when testing. The log records the resolved native chord for every accepted input and every ability stage, including selected native cast action, camera aim, selected destination, validation result, reticle construction, teleport completion, queued and dispatched Domino propagations, candidate counts, registered Cleave hits, Windblast hits, Bend Time request acquisition and Dark Vision highlight counts.
 
 Primary log location:
 
@@ -125,6 +126,7 @@ Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log
 - No campaign-map tick is used.
 - Harmony masks only the configured ability primary key while its complete modifier chord is active in a live mission.
 - Boolean key state and movement-axis reads are both covered, so a reserved chord cannot leak into another native action.
+- Domino never registers a propagated blow from inside Bannerlord's native hit or removal callbacks.
 - No static collection stores mission agents.
 - Runtime state is created per mission and discarded on mission end.
 - Native and TOR particle lookups are optional and non-fatal.
@@ -135,7 +137,7 @@ Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log
 - Windblast projectile deflection is disabled. `Mission.MissilesList` is readable, while a safe public per-missile velocity mutation path was not found in the audited 1.3.15 surface.
 - The camera option currently uses an ownership-checked FOV emphasis pulse. It does not call a view-layer camera-shake API.
 - Dark Vision highlights hostile agents. Interactable highlighting remains reserved because no bounded, mission-local interactable query was verified in the supplied API set.
-- Cleave currently uses procedural rotation and effects rather than an original exported skeletal animation.
+- Cast and Cleave presentation uses existing native Bannerlord actions rather than a newly exported custom skeleton animation asset.
 
 ## Building
 
@@ -167,11 +169,3 @@ docs/                       Architecture, API audit, testing and limitations
 scripts/                    Source packaging and independent validation tools
 references/                 Hash manifest; proprietary runtime files are ignored
 ```
-
-## Credits
-
-Created for the `xmarre` Bannerlord mod collection. TaleWorlds owns Mount & Blade II: Bannerlord. The Old Realms team owns its project and assets. Voidstep contains no Dishonored assets, names, sounds, textures or proprietary visual designs.
-
-## Licence
-
-MIT. See `LICENSE`.

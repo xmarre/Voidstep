@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.8
+
+- Fixed Domino re-entering Bannerlord's native melee-hit callback by deferring propagated blows until the following mission tick.
+- Added identity-checked pending propagation records so removed agents and reused agent indices cannot receive stale Domino damage.
+- Prevented propagated Domino deaths from starting another death-propagation chain.
+- Added native upper-body cast actions for all six abilities, including separate quick, heavy, vision and mounted fallbacks.
+- Added a sweep-synchronised Voidstep Cleave execution action with owned action-speed and progress cleanup.
+- Replaced the subtle casting sigil with a large no-cull placement reticle containing two ground rings, a vertical ring, eight directional spikes and a raised diamond.
+- Forced placement reticles to high render order with no shadow, no season tint and synchronized contour, factor and mesh colours.
+- Added locked API checks and regression tests for deferred Domino propagation, cast actions, Cleave action ownership and reticle visibility.
+
 ## 1.0.7
 
 - Replaced arrow-shaped Blink, Cleave and Domino markers with procedural double-ring casting sigils and persistent particle clusters.

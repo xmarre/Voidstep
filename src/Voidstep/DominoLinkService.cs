@@ -4,12 +4,13 @@ using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
-using Voidstep.Core;
 
 namespace Voidstep
 {
     internal sealed class DominoLinkService
     {
+        private const int PropagatedDeathSuppressionTicks = 4;
+
         private readonly Mission _mission;
         private readonly BlowFactory _blows;
         private readonly EffectController _effects;
@@ -18,11 +19,16 @@ namespace Voidstep
         private readonly List<AgentDistance> _sorted = new List<AgentDistance>(32);
         private readonly Dictionary<int, Agent> _linked = new Dictionary<int, Agent>();
         private readonly Dictionary<int, GameEntity> _markers = new Dictionary<int, GameEntity>();
-        private readonly RecursionGuard<int> _guard = new RecursionGuard<int>();
         private readonly List<int> _removeBuffer = new List<int>(16);
         private readonly List<int> _snapshotBuffer = new List<int>(32);
         private readonly List<GameEntity> _markerBuffer = new List<GameEntity>(32);
+        private readonly List<PendingPropagation> _pending = new List<PendingPropagation>(32);
+        private readonly List<PendingPropagation> _dispatchBuffer = new List<PendingPropagation>(32);
+        private readonly Dictionary<int, int> _propagatedDeathSuppression = new Dictionary<int, int>();
+        private readonly List<int> _suppressionRemoveBuffer = new List<int>(16);
         private Agent _player;
+        private int _tickSerial;
+        private bool _dispatching;
 
         public DominoLinkService(Mission mission, BlowFactory blows, EffectController effects, VoidstepLogger logger)
         {
@@ -69,6 +75,10 @@ namespace Voidstep
 
         public void Tick()
         {
+            _tickSerial++;
+            ExpirePropagationSuppressions();
+            DispatchPendingPropagations();
+
             if (_linked.Count == 0) return;
             _removeBuffer.Clear();
             foreach (var pair in _linked)
@@ -92,59 +102,66 @@ namespace Voidstep
             if (!settings.DominoPropagateDamage || affectedAgent == null || affectorAgent != _player || !MatchesLinkedAgent(affectedAgent))
                 return;
 
-            // Propagated Domino blows are tagged NoSound. The engine can deliver
-            // OnAgentHit after RegisterBlow returns, so the synchronous guard alone
-            // is insufficient to identify a delayed propagated callback.
+            // Never register a new blow while Bannerlord is still inside Agent.HandleBlow.
+            // Re-entering the native melee callback corrupts its by-ref collision state and
+            // can surface as an AccessViolationException from MonoMod.Utils.
             if ((blow.BlowFlag & BlowFlags.NoSound) != 0)
                 return;
 
-            using (var lease = _guard.Enter(1))
+            var damage = Math.Max(0, (int)Math.Round(blow.InflictedDamage * settings.DominoDamageFactor));
+            var flags = BlowFlags.NoSound;
+            if (settings.DominoPropagateKnockdown && (blow.BlowFlag & BlowFlags.KnockDown) != 0)
+                flags |= BlowFlags.KnockDown;
+            var magnitude = Math.Max(1f, blow.BaseMagnitude * settings.DominoDamageFactor);
+
+            CopyLinkedIds();
+            var queued = 0;
+            for (var i = 0; i < _snapshotBuffer.Count; i++)
             {
-                if (lease == null) return;
-                var damage = Math.Max(0, (int)Math.Round(blow.InflictedDamage * settings.DominoDamageFactor));
-                var flags = BlowFlags.NoSound;
-                if (settings.DominoPropagateKnockdown && (blow.BlowFlag & BlowFlags.KnockDown) != 0)
-                    flags |= BlowFlags.KnockDown;
-                CopyLinkedIds();
-                for (var i = 0; i < _snapshotBuffer.Count; i++)
-                {
-                    var id = _snapshotBuffer[i];
-                    if (id == affectedAgent.Index) continue;
-                    if (!_linked.TryGetValue(id, out var identity)) continue;
-                    var target = ResolveLinkedAgent(id, identity);
-                    if (!IsLinkedAgentValid(target)) { Remove(id); continue; }
-                    _blows.ApplyDirectBlow(_player, target, damage, blow.DamageType, flags, Math.Max(1f, blow.BaseMagnitude * settings.DominoDamageFactor));
-                }
+                var id = _snapshotBuffer[i];
+                if (id == affectedAgent.Index) continue;
+                if (!_linked.TryGetValue(id, out var identity)) continue;
+                var target = ResolveLinkedAgent(id, identity);
+                if (!IsLinkedAgentValid(target)) { Remove(id); continue; }
+                _pending.Add(new PendingPropagation(id, identity, damage, blow.DamageType, flags, magnitude, false));
+                queued++;
             }
+            if (queued > 0)
+                _logger.Debug($"Queued Domino damage propagation source={affectedAgent.Index}, targets={queued}, damage={damage}.");
         }
 
         public void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState state)
         {
             if (affectedAgent == null || !MatchesLinkedAgent(affectedAgent))
                 return;
-            var shouldPropagateDeath = VoidstepSettings.Current.DominoPropagateDeath && affectorAgent == _player;
+
+            var propagatedRemoval = ConsumePropagatedDeathSuppression(affectedAgent.Index);
+            var shouldPropagateDeath = !propagatedRemoval && VoidstepSettings.Current.DominoPropagateDeath && affectorAgent == _player;
             Remove(affectedAgent.Index);
             if (!shouldPropagateDeath || _player == null || !_player.IsActive())
                 return;
 
-            using (var lease = _guard.Enter(1))
+            CopyLinkedIds();
+            var queued = 0;
+            for (var i = 0; i < _snapshotBuffer.Count; i++)
             {
-                if (lease == null) return;
-                CopyLinkedIds();
-                for (var i = 0; i < _snapshotBuffer.Count; i++)
-                {
-                    var id = _snapshotBuffer[i];
-                    if (!_linked.TryGetValue(id, out var identity)) continue;
-                    var target = ResolveLinkedAgent(id, identity);
-                    if (!IsLinkedAgentValid(target)) { Remove(id); continue; }
-                    _blows.ApplyDirectBlow(_player, target, (int)Math.Ceiling(target.Health + 1f), DamageTypes.Blunt, BlowFlags.NoSound, target.Health + 1f);
-                }
+                var id = _snapshotBuffer[i];
+                if (!_linked.TryGetValue(id, out var identity)) continue;
+                var target = ResolveLinkedAgent(id, identity);
+                if (!IsLinkedAgentValid(target)) { Remove(id); continue; }
+                var lethalDamage = (int)Math.Ceiling(target.Health + 1f);
+                _pending.Add(new PendingPropagation(id, identity, lethalDamage, DamageTypes.Blunt, BlowFlags.NoSound, target.Health + 1f, true));
+                queued++;
             }
+            if (queued > 0)
+                _logger.Debug($"Queued Domino death propagation source={affectedAgent.Index}, targets={queued}.");
         }
 
         public void OnAgentDeleted(Agent agent)
         {
-            if (agent != null && MatchesLinkedAgent(agent)) Remove(agent.Index);
+            if (agent == null) return;
+            _propagatedDeathSuppression.Remove(agent.Index);
+            if (MatchesLinkedAgent(agent)) Remove(agent.Index);
         }
 
         public void Clear()
@@ -157,7 +174,76 @@ namespace Voidstep
             _linked.Clear();
             _nearby.Clear();
             _sorted.Clear();
+            _pending.Clear();
+            _dispatchBuffer.Clear();
+            _propagatedDeathSuppression.Clear();
+            _suppressionRemoveBuffer.Clear();
+            _dispatching = false;
             _player = null;
+        }
+
+        private void DispatchPendingPropagations()
+        {
+            if (_dispatching || _pending.Count == 0 || _player == null || !_player.IsActive())
+                return;
+
+            _dispatching = true;
+            _dispatchBuffer.Clear();
+            for (var i = 0; i < _pending.Count; i++)
+                _dispatchBuffer.Add(_pending[i]);
+            _pending.Clear();
+
+            var applied = 0;
+            try
+            {
+                for (var i = 0; i < _dispatchBuffer.Count; i++)
+                {
+                    var entry = _dispatchBuffer[i];
+                    if (!_linked.TryGetValue(entry.TargetId, out var identity) || !ReferenceEquals(identity, entry.Identity))
+                        continue;
+                    var target = ResolveLinkedAgent(entry.TargetId, identity);
+                    if (!IsLinkedAgentValid(target)) { Remove(entry.TargetId); continue; }
+
+                    var mayKill = entry.Lethal || entry.Damage >= Math.Ceiling(target.Health);
+                    if (mayKill)
+                        _propagatedDeathSuppression[entry.TargetId] = _tickSerial + PropagatedDeathSuppressionTicks;
+                    if (_blows.ApplyDirectBlow(_player, target, entry.Damage, entry.DamageType, entry.Flags, entry.Magnitude))
+                    {
+                        applied++;
+                    }
+                    else if (mayKill)
+                    {
+                        _propagatedDeathSuppression.Remove(entry.TargetId);
+                    }
+                }
+            }
+            finally
+            {
+                _dispatchBuffer.Clear();
+                _dispatching = false;
+            }
+
+            if (applied > 0)
+                _logger.Debug($"Dispatched {applied} deferred Domino propagation blow{(applied == 1 ? string.Empty : "s")} after the native hit callback completed.");
+        }
+
+        private void ExpirePropagationSuppressions()
+        {
+            if (_propagatedDeathSuppression.Count == 0) return;
+            _suppressionRemoveBuffer.Clear();
+            foreach (var pair in _propagatedDeathSuppression)
+                if (pair.Value < _tickSerial) _suppressionRemoveBuffer.Add(pair.Key);
+            for (var i = 0; i < _suppressionRemoveBuffer.Count; i++)
+                _propagatedDeathSuppression.Remove(_suppressionRemoveBuffer[i]);
+            _suppressionRemoveBuffer.Clear();
+        }
+
+        private bool ConsumePropagatedDeathSuppression(int agentId)
+        {
+            if (!_propagatedDeathSuppression.TryGetValue(agentId, out var expiry))
+                return false;
+            _propagatedDeathSuppression.Remove(agentId);
+            return expiry >= _tickSerial;
         }
 
         private void CopyLinkedIds()
@@ -194,6 +280,28 @@ namespace Voidstep
         {
             var distance = left.DistanceSquared.CompareTo(right.DistanceSquared);
             return distance != 0 ? distance : left.Agent.Index.CompareTo(right.Agent.Index);
+        }
+
+        private readonly struct PendingPropagation
+        {
+            public PendingPropagation(int targetId, Agent identity, int damage, DamageTypes damageType, BlowFlags flags, float magnitude, bool lethal)
+            {
+                TargetId = targetId;
+                Identity = identity;
+                Damage = damage;
+                DamageType = damageType;
+                Flags = flags;
+                Magnitude = magnitude;
+                Lethal = lethal;
+            }
+
+            public int TargetId { get; }
+            public Agent Identity { get; }
+            public int Damage { get; }
+            public DamageTypes DamageType { get; }
+            public BlowFlags Flags { get; }
+            public float Magnitude { get; }
+            public bool Lethal { get; }
         }
 
         private readonly struct AgentDistance

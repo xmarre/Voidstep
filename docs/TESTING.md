@@ -13,9 +13,16 @@
 - destination fallback ordering
 - resource modes and costs
 - cooldown transitions
-- Domino recursion blocking
 - time ownership tokens
 - cancellation cleanup
+
+The independent Python mirror additionally covers:
+
+- Domino callbacks enqueue without dispatching
+- Domino propagation dispatches only on the following mission tick
+- propagated NoSound hits are not requeued
+- propagated lethal removals cannot start another death chain
+- plain formation-number passthrough without the configured modifier
 
 Run with:
 
@@ -54,9 +61,14 @@ A release must record pass/fail and logs for:
 
 A release must record pass/fail and logs for:
 
-- Blink displays a double-ring casting sigil at the current destination, never an arrow model
-- Domino displays the same casting-sigil language above each linked human target and never marks missiles or arrow entities
-- Voidstep Cleave displays a destination sigil during wind-up
+- every successful ability activation starts a visible native cast action
+- mounted activation uses a valid mounted action fallback and does not dismount the player
+- Blink displays a large green/red placement reticle with two ground rings, a vertical ring, directional spikes and a raised diamond
+- Blink reticle remains visible on bright terrain, dark terrain, slopes and around nearby props
+- Domino displays the same reticle language above each linked human target and never marks missiles or arrow entities
+- Voidstep Cleave displays a placement reticle during wind-up
+- Voidstep Cleave plays a visible execution action throughout the 0.72-second sweep while preserving the captured melee weapon
+- Cleave action progress tracks sweep progress and returns to normal action speed on completion, interruption and cleanup
 - Windblast and Bend Time display visible radial cast pulses
 - Dark Vision immediately applies hostile-agent contours
 - Blink destination selection freezes mission actors, missiles and animation while camera movement, preview movement and the confirmation chord remain responsive
@@ -66,6 +78,20 @@ A release must record pass/fail and logs for:
 - mounted Bend Time compensates the controlled mount's speed, maneuver and acceleration
 - ending Bend Time restores only values still equal to Voidstep's applied compensation
 - player death, replacement, mission end and disabling Voidstep clean up every owned time request and compensation value
+
+## Required Domino callback-safety matrix
+
+A release must record pass/fail and logs for:
+
+- striking one linked target queues propagation but does not register another blow inside `OnAgentHit`
+- queued damage is applied to the other linked targets on the following mission tick
+- repeated strikes and rapid multi-hit weapons do not produce protected-memory or native callback crashes
+- propagated NoSound hit callbacks never enqueue a second propagation pass
+- killing a linked target queues lethal propagation without registering blows inside `OnAgentRemoved`
+- a propagated lethal removal is consumed by the suppression ledger and cannot start another death chain
+- deleting or removing a queued target before dispatch safely drops the stale record
+- agent-index reuse cannot redirect a queued propagation because identity references must still match
+- clearing Domino, changing player agent, disabling Voidstep and ending the mission discard all pending propagation records
 
 ## Required Bannerlord runtime matrix
 

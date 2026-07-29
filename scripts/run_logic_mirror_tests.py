@@ -7,6 +7,7 @@ CW = -1
 CCW = 1
 CONTROL = 1
 ALT = 2
+NO_SOUND = 1
 SELECT_ORDER_1 = 69
 SELECT_ORDER_6 = 74
 
@@ -41,6 +42,37 @@ def modifier_chord_matches(required, current, primary_modifier=0):
 def should_suppress_mapped_order(game_key_id, required, current):
     mapped = SELECT_ORDER_1 <= game_key_id <= SELECT_ORDER_6
     return mapped and modifier_chord_matches(required, current)
+
+class DeferredDominoMirror:
+    def __init__(self):
+        self.tick_serial = 0
+        self.pending = []
+        self.dispatched = []
+        self.death_suppression = {}
+
+    def on_hit(self, source, targets, flags=0, lethal=False):
+        if flags & NO_SOUND:
+            return
+        for target in targets:
+            if target != source:
+                self.pending.append((target, lethal))
+
+    def tick(self):
+        self.tick_serial += 1
+        current = self.pending
+        self.pending = []
+        for target, lethal in current:
+            if lethal:
+                self.death_suppression[target] = self.tick_serial + 4
+            self.dispatched.append(target)
+        self.death_suppression = {
+            target: expiry for target, expiry in self.death_suppression.items()
+            if expiry >= self.tick_serial
+        }
+
+    def on_removed(self, target):
+        expiry = self.death_suppression.pop(target, None)
+        return not (expiry is not None and expiry >= self.tick_serial)
 
 class MirrorTests(unittest.TestCase):
     def test_normalise(self):
@@ -119,6 +151,34 @@ class MirrorTests(unittest.TestCase):
         ledger = {1: .25, 2: .5}
         self.assertEqual(ledger.pop(1), .25)
         self.assertIn(2, ledger)
+
+    def test_domino_callback_queues_without_dispatching(self):
+        domino = DeferredDominoMirror()
+        domino.on_hit(source=1, targets=[1, 2, 3])
+        self.assertEqual(domino.pending, [(2, False), (3, False)])
+        self.assertEqual(domino.dispatched, [])
+
+    def test_domino_dispatches_on_next_tick_only(self):
+        domino = DeferredDominoMirror()
+        domino.on_hit(source=1, targets=[2, 3])
+        self.assertEqual(domino.dispatched, [])
+        domino.tick()
+        self.assertEqual(domino.pending, [])
+        self.assertEqual(domino.dispatched, [2, 3])
+
+    def test_propagated_domino_hit_is_not_requeued(self):
+        domino = DeferredDominoMirror()
+        domino.on_hit(source=1, targets=[2, 3], flags=NO_SOUND)
+        domino.tick()
+        self.assertEqual(domino.pending, [])
+        self.assertEqual(domino.dispatched, [])
+
+    def test_propagated_lethal_removal_is_suppressed(self):
+        domino = DeferredDominoMirror()
+        domino.on_hit(source=1, targets=[2], lethal=True)
+        domino.tick()
+        self.assertFalse(domino.on_removed(2))
+        self.assertTrue(domino.on_removed(2))
 
     def test_cancellation_cleanup(self):
         state = {'phase': 'active', 'hits': {7}, 'effects': {1}, 'token': 12}
