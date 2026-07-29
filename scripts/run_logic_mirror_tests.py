@@ -5,6 +5,10 @@ import unittest
 TAU = math.tau
 CW = -1
 CCW = 1
+CONTROL = 1
+ALT = 2
+SELECT_ORDER_1 = 69
+SELECT_ORDER_6 = 74
 
 def norm(a):
     return a % TAU
@@ -30,6 +34,13 @@ def schedule(candidates, start, sweep, direction, radius, maximum=0):
             if distance2 <= radius * radius and inside(start, angle, sweep, direction)]
     rows.sort(key=lambda x: (x[1], x[2], x[3]))
     return rows[:maximum or None]
+
+def modifier_chord_matches(required, current, primary_modifier=0):
+    return (current & ~primary_modifier) == required
+
+def should_suppress_mapped_order(game_key_id, required, current):
+    mapped = SELECT_ORDER_1 <= game_key_id <= SELECT_ORDER_6
+    return mapped and modifier_chord_matches(required, current)
 
 class MirrorTests(unittest.TestCase):
     def test_normalise(self):
@@ -113,6 +124,12 @@ class MirrorTests(unittest.TestCase):
         state = {'phase': 'active', 'hits': {7}, 'effects': {1}, 'token': 12}
         state.update(phase='idle', hits=set(), effects=set(), token=0)
         self.assertEqual(state, {'phase':'idle','hits':set(),'effects':set(),'token':0})
+
+    def test_plain_number_key_remains_native_without_modifier(self):
+        self.assertFalse(should_suppress_mapped_order(SELECT_ORDER_1, CONTROL, 0))
+        self.assertTrue(should_suppress_mapped_order(SELECT_ORDER_1, CONTROL, CONTROL))
+        self.assertFalse(should_suppress_mapped_order(SELECT_ORDER_1, CONTROL, CONTROL | ALT))
+        self.assertFalse(should_suppress_mapped_order(SELECT_ORDER_1 - 1, CONTROL, CONTROL))
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
