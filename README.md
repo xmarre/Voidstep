@@ -60,7 +60,7 @@ Windblast uses a nearby-enemy query only when cast. The cone follows camera aim 
 
 ### Bend Time
 
-Bend Time adds one `Mission.TimeSpeedRequest` and removes it by its own request ID. It does not cache or restore a hard-coded global mission speed. Other active requests therefore remain authoritative after Voidstep releases its request. Player compensation covers locomotion, combat movement, swing, ready, reload, ranged ready/reload and all four action channels. The controlled mount receives speed, maneuver and acceleration compensation. Cleanup restores only values still equal to Voidstep's applied values.
+Bend Time adds one `Mission.TimeSpeedRequest` and removes it by its own request ID. It does not cache or restore a hard-coded global mission speed. Other active requests therefore remain authoritative after Voidstep releases its request. Player compensation covers locomotion, combat movement, swing, ready, reload, ranged ready/reload and Bannerlord's two verified native action channels, 0 and 1. The controlled mount receives speed, maneuver and acceleration compensation. Cleanup restores only values still equal to Voidstep's applied values.
 
 ### Domino
 
@@ -127,6 +127,7 @@ Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log
 - Harmony masks only the configured ability primary key while its complete modifier chord is active in a live mission.
 - Boolean key state and movement-axis reads are both covered, so a reserved chord cannot leak into another native action.
 - Domino never registers a propagated blow from inside Bannerlord's native hit or removal callbacks.
+- Bend Time writes action speed only to Bannerlord's verified native agent channels 0 and 1.
 - No static collection stores mission agents.
 - Runtime state is created per mission and discarded on mission end.
 - Native and TOR particle lookups are optional and non-fatal.

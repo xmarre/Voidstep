@@ -30,6 +30,146 @@ animation = files.get('AnimationController.cs', '')
 cast_animation_patch = files.get('AbilityCastAnimationPatch.cs', '')
 mirror_tests = (root / 'scripts' / 'run_logic_mirror_tests.py').read_text(encoding='utf-8')
 
+
+def mask_csharp_noncode(source):
+    """Mask comments and literals while preserving offsets, braces and newlines."""
+    chars = list(source)
+    masked = list(source)
+    length = len(source)
+    index = 0
+
+    def blank(start, end):
+        for position in range(start, end):
+            if chars[position] not in ('\r', '\n'):
+                masked[position] = ' '
+
+    while index < length:
+        if source.startswith('//', index):
+            end = source.find('\n', index + 2)
+            if end < 0:
+                end = length
+            blank(index, end)
+            index = end
+            continue
+        if source.startswith('/*', index):
+            end = source.find('*/', index + 2)
+            end = length if end < 0 else end + 2
+            blank(index, end)
+            index = end
+            continue
+
+        prefix_length = 0
+        verbatim = False
+        if source.startswith('$@"', index) or source.startswith('@$"', index):
+            prefix_length = 3
+            verbatim = True
+        elif source.startswith('@"', index):
+            prefix_length = 2
+            verbatim = True
+        elif source.startswith('$"', index):
+            prefix_length = 2
+        elif source[index] == '"':
+            prefix_length = 1
+
+        if prefix_length:
+            start = index
+            index += prefix_length
+            while index < length:
+                if verbatim and source.startswith('""', index):
+                    index += 2
+                    continue
+                if source[index] == '"':
+                    index += 1
+                    break
+                if not verbatim and source[index] == '\\':
+                    index += 2
+                    continue
+                index += 1
+            blank(start, min(index, length))
+            continue
+
+        if source[index] == "'":
+            start = index
+            index += 1
+            while index < length:
+                if source[index] == '\\':
+                    index += 2
+                    continue
+                if source[index] == "'":
+                    index += 1
+                    break
+                index += 1
+            blank(start, min(index, length))
+            continue
+
+        index += 1
+
+    return ''.join(masked)
+
+
+def extract_braced_body(source, opening_brace):
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        if source[index] == '{':
+            depth += 1
+        elif source[index] == '}':
+            depth -= 1
+            if depth == 0:
+                return source[opening_brace + 1:index]
+    return None
+
+
+def extract_private_void_method(masked_source, name):
+    pattern = re.compile(
+        r'\bprivate\s+void\s+' + re.escape(name) + r'\s*\([^)]*\)\s*\{')
+    matches = list(pattern.finditer(masked_source))
+    if len(matches) != 1:
+        return None
+    opening_brace = masked_source.find('{', matches[0].start(), matches[0].end())
+    return extract_braced_body(masked_source, opening_brace)
+
+
+def validate_native_action_channel_method(masked_source, method_name, expected_speed):
+    body = extract_private_void_method(masked_source, method_name)
+    if body is None:
+        return False
+
+    loop_pattern = re.compile(
+        r'\bfor\s*\(\s*var\s+(?P<channel>[A-Za-z_]\w*)\s*=\s*0\s*;\s*'
+        r'(?P=channel)\s*<\s*NativeActionChannelCount\s*;\s*'
+        r'(?P=channel)\s*\+\+\s*\)\s*\{')
+    loops = list(loop_pattern.finditer(body))
+    if len(loops) != 1 or len(re.findall(r'\bfor\s*\(', body)) != 1:
+        return False
+
+    loop = loops[0]
+    opening_brace = body.find('{', loop.start(), loop.end())
+    loop_body = extract_braced_body(body, opening_brace)
+    if loop_body is None:
+        return False
+
+    channel = loop.group('channel')
+    call_pattern = re.compile(
+        r'\bSetCurrentActionSpeed\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^,\)]+?)\s*\)')
+    loop_calls = call_pattern.findall(loop_body)
+    method_calls = call_pattern.findall(body)
+    return (
+        len(loop_calls) == 1
+        and len(method_calls) == 1
+        and loop_calls[0][0] == channel
+        and loop_calls[0][1].strip() == expected_speed)
+
+
+time_control_code = mask_csharp_noncode(time_control)
+bend_time_channel_safety = (
+    re.search(
+        r'\bprivate\s+const\s+int\s+NativeActionChannelCount\s*=\s*2\s*;',
+        time_control_code) is not None
+    and validate_native_action_channel_method(
+        time_control_code, 'SetActionSpeeds', 'speed')
+    and validate_native_action_channel_method(
+        time_control_code, 'RestoreActionSpeeds', '1f'))
+
 time_release_guard = re.search(
     r'private bool TryCompleteRelease\(\)\s*\{.*?'
     r'if \(_mission\.GetRequestedTimeSpeed\(requestId, out requestedFactor\)\)\s*\{\s*'
@@ -132,7 +272,8 @@ checks = {
     'blink preview bounds fallback work': 'PreviewFallbackCandidateBudget = 24' in blink and 'fallbackCandidateBudget' in teleport_validator and 'fallbackLimit' in teleport_validator,
     'cleave fallback remains exhaustive and range bounded': 'fallbackCandidateBudget = 0' in teleport_validator and ': _fallback.Count;' in teleport_validator and 'candidateDelta.Length > maximumRange + 0.05f' in teleport_validator and '3.2f' in teleport_validator,
     'bend time duration uses application time': 'MBCommon.GetApplicationTime()' in time_control and '_remaining -= realDt;' in time_control,
-    'bend time compensates player and mount systems': all(name in time_control for name in ('MaxSpeedMultiplier', 'CombatMaxSpeedMultiplier', 'SwingSpeedMultiplier', 'ReloadSpeed', 'BipedalRangedReadySpeedMultiplier', 'BipedalRangedReloadSpeedMultiplier', 'MountSpeed', 'MountManeuver', 'MountDashAccelerationMultiplier')) and 'for (var channel = 0; channel < 4; channel++)' in time_control,
+    'bend time compensates player and mount systems': all(name in time_control for name in ('MaxSpeedMultiplier', 'CombatMaxSpeedMultiplier', 'SwingSpeedMultiplier', 'ReloadSpeed', 'BipedalRangedReadySpeedMultiplier', 'BipedalRangedReloadSpeedMultiplier', 'MountSpeed', 'MountManeuver', 'MountDashAccelerationMultiplier')) and bend_time_channel_safety,
+    'bend time never writes unverified native action channels': bend_time_channel_safety,
     'bend time separates mutation ownership': all(name in time_control for name in ('_playerPropertiesApplied', '_mountPropertiesApplied', '_actionSpeedsApplied')) and 'RestoreCompensation();' in time_control,
     'bend time refreshes externally recalculated baselines': 'RefreshPlayerBaselinesAfterExternalUpdate' in time_control and 'RefreshMountBaselinesAfterExternalUpdate' in time_control and '!Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier)' in time_control,
     'bend time restores only owned values': 'Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier)' in time_control and 'Approximately(driven.MountSpeed, _appliedMountSpeed)' in time_control,

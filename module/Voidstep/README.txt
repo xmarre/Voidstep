@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.0.8
+VOIDSTEP — ARCANE MELEE ABILITIES v1.0.9
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional compatibility preset: The Old Realms 1.16
 
@@ -39,6 +39,6 @@ Domino never registers propagated blows from inside Bannerlord's native hit or r
 
 TIME CONTROL
 Blink freezes mission time while destination targeting is active. Preview movement, confirmation, cancellation and expiry remain responsive through application-time updates.
-Bend Time slows the outside world while compensating the controlled player for locomotion, combat movement, swing, ready, reload and action-channel speed. The controlled mount receives corresponding speed and maneuver compensation. Cleanup restores only values still owned by Voidstep.
+Bend Time slows the outside world while compensating the controlled player for locomotion, combat movement, swing, ready, reload and the two verified Bannerlord native action channels. The controlled mount receives corresponding speed and maneuver compensation. Cleanup restores only values still owned by Voidstep.
 
 Enable Debug logging in MCM when reporting an ability problem. The log is written to Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log.

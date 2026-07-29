@@ -23,6 +23,7 @@ The independent Python mirror additionally covers:
 - propagated NoSound hits are not requeued
 - propagated lethal removals cannot start another death chain
 - plain formation-number passthrough without the configured modifier
+- Bend Time source is restricted to native action channels 0 and 1
 
 Run with:
 
@@ -74,10 +75,12 @@ A release must record pass/fail and logs for:
 - Blink destination selection freezes mission actors, missiles and animation while camera movement, preview movement and the confirmation chord remain responsive
 - Blink confirmation and cancellation remove only the owned zero-speed request
 - Blink targeting still expires after eight seconds of application time while mission time is frozen
+- Bend Time activation survives the first mission tick without a protected-memory crash
+- Bend Time writes action speed only to native channels 0 and 1 and never attempts channels 2 or 3
 - Bend Time leaves outside actors slowed by the configured factor while the player can move, turn, attack, ready, reload and recover materially faster
 - mounted Bend Time compensates the controlled mount's speed, maneuver and acceleration
 - ending Bend Time restores only values still equal to Voidstep's applied compensation
-- player death, replacement, mission end and disabling Voidstep clean up every owned time request and compensation value
+- repeated Bend Time casts, expiration, manual disable, player death, player replacement and mission end clean up every owned time request and compensation value
 
 ## Required Domino callback-safety matrix
 
