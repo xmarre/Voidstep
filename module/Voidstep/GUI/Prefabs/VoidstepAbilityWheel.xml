@@ -1,0 +1,18 @@
+<Prefab>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" DoNotAcceptEvents="true">
+      <Children>
+        <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="620" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="BlankWhiteSquare_9" Brush.Color="#180018D8" IsCircular="true" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="330" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="-235" Brush="SPGeneral" Brush.FontSize="28" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@CleaveText" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionXOffset="225" PositionYOffset="-118" Brush="SPGeneral" Brush.FontSize="26" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@BlinkText" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionXOffset="225" PositionYOffset="118" Brush="SPGeneral" Brush.FontSize="26" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@WindblastText" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="330" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="235" Brush="SPGeneral" Brush.FontSize="28" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@BendTimeText" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionXOffset="-225" PositionYOffset="118" Brush="SPGeneral" Brush.FontSize="26" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@DominoText" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionXOffset="-225" PositionYOffset="-118" Brush="SPGeneral" Brush.FontSize="26" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@DarkVisionText" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="430" SuggestedHeight="58" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="-22" Brush="SPGeneral" Brush.FontSize="34" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@SelectedName" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="460" SuggestedHeight="88" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="42" Brush="SPGeneral" Brush.FontSize="20" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@SelectedDescription" />
+        <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="700" SuggestedHeight="44" HorizontalAlignment="Center" VerticalAlignment="Bottom" MarginBottom="80" Brush="SPGeneral" Brush.FontSize="20" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@CastHint" />
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>
