@@ -40,7 +40,8 @@ namespace Voidstep
 
             using (InputConflictSuppression.EnterBypass())
             {
-                if (!ModifiersSatisfied(GetModifiers(ability)))
+                var modifiers = GetModifiers(ability);
+                if (!ModifiersSatisfied(modifiers))
                     return false;
 
                 for (var i = 0; i < hotKey.Keys.Count; i++)
@@ -50,6 +51,8 @@ namespace Voidstep
                         continue;
                     if (!Input.IsKeyPressed(key.InputKey))
                         continue;
+                    if (IsAmbiguousChord(ability, key.InputKey, modifiers))
+                        return false;
 
                     pressedKey = key.InputKey;
                     return true;
@@ -81,8 +84,40 @@ namespace Voidstep
         {
             var parts = new string[Abilities.Length];
             for (var i = 0; i < Abilities.Length; i++)
-                parts[i] = FormatBinding(Abilities[i]);
+                parts[i] = AbilityName(Abilities[i]) + "=" + FormatBinding(Abilities[i]);
             return string.Join(", ", parts);
+        }
+
+        internal static string GetConflictWarning()
+        {
+            for (var i = 0; i < Abilities.Length; i++)
+            {
+                var first = Abilities[i];
+                var firstModifiers = GetModifiers(first);
+                var firstHotKey = VoidstepHotKeyContext.Get(first);
+                if (firstHotKey == null)
+                    continue;
+
+                for (var keyIndex = 0; keyIndex < firstHotKey.Keys.Count; keyIndex++)
+                {
+                    var firstKey = firstHotKey.Keys[keyIndex];
+                    if (firstKey == null || firstKey.InputKey == InputKey.Invalid)
+                        continue;
+
+                    for (var j = i + 1; j < Abilities.Length; j++)
+                    {
+                        var second = Abilities[j];
+                        if (firstModifiers != GetModifiers(second))
+                            continue;
+                        var secondHotKey = VoidstepHotKeyContext.Get(second);
+                        if (secondHotKey == null || !ContainsKey(secondHotKey, firstKey.InputKey))
+                            continue;
+
+                        return $"Duplicate Voidstep chord {FormatModifiers(firstModifiers)}{firstKey}: {AbilityName(first)} and {AbilityName(second)}. Rebind one primary key in Options > Keybindings > Voidstep or change one modifier in MCM. The duplicate chord is disabled.";
+                    }
+                }
+            }
+            return null;
         }
 
         internal static string FormatBinding(AbilityId ability)
@@ -101,8 +136,7 @@ namespace Voidstep
                 }
             }
 
-            var modifier = GetModifiers(ability);
-            return FormatModifiers(modifier) + keyName;
+            return FormatModifiers(GetModifiers(ability)) + keyName;
         }
 
         internal static VoidstepModifiers GetModifiers(AbilityId ability)
@@ -118,6 +152,20 @@ namespace Voidstep
                 case AbilityId.DarkVision: return ParseModifiers(settings.DarkVisionModifier);
                 default: return VoidstepModifiers.None;
             }
+        }
+
+        private static bool IsAmbiguousChord(AbilityId ability, InputKey inputKey, VoidstepModifiers modifiers)
+        {
+            for (var i = 0; i < Abilities.Length; i++)
+            {
+                var other = Abilities[i];
+                if (other == ability || GetModifiers(other) != modifiers)
+                    continue;
+                var otherHotKey = VoidstepHotKeyContext.Get(other);
+                if (otherHotKey != null && ContainsKey(otherHotKey, inputKey))
+                    return true;
+            }
+            return false;
         }
 
         private static bool ContainsKey(HotKey hotKey, InputKey inputKey)
@@ -164,6 +212,20 @@ namespace Voidstep
             if (modifiers.HasFlag(VoidstepModifiers.Alt)) text += "Alt+";
             if (modifiers.HasFlag(VoidstepModifiers.Shift)) text += "Shift+";
             return text;
+        }
+
+        private static string AbilityName(AbilityId ability)
+        {
+            switch (ability)
+            {
+                case AbilityId.VoidstepCleave: return "Voidstep Cleave";
+                case AbilityId.Blink: return "Blink";
+                case AbilityId.Windblast: return "Windblast";
+                case AbilityId.BendTime: return "Bend Time";
+                case AbilityId.Domino: return "Domino";
+                case AbilityId.DarkVision: return "Dark Vision";
+                default: return ability.ToString();
+            }
         }
 
         private static bool IsModifierKey(InputKey inputKey) =>
