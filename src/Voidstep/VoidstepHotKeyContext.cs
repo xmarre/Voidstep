@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using TaleWorlds.Core;
 using TaleWorlds.InputSystem;
 using TaleWorlds.Localization;
+using TaleWorlds.MountAndBlade;
 using Voidstep.Core;
 
 namespace Voidstep
