@@ -18,7 +18,9 @@ namespace Voidstep
         internal const string Domino = "Domino";
         internal const string DarkVision = "DarkVision";
 
-        internal static VoidstepHotKeyContext Current { get; private set; }
+        private static bool _localizedTextRegistered;
+
+        internal static GameKeyContext Current { get; private set; }
 
         private VoidstepHotKeyContext()
             : base(CategoryId, 0, GameKeyContextType.AuxiliarySerializedAndShownInOptions)
@@ -33,27 +35,30 @@ namespace Voidstep
 
         internal static bool TryRegister(VoidstepLogger logger)
         {
-            if (Current != null)
-                return true;
-
             try
             {
-                foreach (var category in HotKeyManager.GetAllCategories())
+                if (Current == null)
                 {
-                    if (!string.Equals(category.GameKeyCategoryId, CategoryId, StringComparison.Ordinal))
-                        continue;
+                    foreach (var category in HotKeyManager.GetAllCategories())
+                    {
+                        if (!string.Equals(category.GameKeyCategoryId, CategoryId, StringComparison.Ordinal))
+                            continue;
 
-                    Current = category as VoidstepHotKeyContext;
-                    if (Current == null)
-                        throw new InvalidOperationException("Another hotkey category already uses the Voidstep category ID.");
-                    return true;
+                        Current = category;
+                        logger?.Info("Reused the existing native Voidstep hotkey category.");
+                        break;
+                    }
                 }
 
-                RegisterLocalizedText();
-                var context = new VoidstepHotKeyContext();
-                HotKeyManager.RegisterContext(context, false, true);
-                Current = context;
-                logger?.Info("Native configurable Voidstep hotkeys registered under Options > Keybindings > Voidstep.");
+                if (Current == null)
+                {
+                    var context = new VoidstepHotKeyContext();
+                    HotKeyManager.RegisterContext(context, false, true);
+                    Current = context;
+                    logger?.Info("Native configurable Voidstep hotkeys registered under Options > Keybindings > Voidstep.");
+                }
+
+                EnsureLocalizedText();
                 return true;
             }
             catch (Exception ex)
@@ -62,6 +67,11 @@ namespace Voidstep
                 Current = null;
                 return false;
             }
+        }
+
+        internal static void Clear()
+        {
+            Current = null;
         }
 
         internal static HotKey Get(AbilityId ability)
@@ -84,16 +94,23 @@ namespace Voidstep
             }
         }
 
-        private static void RegisterLocalizedText()
+        private static void EnsureLocalizedText()
         {
+            if (_localizedTextRegistered)
+                return;
+
             var module = Module.CurrentModule;
             if (module == null)
                 throw new InvalidOperationException("Bannerlord module text manager is not available yet.");
 
             var tags = new List<GameTextManager.ChoiceTag>();
             var textManager = module.GlobalTextManager;
-            textManager.AddGameText("str_hotkey_category_name")
-                .AddVariationWithId(CategoryId, new TextObject("Voidstep"), tags);
+            TextObject ignored;
+            if (!textManager.TryGetText("str_hotkey_category_name", CategoryId, out ignored))
+            {
+                textManager.AddGameText("str_hotkey_category_name")
+                    .AddVariationWithId(CategoryId, new TextObject("Voidstep"), tags);
+            }
 
             RegisterText(textManager, tags, VoidstepCleave, "Voidstep Cleave", "Primary key for Voidstep Cleave. Configure its modifier in MCM.");
             RegisterText(textManager, tags, Blink, "Blink", "Primary key for Blink. Configure its modifier in MCM.");
@@ -101,15 +118,23 @@ namespace Voidstep
             RegisterText(textManager, tags, BendTime, "Bend Time", "Primary key for Bend Time. Configure its modifier in MCM.");
             RegisterText(textManager, tags, Domino, "Domino", "Primary key for Domino. Configure its modifier in MCM.");
             RegisterText(textManager, tags, DarkVision, "Dark Vision", "Primary key for Dark Vision. Configure its modifier in MCM.");
+            _localizedTextRegistered = true;
         }
 
         private static void RegisterText(GameTextManager textManager, List<GameTextManager.ChoiceTag> tags, string id, string name, string description)
         {
             var variationId = CategoryId + "_" + id;
-            textManager.AddGameText("str_hotkey_name")
-                .AddVariationWithId(variationId, new TextObject(name), tags);
-            textManager.AddGameText("str_hotkey_description")
-                .AddVariationWithId(variationId, new TextObject(description), tags);
+            TextObject ignored;
+            if (!textManager.TryGetText("str_hotkey_name", variationId, out ignored))
+            {
+                textManager.AddGameText("str_hotkey_name")
+                    .AddVariationWithId(variationId, new TextObject(name), tags);
+            }
+            if (!textManager.TryGetText("str_hotkey_description", variationId, out ignored))
+            {
+                textManager.AddGameText("str_hotkey_description")
+                    .AddVariationWithId(variationId, new TextObject(description), tags);
+            }
         }
     }
 }
