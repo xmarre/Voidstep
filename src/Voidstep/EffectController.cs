@@ -66,9 +66,11 @@ namespace Voidstep
 
                 var particleId = ResolveFirst(UseTorPreset() ? TorMarker : NativeMarker);
                 var attachedParticles = 0;
-                if (particleId >= 0)
+                var intensity = VoidstepSettings.Current.EffectIntensity;
+                if (particleId >= 0 && intensity > 0f)
                 {
-                    for (var i = 0; i < MarkerOffsets.Length; i++)
+                    var offsetCount = intensity >= 1f ? MarkerOffsets.Length : 1;
+                    for (var i = 0; i < offsetCount; i++)
                     {
                         var localFrame = MatrixFrame.Identity;
                         localFrame.origin = MarkerOffsets[i];
@@ -163,13 +165,14 @@ namespace Voidstep
         {
             for (var i = 0; i < MarkerMaterialDonors.Length; i++)
             {
+                Mesh mesh = null;
                 try
                 {
                     var donor = Mesh.GetFromResource(MarkerMaterialDonors[i]);
                     var material = donor?.GetMaterial();
                     if (material == null) continue;
 
-                    var mesh = Mesh.CreateMeshWithMaterial(material);
+                    mesh = Mesh.CreateMeshWithMaterial(material);
                     if (mesh == null) continue;
                     mesh.Color = color;
                     mesh.Color2 = color;
@@ -192,6 +195,9 @@ namespace Voidstep
                 }
                 catch (Exception ex)
                 {
+                    // Mesh exposes no public release method in the locked 1.3.15 API.
+                    // Drop the wrapper immediately so a failed donor cannot remain owned here.
+                    mesh = null;
                     _logger.Debug($"Cast sigil material donor '{MarkerMaterialDonors[i]}' unavailable: {ex.Message}");
                 }
             }
