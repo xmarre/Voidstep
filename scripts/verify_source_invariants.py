@@ -171,11 +171,40 @@ def validate_native_action_channel_method(masked_source, method_name, expected_s
         and loop_calls[0][1].strip() == expected_speed)
 
 
+def validate_selection_player_guard(masked_source):
+    body = extract_method(
+        masked_source,
+        r'\binternal\s+bool\s+Select\s*\(\s*AbilityId\s+[A-Za-z_]\w*\s*,\s*string\s+[A-Za-z_]\w*\s*\)\s*\{')
+    if body is None:
+        return False
+
+    guard = re.search(
+        r'\bvar\s+player\s*=\s*_mission\.MainAgent\s*;\s*'
+        r'if\s*\(\s*player\s*==\s*null\s*\|\|\s*!player\.IsActive\(\)\s*\|\|\s*'
+        r'player\.Health\s*<=\s*0f\s*\)\s*'
+        r'\{\s*Show\s*\([^;]*\)\s*;\s*return\s+false\s*;\s*\}',
+        body,
+        re.DOTALL)
+    busy = re.search(r'\bif\s*\(\s*_manager\.IsBusy\s*\)', body)
+    mutation = re.search(
+        r'\bCancel\s*\(|\b_selected\s*=|\b_previewRefreshRemaining\s*=|'
+        r'\b_blinkTargetingOwned\s*=|\b_previewCreationFailures\s*=|'
+        r'\b_previewCreationDisabled\s*=|\bClearSelectionVisuals\s*\(|'
+        r'\bRefreshPreview\s*\(',
+        body)
+    return (
+        guard is not None
+        and busy is not None
+        and mutation is not None
+        and guard.end() <= busy.start() < mutation.start())
+
+
 time_code = mask_csharp_noncode(time_control)
 bend_time_channel_safety = (
     re.search(r'\bprivate\s+const\s+int\s+NativeActionChannelCount\s*=\s*2\s*;', time_code) is not None
     and validate_native_action_channel_method(time_code, 'SetActionSpeeds', 'speed')
     and validate_native_action_channel_method(time_code, 'RestoreActionSpeeds', '1f'))
+selection_player_guard = validate_selection_player_guard(mask_csharp_noncode(selection))
 
 time_release_guard = re.search(
     r'private bool TryCompleteRelease\(\)\s*\{.*?'
@@ -275,7 +304,7 @@ checks = {
     'direct bindings select rather than cast': '_selection.Select(directAbility.Value, "configured direct selector")' in wheel_coordinator,
     'right mouse confirms selected ability': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in wheel_coordinator and '_selection.Confirm()' in wheel_coordinator,
     'Q suppression is limited to owned standalone state': 'return !_tor.IsAvailable && (_standalone.IsOpen || _selection.HasSelection);' in wheel_coordinator,
-    'selection validates player before mutation': selection.find('var player = _mission.MainAgent;') < selection.find('if (_manager.IsBusy)') and selection.find('var player = _mission.MainAgent;') >= 0,
+    'selection validates player before mutation': selection_player_guard,
     'Blink cancellation fails closed': '_cancelCurrent == null' in selection and 'Blink targeting could not be cancelled safely.' in selection and 'return false;' in selection,
     'preview creation retries are bounded': 'MaximumPreviewCreationFailures = 3' in selection and '_previewCreationDisabled = true;' in selection,
     'selection is independent from persistent effects': 'AbilityId? _selected' in selection and '_manager.TryActivate(ability)' in selection and 'ClearSelectionVisuals' in selection,
