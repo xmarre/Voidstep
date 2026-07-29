@@ -15,6 +15,8 @@ def compact(value):
 
 
 coordinator = read('src/Voidstep/AbilityWheelCoordinator.cs')
+standalone = read('src/Voidstep/StandaloneAbilityWheel.cs')
+wheel_suppression = read('src/Voidstep/AbilityWheelInputSuppressionPatch.cs')
 tor = read('src/Voidstep/TorAbilityWheelAdapter.cs')
 selection = read('src/Voidstep/AbilitySelectionController.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
@@ -71,6 +73,20 @@ checks = {
         'if (!_tor.IsAvailable)',
         '_standalone.Tick();',
         'HandleWheelAvailabilityTransition();')) and 'standalone wheel remains active' in tor,
+    'standalone Gauntlet overlay never owns mission input':
+        'display-only Gauntlet layer' in standalone and
+        all(token not in standalone for token in (
+            'IsFocusLayer',
+            'ConfigureInputRestrictions',
+            'SetInputRestrictions',
+            'TrySetFocus',
+            'TryLoseFocus',
+            'InputUsageMask')),
+    'wheel suppression never intercepts mouse-wheel keys':
+        all(token not in coordinator + wheel_suppression for token in (
+            'MouseScrollUp',
+            'MouseScrollDown',
+            'MouseScrollAxis')),
     'TOR opening cancels stale Voidstep selection': 'state == 1 && _lastState != 1 && _selection.HasSelection' in tor and '_selection.Cancel(true);' in tor,
     'TOR entries receive stable donor icons': all(token in tor for token in (
         'ResolveDonorSprites();',
