@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0
+
+- Added a unified Dishonored-style casting flow: open the Q wheel, select an ability, aim with a live cast indicator and confirm with Right Mouse Button.
+- Added a standalone six-segment Voidstep Q wheel for battles without The Old Realms.
+- Added reflection-isolated TOR 1.16 integration that injects six `[Voidstep]` selections into TOR's existing Q ability wheel without adding a hard TOR dependency.
+- Converted the six configurable direct bindings into ability selectors so they use the same indicator and Mouse2 confirmation path instead of bypassing targeting.
+- Added live destination, cone, radius and linked-target previews for all six abilities; Blink retains its complete mission-time freeze during destination selection.
+- Separated persistent Domino links from transient cast selection so linked enemies do not occupy the active casting state or block other abilities.
+- Fixed Domino ignoring valid Cleave, Windblast and other player-generated hits merely because they used `BlowFlags.NoSound`.
+- Replaced the overloaded `NoSound` recursion test with an explicit per-target propagated-hit ownership ledger that suppresses only Domino's own synchronous callbacks.
+- Added controlled-mount hits as valid Domino trigger sources and guaranteed at least one propagated damage when the original hit inflicted damage.
+- Added deterministic cleanup for wheel UI, TOR proxy abilities, selection markers, Right Mouse Button suppression, pending Domino propagation and all mission-owned state.
+- Added independent mirror tests and locked source/package invariants for the wheel lifecycle, Mouse2 casting, TOR proxy isolation and explicit Domino propagation ownership.
+
 ## 1.0.9
 
 - Fixed Bend Time corrupting native mission memory by writing action-speed values to unsupported Bannerlord action channels 2 and 3.
