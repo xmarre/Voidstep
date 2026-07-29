@@ -8,6 +8,12 @@ namespace Voidstep
     internal sealed class TimeControlService
     {
         private const int RequestId = 0x56535450; // "VSTP"
+        // Bannerlord 1.3.15 exposes two native action channels for agents. Its own
+        // SetCurrentActionSpeed call sites use only channel 0 and channel 1.
+        // Writing channel 2 or 3 crosses the native action-channel boundary and can
+        // corrupt mission memory without producing a catchable managed exception.
+        private const int NativeActionChannelCount = 2;
+
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
         private readonly OwnershipLedger<int> _ownership = new OwnershipLedger<int>();
@@ -408,7 +414,7 @@ namespace Voidstep
         private void SetActionSpeeds(float speed)
         {
             if (_player == null || !_player.IsActive()) return;
-            for (var channel = 0; channel < 4; channel++)
+            for (var channel = 0; channel < NativeActionChannelCount; channel++)
             {
                 try
                 {
@@ -429,7 +435,7 @@ namespace Voidstep
             if (!_actionSpeedsApplied) return;
             if (_player != null && _player.IsActive())
             {
-                for (var channel = 0; channel < 4; channel++)
+                for (var channel = 0; channel < NativeActionChannelCount; channel++)
                 {
                     try { _player.SetCurrentActionSpeed(channel, 1f); }
                     catch (Exception ex)
