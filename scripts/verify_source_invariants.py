@@ -15,6 +15,7 @@ submodule = files.get('VoidstepSubModule.cs', '')
 mission_behavior = files.get('VoidstepMissionBehavior.cs', '')
 input_router = files.get('InputRouter.cs', '')
 input_bindings = files.get('VoidstepInputBindings.cs', '')
+mission_order_suppression = files.get('MissionOrderInputSuppression.cs', '')
 hotkey_context = files.get('VoidstepHotKeyContext.cs', '')
 settings = files.get('VoidstepSettings.cs', '')
 weapon_validation = files.get('WeaponValidation.cs', '')
@@ -68,6 +69,7 @@ checks = {
     'arbitrary primary keys replace hardcoded key list': 'KeyOptions' not in settings and 'VoidstepKey' not in settings and 'RequireControlModifier' not in settings and 'ModifierOptions' in settings,
     'per ability modifiers configurable': all(name in settings for name in ('VoidstepModifier', 'BlinkModifier', 'WindblastModifier', 'BendTimeModifier', 'DominoModifier', 'DarkVisionModifier')),
     'input router polls cached native bindings': 'VoidstepInputBindings.TryGetPressedKey' in input_router and 'InputConflictSuppression.Latch' in input_router and 'Enum.TryParse' not in input_router,
+    'input router refreshes live modifiers before polling': re.search(r'PollAbility\(\)\s*\{\s*InputConflictSuppression\.CaptureCurrentModifiers\(\);\s*InputConflictSuppression\.RefreshLatches\(\);', input_router) is not None,
     'immutable binding cache covers hot paths': 'private sealed class BindingCache' in input_bindings and 'BoundPrimaryKeys' in input_bindings and 'RefreshCacheIfChanged()' in input_bindings and 'Volatile.Read(ref _cache)' in input_bindings,
     'binding cache invalidates on native changes': 'HotKeyManager.OnKeybindsChanged += Invalidate' in input_bindings and 'HotKeyManager.OnKeybindsChanged -= Invalidate' in input_bindings and 'IsCacheDirty' in input_bindings,
     'modifier strings are parsed only during cache refresh': input_bindings.count('ParseModifiers(') == 7 and 'ReadConfiguredModifiers' in input_bindings,
@@ -75,7 +77,9 @@ checks = {
     'duplicate chords rejected while native action passes through': duplicate_passthrough is not None and 'native game action remains available' in input_bindings,
     'generic raw input boolean suppression': all(name in input_bindings for name in ('nameof(Input.IsKeyPressed)', 'nameof(Input.IsKeyDown)', 'nameof(Input.IsKeyDownImmediate)', 'nameof(Input.IsKeyReleased)')),
     'generic raw input axis suppression': 'nameof(Input.GetKeyState)' in input_bindings and '__result = Vec2.Zero;' in input_bindings,
-    'current modifiers captured once from input update': 'nameof(Input.UpdateKeyData)' in input_bindings and 'CaptureCurrentModifiers();' in input_bindings and '_modifierSnapshotReady' in input_bindings,
+    'bound raw queries refresh live modifiers': 'RawInputModifierRefreshPatch' in mission_order_suppression and 'VoidstepInputBindings.IsBoundPrimaryKey(__0)' in mission_order_suppression and 'InputConflictSuppression.CaptureCurrentModifiers();' in mission_order_suppression,
+    'integer mission order gamekeys are suppressed': all(name in mission_order_suppression for name in ('nameof(InputContext.IsGameKeyPressed)', 'nameof(InputContext.IsGameKeyDown)', 'nameof(InputContext.IsGameKeyDownImmediate)', 'nameof(InputContext.IsGameKeyReleased)', 'nameof(InputContext.GetGameKeyState)')) and 'new[] { typeof(int) }' in mission_order_suppression and 'SelectOrder1 = 69' in mission_order_suppression and 'SelectOrder6 = 74' in mission_order_suppression,
+    'mission order suppression preserves plain number keys': 'InputConflictSuppression.ShouldSuppress(inputKey)' in mission_order_suppression and 'TryGetNumberRowKey' in mission_order_suppression,
     'suppression preserves own polling through bypass': '[ThreadStatic]' in input_bindings and 'EnterBypass()' in input_bindings and 'IsBypassed' in input_bindings,
     'suppression latches are thread safe': 'ConcurrentDictionary<InputKey, byte> LatchedKeys' in input_bindings and 'LatchedKeys.TryAdd' in input_bindings and 'LatchedKeys.TryRemove' in input_bindings,
     'suppression latches complete chord lifecycle': 'RefreshLatches()' in input_bindings and 'Input.IsKeyReleased(inputKey)' in input_bindings,
