@@ -7,6 +7,28 @@ root = Path(__file__).resolve().parents[1]
 runtime = root / 'src' / 'Voidstep'
 files = {p.name: p.read_text(encoding='utf-8') for p in runtime.glob('*.cs')}
 all_text = '\n'.join(files.values())
+time_control = files.get('TimeControlService.cs', '')
+blink = files.get('BlinkController.cs', '')
+
+time_release_guard = re.search(
+    r'private bool TryCompleteRelease\(\)\s*\{.*?'
+    r'if \(_mission\.GetRequestedTimeSpeed\(requestId, out requestedFactor\)\)\s*\{\s*'
+    r'_mission\.RemoveTimeSpeedRequest\(requestId\);\s*'
+    r'if \(_mission\.GetRequestedTimeSpeed\(requestId, out requestedFactor\)\)\s*return false;\s*\}.*?'
+    r'if \(!_ownership\.Release\(token, out releasedRequestId\)\)\s*return false;.*?'
+    r'_token = 0;',
+    time_control,
+    re.DOTALL)
+
+blink_release_guard = re.search(
+    r'private bool ReleaseAimTimeRequest\(\)\s*\{.*?'
+    r'if \(_mission\.GetRequestedTimeSpeed\(AimTimeRequestId, out requestedFactor\)\)\s*\{\s*'
+    r'_mission\.RemoveTimeSpeedRequest\(AimTimeRequestId\);\s*'
+    r'if \(_mission\.GetRequestedTimeSpeed\(AimTimeRequestId, out requestedFactor\)\)\s*return false;\s*\}.*?'
+    r'_ownsTimeRequest = false;\s*_timeCleanupPending = false;',
+    blink,
+    re.DOTALL)
+
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
     'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs','') and '_initializationAttempted' in files.get('VoidstepMissionBehavior.cs',''),
@@ -14,8 +36,8 @@ checks = {
     'legacy formation controls migrate': 'MigrateLegacyDefaultControls' in files.get('VoidstepSettings.cs','') and 'HasNumberRowConflict' in files.get('VoidstepSettings.cs',''),
     'per-cast hit registry': 'HitRegistry<int> _hits' in files.get('CleaveSweepController.cs',''),
     'cleave deterministic cleanup': '_hits.Clear();' in files.get('CleaveSweepController.cs','') and '_snapshotSchedule.Clear();' in files.get('CleaveSweepController.cs',''),
-    'time request ownership': 'OwnershipLedger<int>' in files.get('TimeControlService.cs','') and 'GetRequestedTimeSpeed(requestId, out requestedFactor)' in files.get('TimeControlService.cs','') and 'RemoveTimeSpeedRequest(requestId)' in files.get('TimeControlService.cs',''),
-    'no unverified time request removal': 'RemoveTimeSpeedRequest(RequestId);' not in files.get('TimeControlService.cs','') and 'GetRequestedTimeSpeed(AimTimeRequestId, out requestedFactor)' in files.get('BlinkController.cs',''),
+    'time request ownership retained through cleanup': '_cleanupPending' in time_control and '_ownership.TryGet(_token, out requestId)' in time_control and time_release_guard is not None and time_control.count('RemoveTimeSpeedRequest(') == 1,
+    'blink request ownership retained through cleanup': '_timeCleanupPending' in blink and blink_release_guard is not None and blink.count('RemoveTimeSpeedRequest(') == 1,
     'domino index storage': 'Dictionary<int, Agent> _linked' in files.get('DominoLinkService.cs','') and 'FindAgentWithIndex' in files.get('DominoLinkService.cs',''),
     'domino recursion guard': 'RecursionGuard<int>' in files.get('DominoLinkService.cs',''),
     'dark vision throttled': 'DarkVisionRefreshInterval' in files.get('DarkVisionService.cs','') and '_refreshRemaining' in files.get('DarkVisionService.cs',''),
