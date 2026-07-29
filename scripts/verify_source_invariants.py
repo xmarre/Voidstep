@@ -21,6 +21,7 @@ settings = files.get('VoidstepSettings.cs', '')
 weapon_validation = files.get('WeaponValidation.cs', '')
 dark_vision = files.get('DarkVisionService.cs', '')
 blow_factory = files.get('BlowFactory.cs', '')
+mirror_tests = (root / 'scripts' / 'run_logic_mirror_tests.py').read_text(encoding='utf-8')
 
 time_release_guard = re.search(
     r'private bool TryCompleteRelease\(\)\s*\{.*?'
@@ -79,7 +80,7 @@ checks = {
     'generic raw input axis suppression': 'nameof(Input.GetKeyState)' in input_bindings and '__result = Vec2.Zero;' in input_bindings,
     'bound raw queries refresh live modifiers': 'RawInputModifierRefreshPatch' in mission_order_suppression and 'VoidstepInputBindings.IsBoundPrimaryKey(__0)' in mission_order_suppression and 'InputConflictSuppression.CaptureCurrentModifiers();' in mission_order_suppression,
     'integer mission order gamekeys are suppressed': all(name in mission_order_suppression for name in ('nameof(InputContext.IsGameKeyPressed)', 'nameof(InputContext.IsGameKeyDown)', 'nameof(InputContext.IsGameKeyDownImmediate)', 'nameof(InputContext.IsGameKeyReleased)', 'nameof(InputContext.GetGameKeyState)')) and 'new[] { typeof(int) }' in mission_order_suppression and 'SelectOrder1 = 69' in mission_order_suppression and 'SelectOrder6 = 74' in mission_order_suppression,
-    'mission order suppression preserves plain number keys': 'InputConflictSuppression.ShouldSuppress(inputKey)' in mission_order_suppression and 'TryGetNumberRowKey' in mission_order_suppression,
+    'mission order suppression preserves plain number keys': 'InputConflictSuppression.ShouldSuppress(inputKey)' in mission_order_suppression and 'TryGetNumberRowKey' in mission_order_suppression and 'def should_suppress_mapped_order' in mirror_tests and 'def test_plain_number_key_remains_native_without_modifier' in mirror_tests,
     'suppression preserves own polling through bypass': '[ThreadStatic]' in input_bindings and 'EnterBypass()' in input_bindings and 'IsBypassed' in input_bindings,
     'suppression latches are thread safe': 'ConcurrentDictionary<InputKey, byte> LatchedKeys' in input_bindings and 'LatchedKeys.TryAdd' in input_bindings and 'LatchedKeys.TryRemove' in input_bindings,
     'suppression latches complete chord lifecycle': 'RefreshLatches()' in input_bindings and 'Input.IsKeyReleased(inputKey)' in input_bindings,
