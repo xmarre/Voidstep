@@ -1,125 +1,122 @@
 # Testing
 
-## Automated pure logic tests
+## Automated tests
 
-`tests/Voidstep.Core.Tests/CoreLogicTests.cs` covers:
-
-- angle normalisation
-- clockwise and counter-clockwise ordering
-- sweep-gap handling
-- radius filtering
-- one-hit registry
-- angle-to-animation damage timing
-- destination fallback ordering
-- resource modes and costs
-- cooldown transitions
-- time ownership tokens
-- cancellation cleanup
+`tests/Voidstep.Core.Tests/CoreLogicTests.cs` covers deterministic sweep, targeting fallback, hit registry, resource, cooldown, ownership and cancellation logic.
 
 The independent Python mirror additionally covers:
 
 - Domino callbacks enqueue without dispatching
-- Domino propagation dispatches only on the following mission tick
-- propagated NoSound hits are not requeued
+- deferred propagation dispatches only on the following mission tick
+- a legitimate `NoSound` player hit remains eligible to trigger Domino
+- explicit propagated-hit markers suppress only Domino-owned synchronous callbacks
+- unconsumed propagated-hit markers are removed immediately
 - propagated lethal removals cannot start another death chain
+- persistent Domino links do not block selecting another ability
+- Blink owns only its targeting phase until Mouse2 confirmation
 - plain formation-number passthrough without the configured modifier
 - Bend Time source is restricted to native action channels 0 and 1
 
-Run with:
-
-```powershell
-dotnet test .\tests\Voidstep.Core.Tests\Voidstep.Core.Tests.csproj -c Release
-```
-
-Independent standard-library Python mirrors and source-invariant checks are available:
+Run:
 
 ```text
+dotnet test tests/Voidstep.Core.Tests/Voidstep.Core.Tests.csproj -c Release
 python scripts/run_logic_mirror_tests.py
 python scripts/verify_source_invariants.py
 python scripts/validate_api_surface.py references/runtime
 ```
 
-## Required input-binding matrix
+## Required wheel and input matrix
 
 A release must record pass/fail and logs for:
 
-- `Ctrl+1` through `Ctrl+6` each produce exactly one `Input accepted` log and activate only the corresponding Voidstep ability
-- `Ctrl+1` through `Ctrl+6` do not open the order interface, select a formation or execute a native formation command
-- plain `1` through `6` still select formations with the default Control modifiers
-- releasing Control before releasing the number key does not trigger a delayed formation command
-- changing one modifier in MCM during a mission, such as Cleave from Control to Alt, immediately makes `Alt+1` active and leaves plain `1` native
-- exact modifier matching rejects additional unconfigured modifiers, such as `Ctrl+Alt+1` when only Control is configured
-- rebinding an ability primary key under `Options > Keybindings > Voidstep` persists after restarting the game
-- binding to a weapon-slot key suppresses only that weapon-slot action while the complete ability chord is active
-- binding to a movement key suppresses movement while the complete chord is active and preserves ordinary movement without the configured modifier
-- binding to an attack or mouse button suppresses the native action while the complete chord is active
-- modifier values None, Control, Alt, Shift and combined modifiers activate exactly as configured
-- two abilities deliberately assigned the same chord produce a visible/logged configuration conflict and never activate both from one press
-- opening text input or the on-screen keyboard disables ability polling and suppression
-- mission end, player death and disabling Voidstep clear every latched input key
+- without TOR, holding `Q` opens the standalone six-segment Voidstep wheel
+- moving the mouse around the centre highlights exactly one of six entries
+- releasing `Q` selects the highlighted ability and closes the wheel
+- reopening the wheel or pressing `Escape` cancels the previous selection and clears its preview
+- Right Mouse Button casts the selected ability exactly once
+- Right Mouse Button does not block, attack, cancel or trigger another native action during the owned confirmation press
+- Right Mouse Button returns to native behaviour after release
+- the standalone wheel prefab is visible at 16:9, 16:10, ultrawide and UI-scale variants
+- wheel focus and cursor ownership are returned after selection, cancellation, death and mission end
+- with TOR 1.16, the six `[Voidstep]` entries appear in TOR's existing Q wheel alongside native TOR abilities
+- selecting a normal TOR spell still follows TOR's native targeting and casting flow
+- selecting a `[Voidstep]` entry starts Voidstep's indicator and Mouse2-confirmation flow
+- selecting and casting a Voidstep proxy does not execute TOR's placeholder spell object
+- removing/changing the player agent removes old proxies and injects exactly one new set for the current agent
+- without TOR, no `TOR_Core` type is required and no TOR assembly exception is logged
+- when TOR integration fails safely, the standalone wheel remains usable
+- `Ctrl+1` through `Ctrl+6` select only the corresponding ability and do not cast before Mouse2
+- completed selector chords do not open the order interface or execute formation commands
+- plain `1` through `6` remain native with the default Control modifiers
+- releasing Control before the number key does not leak a delayed formation command
+- MCM modifier changes and native key rebindings apply during the mission
+- exact modifier matching rejects unconfigured extra modifiers
+- duplicate selector chords produce a visible/logged conflict and never select two abilities
+- text input or on-screen keyboard disables selector polling and suppression
+- disabling Voidstep, player death and mission end clear selector, wheel and suppression ownership
 
-## Required ability presentation and time-control matrix
+## Required cast-indicator matrix
 
-A release must record pass/fail and logs for:
-
-- every successful ability activation starts a visible native cast action
-- mounted activation uses a valid mounted action fallback and does not dismount the player
-- Blink displays a large green/red placement reticle with two ground rings, a vertical ring, directional spikes and a raised diamond
-- Blink reticle remains visible on bright terrain, dark terrain, slopes and around nearby props
-- Domino displays the same reticle language above each linked human target and never marks missiles or arrow entities
-- Voidstep Cleave displays a placement reticle during wind-up
-- Voidstep Cleave plays a visible execution action throughout the 0.72-second sweep while preserving the captured melee weapon
-- Cleave action progress tracks sweep progress and returns to normal action speed on completion, interruption and cleanup
-- Windblast and Bend Time display visible radial cast pulses
-- Dark Vision immediately applies hostile-agent contours
-- Blink destination selection freezes mission actors, missiles and animation while camera movement, preview movement and the confirmation chord remain responsive
+- Voidstep Cleave shows the current validated teleport destination before payment or teleport
+- invalid Cleave placement is visibly rejected and does not consume resources
+- Blink selection freezes mission actors, missiles and animation while camera, preview and Mouse2 remain responsive
 - Blink confirmation and cancellation remove only the owned zero-speed request
-- Blink targeting still expires after eight seconds of application time while mission time is frozen
-- Bend Time activation survives the first mission tick without a protected-memory crash
-- Bend Time writes action speed only to native channels 0 and 1 and never attempts channels 2 or 3
-- Bend Time leaves outside actors slowed by the configured factor while the player can move, turn, attack, ready, reload and recover materially faster
-- mounted Bend Time compensates the controlled mount's speed, maneuver and acceleration
-- ending Bend Time restores only values still equal to Voidstep's applied compensation
-- repeated Bend Time casts, expiration, manual disable, player death, player replacement and mission end clean up every owned time request and compensation value
+- Windblast shows the camera-aligned cone footprint before confirmation
+- Bend Time shows its radius/centre preview before confirmation
+- Domino shows the exact hostile humans proposed for linking and never marks missiles, arrows or dropped projectiles
+- Dark Vision shows its radius preview before confirmation
+- every successful confirmed ability plays a visible native cast action
+- mounted activation uses a valid mounted fallback and does not dismount the player
+- selection previews reuse/move marker entities rather than creating new markers every frame
+- all preview markers are removed on cast, cancellation, actor replacement, disable and mission end
 
-## Required Domino callback-safety matrix
+## Required Domino matrix
 
-A release must record pass/fail and logs for:
+- selecting and confirming Domino creates at least two links when valid enemies exist
+- active Domino links do not make `AbilityManager.IsBusy` true and do not block Cleave, Blink, Windblast, Bend Time or Dark Vision
+- a normal weapon hit on one linked target queues propagation to the others
+- a Cleave hit carrying `BlowFlags.NoSound` still queues Domino propagation
+- a Windblast synthetic hit carrying `BlowFlags.NoSound` still queues Domino propagation
+- a controlled-mount hit counts as a player source
+- queued damage is registered only on the following mission tick, never inside `OnAgentHit`
+- each Domino-owned synchronous hit callback consumes exactly one explicit suppression marker and never requeues
+- a failed direct-blow registration removes its unconsumed marker so the next real player hit is not discarded
+- low-damage source hits that inflicted damage propagate at least one point after scaling
+- repeated strikes and rapid multi-hit weapons do not recurse or crash
+- killing a linked target queues lethal propagation outside `OnAgentRemoved`
+- propagated lethal removals are consumed once and cannot start another death wave
+- removed targets and reused agent indices cannot receive stale queued damage
+- recasting Domino replaces the previous link set and clears old markers and pending work
+- actor replacement, disable and mission end clear links, markers, pending propagation and both suppression ledgers
 
-- striking one linked target queues propagation but does not register another blow inside `OnAgentHit`
-- queued damage is applied to the other linked targets on the following mission tick
-- repeated strikes and rapid multi-hit weapons do not produce protected-memory or native callback crashes
-- propagated NoSound hit callbacks never enqueue a second propagation pass
-- killing a linked target queues lethal propagation without registering blows inside `OnAgentRemoved`
-- a propagated lethal removal is consumed by the suppression ledger and cannot start another death chain
-- deleting or removing a queued target before dispatch safely drops the stale record
-- agent-index reuse cannot redirect a queued propagation because identity references must still match
-- clearing Domino, changing player agent, disabling Voidstep and ending the mission discard all pending propagation records
+## Required ability and time-control matrix
 
-## Required Bannerlord runtime matrix
+- Cleave preserves the captured melee weapon and drives its execution action through the full sweep
+- Cleave action progress and speed return to normal on completion, interruption and cleanup
+- Blink targeting expires after eight seconds of application time while mission time is frozen
+- Bend Time activation survives the first mission tick without protected-memory failure
+- Bend Time writes action speed only to native channels 0 and 1
+- the outside world remains slowed while player movement, turning, attacks, ready, reload and recovery are materially faster
+- mounted Bend Time compensates speed, manoeuvre and acceleration
+- expiration, repeated casts, manual disable, death, replacement and mission end restore only owned values
+- Dark Vision applies hostile contours immediately and clears stale agents
 
-A release must record pass/fail and logs for:
+## Required battle scenarios
 
-- one enemy directly ahead
-- one enemy behind
-- enemies around the full sweep and inside the configured gap
-- at least 30 enemies in radius
-- repeated casts and rapid input
-- enemy killed or removed during sweep
-- player death during wind-up, teleport and recovery
-- mission end during Bend Time
-- walls, cliffs, props, water and occupied destinations
-- a locked Cleave enemy surrounded by a dense formation, verifying the complete fallback field finds a safe point or reports the final safety failure
-- Cleave fallback never exceeds the configured teleport range
-- player mounted and mount near destination
+- native game without TOR
+- TOR 1.16 battle mission with native TOR spells and Voidstep entries in the same wheel
+- one enemy directly ahead and behind
+- dense formations with at least 30 enemies
+- walls, cliffs, props, water and occupied teleport destinations
+- player mounted and dismounted
 - friendlies in radius with friendly fire off and on
 - shielded enemies
-- one-handed and two-handed weapons
-- empty target area
-- switching abilities during recovery
-- repeated Dark Vision toggles
-- Domino targets dying in different orders
-- native game without TOR
-- TOR 1.16 battle mission
+- one-handed and two-handed melee weapons
+- empty target areas
+- rapid Q-wheel reopening, Mouse2 confirmation and Escape cancellation
+- switching selections during cooldown, persistent Domino, Bend Time and Dark Vision
+- player death during selection, Blink freeze, Cleave wind-up and active sweep
+- mission end during wheel display, Blink targeting, Bend Time and queued Domino propagation
 
-No document in this repository treats these matrices as passed until Bannerlord is actually launched and the scenarios are executed.
+No document in this repository treats this runtime matrix as passed until Bannerlord is launched and the scenarios are executed.
