@@ -71,11 +71,14 @@ namespace Voidstep
 
         public void Disable()
         {
-            var cleared = _highlighted.Count;
+            var cleared = 0;
             _staleBuffer.Clear();
             foreach (var id in _highlighted) _staleBuffer.Add(id);
             for (var i = 0; i < _staleBuffer.Count; i++)
-                ClearContour(_mission.FindAgentWithIndex(_staleBuffer[i]));
+            {
+                if (ClearContour(_mission.FindAgentWithIndex(_staleBuffer[i])))
+                    cleared++;
+            }
             _staleBuffer.Clear();
             _highlighted.Clear();
             _seen.Clear();
@@ -99,12 +102,8 @@ namespace Voidstep
                 if (!TargetingService.IsUsableTarget(_player, agent, true)) continue;
                 _seen.Add(agent.Index);
                 var color = ClassifyColor(agent);
-                try
-                {
-                    agent.AgentVisuals?.SetContourColor(color, true);
+                if (TrySetContour(agent, color))
                     _highlighted.Add(agent.Index);
-                }
-                catch (Exception ex) { _logger.Debug("Dark Vision contour update failed: " + ex.Message); }
             }
 
             _staleBuffer.Clear();
@@ -143,11 +142,35 @@ namespace Voidstep
             return UnawareColor;
         }
 
-        private static void ClearContour(Agent agent)
+        private bool TrySetContour(Agent agent, uint color)
         {
-            if (agent == null) return;
-            try { agent.AgentVisuals?.SetContourColor(null, false); }
-            catch { }
+            if (agent?.AgentVisuals == null)
+                return false;
+            try
+            {
+                agent.AgentVisuals.SetContourColor(color, true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Dark Vision contour update failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool ClearContour(Agent agent)
+        {
+            if (agent?.AgentVisuals == null)
+                return false;
+            try
+            {
+                agent.AgentVisuals.SetContourColor(null, false);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }
