@@ -11,19 +11,21 @@ namespace Voidstep
         private static Harmony _harmony;
 
         internal static bool InputSuppressionReady { get; private set; }
+        internal static bool NativeHotkeysReady { get; private set; }
 
         protected override void OnSubModuleLoad()
         {
             base.OnSubModuleLoad();
             _logger = new VoidstepLogger();
-            _logger.Info("Voidstep v1.0.4 submodule loaded.");
+            _logger.Info("Voidstep v1.0.5 submodule loaded.");
             InputSuppressionReady = false;
+            NativeHotkeysReady = false;
             try
             {
                 _harmony = new Harmony(HarmonyId);
                 _harmony.PatchAll(typeof(VoidstepSubModule).Assembly);
                 InputSuppressionReady = true;
-                _logger.Info("Ctrl+number formation-input suppression patches installed.");
+                _logger.Info("Generic conflicting-input suppression patches installed.");
             }
             catch (Exception ex)
             {
@@ -32,9 +34,17 @@ namespace Voidstep
             }
         }
 
+        protected override void OnBeforeInitialModuleScreenSetAsRoot()
+        {
+            base.OnBeforeInitialModuleScreenSetAsRoot();
+            NativeHotkeysReady = VoidstepHotKeyContext.TryRegister(_logger);
+        }
+
         protected override void OnSubModuleUnloaded()
         {
             InputSuppressionReady = false;
+            NativeHotkeysReady = false;
+            InputConflictSuppression.Reset();
             if (_harmony != null && !TryUnpatchOwnedPatches())
             {
                 _logger?.Error(
@@ -53,11 +63,13 @@ namespace Voidstep
             if (mission == null) return;
 
             var logger = _logger ?? new VoidstepLogger();
-            if (!InputSuppressionReady || _harmony == null)
+            if (!NativeHotkeysReady)
+                NativeHotkeysReady = VoidstepHotKeyContext.TryRegister(logger);
+            if (!InputSuppressionReady || _harmony == null || !NativeHotkeysReady)
             {
                 logger.Error(
-                    "Mission runtime was not registered because Ctrl+number formation-input suppression is unavailable.",
-                    new InvalidOperationException("Voidstep input suppression is not ready."));
+                    "Mission runtime was not registered because native hotkeys or conflicting-input suppression are unavailable.",
+                    new InvalidOperationException("Voidstep input runtime is not ready."));
                 return;
             }
 
