@@ -79,6 +79,14 @@ domino_removed_callback = re.search(
 domino_hit_text = domino_hit_callback.group(0) if domino_hit_callback else ''
 domino_removed_text = domino_removed_callback.group(0) if domino_removed_callback else ''
 
+cleave_partial_ownership = re.search(
+    r'SetCurrentActionSpeed\(1, 0\.01f\);\s*'
+    r'_cleaveActor = actor;\s*'
+    r'_cleaveActionOwned = true;\s*'
+    r'actor\.SetCurrentActionProgress\(1, 0f\);',
+    animation,
+    re.DOTALL)
+
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
     'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in mission_behavior and 'EnsureInitialized("EarlyStart")' in mission_behavior,
@@ -115,7 +123,9 @@ checks = {
     'failed cast reticle donors release local ownership': 'Mesh mesh = null;' in effects and 'mesh = null;' in effects,
     'cast reticle color updates mesh contour and factor': '_markerMeshes.TryGetValue(marker, out var mesh)' in effects and 'mesh.SetColorAndStroke(color, color, true)' in effects and 'marker.SetContourColor(color, true)' in effects and 'marker.SetFactorColor(color)' in effects,
     'marker particle count respects effect intensity': 'var intensity = VoidstepSettings.Current.EffectIntensity;' in effects and 'var offsetCount = intensity >= 1f ? MarkerOffsets.Length : 1;' in effects,
-    'all six successful activations play native cast actions': '[HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.TryActivate))]' in cast_animation_patch and 'if (!__result) return;' in cast_animation_patch and 'AnimationController.PlayAbilityCast' in cast_animation_patch and 'SetActionChannel(1, action)' in animation,
+    'successful activations play logged native cast actions': '[HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.TryActivate))]' in cast_animation_patch and 'AnimationController.PlayAbilityCast(actor, ability, __instance.Logger);' in cast_animation_patch and 'internal VoidstepLogger Logger => _context.Logger;' in ability_manager and 'SetActionChannel(1, action)' in animation,
+    'dark vision disable skips cast action': 'out bool __state' in cast_animation_patch and 'ability == AbilityId.DarkVision && __instance.IsDarkVisionActive' in cast_animation_patch and 'if (!__result || __state) return;' in cast_animation_patch and 'internal bool IsDarkVisionActive => _darkVision.Active;' in ability_manager,
+    'cleave execution owns speed before progress initialization': cleave_partial_ownership is not None and 'ResetActionSpeed(actor);' in animation,
     'cleave execution owns and restores action progress': 'BeginCleave(actor);' in cleave and 'SetCleaveProgress(_actor, progress);' in cleave and 'SetCurrentActionProgress(1' in animation and 'ResetActionSpeed(_actor);' in cleave,
     'all six abilities expose cast feedback': 'CreateWorldMarker' in ability_manager and 'CreateWorldMarker' in blink and 'CreateWorldMarker' in domino and '_effects.Windblast' in windblast and '_effects.BendTime' in ability_manager and 'SetContourColor' in dark_vision,
     'blink targeting freezes mission time': 'new Mission.TimeSpeedRequest(0f, AimTimeRequestId)' in blink and 'MBCommon.GetApplicationTime()' in blink and 'realDt' in blink,
@@ -142,7 +152,7 @@ checks = {
     'domino hit callback only queues propagation': domino_hit_callback is not None and '_pending.Add(new PendingPropagation' in domino_hit_text and 'ApplyDirectBlow' not in domino_hit_text,
     'domino removal callback only queues propagation': domino_removed_callback is not None and '_pending.Add(new PendingPropagation' in domino_removed_text and 'ApplyDirectBlow' not in domino_removed_text,
     'domino propagation dispatches after callback on mission tick': 'DispatchPendingPropagations();' in domino and '_blows.ApplyDirectBlow' in domino and 'after the native hit callback completed' in domino,
-    'domino propagated deaths cannot recurse': '_propagatedDeathSuppression' in domino and 'ConsumePropagatedDeathSuppression' in domino and 'PropagatedDeathSuppressionTicks' in domino,
+    'domino propagated deaths cannot recurse': '_propagatedDeathSuppression' in domino and 'ConsumePropagatedDeathSuppression' in domino and 'PropagatedDeathSuppressionTicks' in domino and 'var mayKill = entry.Lethal || entry.Damage >= Math.Ceiling(target.Health);' in domino,
     'domino propagated callbacks remain tagged': '(blow.BlowFlag & BlowFlags.NoSound) != 0' in domino and 'BlowFlags.NoSound' in domino,
     'dark vision immediate and throttled': 'Refresh();' in dark_vision and 'DarkVisionRefreshInterval' in dark_vision,
     'dark vision counts successful contours only': 'if (TrySetContour(agent, color))' in dark_vision and 'private static bool ClearContour' in dark_vision and 'if (ClearContour(' in dark_vision,
