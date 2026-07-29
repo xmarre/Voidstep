@@ -7,7 +7,7 @@ namespace Voidstep
 {
     internal sealed class BlinkController
     {
-        private const int AimTimeRequestId = 0x5653424C; // VSBL
+        private const int AimTimeRequestId = 0x5653424C;
         private readonly Mission _mission;
         private readonly TargetingService _targeting;
         private readonly TeleportValidator _validator;
@@ -21,6 +21,10 @@ namespace Voidstep
         private float _refresh;
         private bool _ownsTimeRequest;
         private bool _timeCleanupPending;
+        private bool? _lastLoggedSuccess;
+        private string _lastLoggedReason;
+        private Vec3 _lastLoggedPosition;
+        private bool _hasLastLoggedPosition;
 
         public BlinkController(Mission mission, TargetingService targeting, TeleportValidator validator, EffectController effects, HudService hud, VoidstepLogger logger)
         {
@@ -43,6 +47,10 @@ namespace Voidstep
             IsAiming = true;
             _elapsed = 0f;
             _refresh = 0f;
+            _lastLoggedSuccess = null;
+            _lastLoggedReason = null;
+            _lastLoggedPosition = Vec3.Invalid;
+            _hasLastLoggedPosition = false;
             if (VoidstepSettings.Current.BlinkAimSlowdown)
             {
                 if (_ownsTimeRequest)
@@ -60,8 +68,6 @@ namespace Voidstep
                         }
                         else
                         {
-                            // Mark ownership before adding so a partially completed
-                            // native call is still cleaned through the verified release path.
                             _ownsTimeRequest = true;
                             _timeCleanupPending = false;
                             _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0.35f, AimTimeRequestId));
@@ -75,7 +81,8 @@ namespace Voidstep
                 }
             }
             RefreshPreview();
-            _hud.Show("Blink aiming — press the Blink key again to confirm.");
+            _hud.Show("Blink aiming — move the camera; green is valid, red is blocked. Press Blink again to teleport.");
+            _logger.Debug("Blink targeting started.");
             return true;
         }
 
@@ -99,6 +106,7 @@ namespace Voidstep
             if (_elapsed >= 8f)
             {
                 _hud.Show("Blink aiming expired.");
+                _logger.Debug("Blink targeting expired.");
                 Cancel();
             }
         }
@@ -116,9 +124,11 @@ namespace Voidstep
             if (!_validation.Success)
             {
                 failure = _validation.Reason ?? "No safe Blink destination was found.";
+                _logger.Debug("Blink confirmation rejected: " + failure);
                 return false;
             }
             destination = _validation.Position;
+            _logger.Debug($"Blink confirmed destination=({destination.x:0.00}, {destination.y:0.00}, {destination.z:0.00}), fallback={_validation.UsedFallback}.");
             CancelPreviewAndTime();
             IsAiming = false;
             _actor = null;
@@ -133,6 +143,10 @@ namespace Voidstep
             _refresh = 0f;
             _actor = null;
             _validation = default(TeleportValidationResult);
+            _lastLoggedSuccess = null;
+            _lastLoggedReason = null;
+            _lastLoggedPosition = Vec3.Invalid;
+            _hasLastLoggedPosition = false;
         }
 
         private void RefreshPreview()
@@ -143,11 +157,23 @@ namespace Voidstep
             _validation = _validator.Validate(_actor, requested, settings.BlinkRange, settings.BlinkThroughWalls);
             var position = _validation.Success ? _validation.Position : requested;
             var color = _validation.Success ? 0x60E080FFu : 0xE05050FFu;
-            if (_preview == null) _preview = _effects.CreateWorldMarker(position + Vec3.Up * 0.15f, color);
+            if (_preview == null)
+                _preview = _effects.CreateWorldMarker(position + Vec3.Up * 0.15f, color);
             else
             {
                 _effects.MoveMarker(_preview, position + Vec3.Up * 0.15f);
-                try { _preview.SetContourColor(color, true); } catch { }
+                _effects.SetMarkerColor(_preview, color);
+            }
+
+            var moved = !_hasLastLoggedPosition || (_lastLoggedPosition - position).LengthSquared > 1f;
+            if (_lastLoggedSuccess != _validation.Success ||
+                !string.Equals(_lastLoggedReason, _validation.Reason, StringComparison.Ordinal) || moved)
+            {
+                _logger.Debug($"Blink preview valid={_validation.Success}, fallback={_validation.UsedFallback}, position=({position.x:0.00}, {position.y:0.00}, {position.z:0.00}), reason={_validation.Reason ?? "none"}.");
+                _lastLoggedSuccess = _validation.Success;
+                _lastLoggedReason = _validation.Reason;
+                _lastLoggedPosition = position;
+                _hasLastLoggedPosition = true;
             }
         }
 
@@ -158,7 +184,7 @@ namespace Voidstep
             {
                 var away = locked.Position - actor.Position;
                 away.z = 0f;
-                if (away.Normalize() < 0.001f) away = actor.LookDirection;
+                if (away.Normalize() < 0.001f) away = _targeting.GetAimDirection(actor);
                 return locked.Position + away * 1.35f;
             }
             if (_targeting.TryGetAimedGroundPosition(actor, range, out var aimed))
@@ -191,8 +217,6 @@ namespace Voidstep
             _timeCleanupPending = true;
             try
             {
-                // RemoveTimeSpeedRequest throws when its ID is absent, so always
-                // confirm removal and retain ownership if native cleanup fails.
                 float requestedFactor;
                 if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out requestedFactor))
                 {
