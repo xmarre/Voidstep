@@ -11,6 +11,7 @@ namespace Voidstep
         private readonly StandaloneAbilityWheel _standalone;
         private readonly TorAbilityWheelAdapter _tor;
         private readonly VoidstepLogger _logger;
+        private bool _wasUsingTorWheel;
         private bool _suppressRightMouseUntilRelease;
         private bool _suppressEscapeUntilRelease;
 
@@ -21,6 +22,7 @@ namespace Voidstep
             _selection = new AbilitySelectionController(mission, manager, logger);
             _standalone = new StandaloneAbilityWheel(logger, ability => _selection.Select(ability, "standalone Q cast wheel"));
             _tor = new TorAbilityWheelAdapter(mission, _selection, logger);
+            _wasUsingTorWheel = _tor.IsAvailable;
             VoidstepWheelRuntime.Attach(this);
         }
 
@@ -31,6 +33,7 @@ namespace Voidstep
             RefreshSuppressionLatches();
             _selection.Tick(dt);
             _tor.Tick();
+            HandleWheelAvailabilityTransition();
 
             if (!_tor.IsAvailable)
             {
@@ -98,9 +101,31 @@ namespace Voidstep
             _standalone.Cleanup();
             _tor.Cleanup();
             _selection.Cleanup();
+            _wasUsingTorWheel = false;
             _suppressRightMouseUntilRelease = false;
             _suppressEscapeUntilRelease = false;
             _logger.Debug("Ability wheel and selection ownership cleaned up.");
+        }
+
+        private void HandleWheelAvailabilityTransition()
+        {
+            var usingTor = _tor.IsAvailable;
+            if (usingTor == _wasUsingTorWheel)
+                return;
+
+            if (usingTor)
+            {
+                _standalone.Cleanup();
+                _logger.Info("TOR ability component became available; Q now uses TOR's existing cast wheel.");
+            }
+            else
+            {
+                if (_tor.OwnsTargeting)
+                    _tor.CloseTargetingMode();
+                _selection.Cancel(true);
+                _logger.Info("TOR cast-wheel integration is unavailable; Q reverted to the standalone Voidstep wheel.");
+            }
+            _wasUsingTorWheel = usingTor;
         }
 
         private void RefreshSuppressionLatches()
