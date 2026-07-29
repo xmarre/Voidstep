@@ -1,0 +1,6 @@
+{
+  "version": "v1.1.0",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Adds the unified Q selection wheel, Mouse2-confirmed casting, TOR wheel integration and explicit Domino propagation ownership."
+}
