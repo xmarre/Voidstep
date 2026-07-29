@@ -1,4 +1,5 @@
 using System;
+using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using Voidstep.Core;
@@ -32,6 +33,8 @@ namespace Voidstep
         private float _castRecoveryRadians;
         private int _controlledAgentIndex;
         private Vec3 _castOriginalLook;
+        private MissionWeapon _cleaveWeapon;
+        private GameEntity _cleaveMarker;
         private const float OwnedFov = 1.08f;
 
         public AbilityManager(AbilityContext context)
@@ -44,7 +47,7 @@ namespace Voidstep
             _blows = new BlowFactory(context.Mission, context.Logger);
             _hud = new HudService();
             _cleave = new CleaveSweepController(context.Mission, _blows, _effects, _animation, context.Logger);
-            _windblast = new WindblastController(context.Mission, _blows, _effects, context.Logger);
+            _windblast = new WindblastController(context.Mission, _blows, _effects, _targeting, context.Logger);
             _time = new TimeControlService(context.Mission, context.Logger);
             _domino = new DominoLinkService(context.Mission, _blows, _effects, context.Logger);
             _darkVision = new DarkVisionService(context.Mission, context.Logger);
@@ -108,6 +111,8 @@ namespace Voidstep
             if (!_context.IsPlayerUsable())
                 return Fail("No active player agent is available.");
 
+            _context.Logger.Debug($"Activation requested ability={ability}, actor={player.Index}, position={Format(player.Position)}, look={Format(_targeting.GetAimDirection(player))}, weaponEmpty={player.WieldedWeapon.IsEmpty}.");
+
             if (ability == AbilityId.Blink && _state.IsCasting && _state.Ability == AbilityId.Blink && _state.Phase == AbilityPhase.Targeting)
                 return ConfirmBlink(player);
 
@@ -118,6 +123,7 @@ namespace Voidstep
             {
                 _darkVision.Disable();
                 _hud.Show("Dark Vision disabled.");
+                _context.Logger.Debug("Dark Vision toggled off.");
                 return true;
             }
 
@@ -147,10 +153,8 @@ namespace Voidstep
             }
         }
 
-        public void OnAgentHit(Agent affectedAgent, Agent affectorAgent, ref Blow blow)
-        {
+        public void OnAgentHit(Agent affectedAgent, Agent affectorAgent, ref Blow blow) =>
             _domino.OnAgentHit(affectedAgent, affectorAgent, ref blow);
-        }
 
         public void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, TaleWorlds.Core.AgentState state)
         {
@@ -189,6 +193,7 @@ namespace Voidstep
             _domino.Clear();
             _darkVision.Disable();
             RestoreFov();
+            RemoveCleaveMarker();
             _effects.Cleanup();
             _context.Cooldowns.Clear();
             _context.Energy.Reset();
@@ -197,6 +202,10 @@ namespace Voidstep
 
         private bool BeginVoidstep(Agent player)
         {
+            _cleaveWeapon = player.WieldedWeapon;
+            if (_cleaveWeapon.IsEmpty)
+                return Fail("Voidstep Cleave requires a wielded melee weapon.");
+
             var settings = VoidstepSettings.Current;
             var requested = ResolveVoidstepDestination(player, settings.VoidstepRange);
             var validation = _teleportValidator.Validate(player, requested, settings.VoidstepRange, false);
@@ -213,7 +222,9 @@ namespace Voidstep
             _castRecoveryRadians = (settings.CleaveClockwise ? -1f : 1f) * (360f - settings.CleaveSweepDegrees) * (float)Math.PI / 180f;
             _state.Transition(_token, AbilityPhase.Validating);
             _state.Transition(_token, AbilityPhase.WindUp);
+            _cleaveMarker = _effects.CreateWorldMarker(_destination + Vec3.Up * 0.2f, 0x60E080FFu);
             BeginFovPulse();
+            _context.Logger.Debug($"Voidstep Cleave locked destination={Format(_destination)}, fallback={validation.UsedFallback}.");
             _hud.ShowAbilityResult(AbilityId.VoidstepCleave, _context.Energy, _context.Cooldowns);
             return true;
         }
@@ -224,7 +235,7 @@ namespace Voidstep
             switch (_state.Phase)
             {
                 case AbilityPhase.WindUp:
-                    if (_state.PhaseElapsed >= 0.18f)
+                    if (_state.PhaseElapsed >= 0.24f)
                     {
                         _effects.Departure(player.Position);
                         _effects.PlaySound("event:/mission/combat/swing/weapon_swing", player.Position);
@@ -243,6 +254,8 @@ namespace Voidstep
                         }
                         _destination = validation.Position;
                         TeleportActor(player, _destination, false);
+                        RemoveCleaveMarker();
+                        _context.Logger.Debug($"Voidstep Cleave teleported actor to {Format(player.Position)}.");
                         _state.Transition(_token, AbilityPhase.Teleporting);
                     }
                     break;
@@ -253,27 +266,31 @@ namespace Voidstep
                 case AbilityPhase.Arriving:
                     if (_state.PhaseElapsed >= 0.08f)
                     {
-                        _cleave.Begin(player);
+                        if (!_cleave.Begin(player, _cleaveWeapon, out var failure))
+                        {
+                            Fail(failure ?? "Cleave execution could not start.");
+                            CancelCurrent(CancelReason.Interrupted);
+                            return;
+                        }
                         _state.Transition(_token, AbilityPhase.Active);
                     }
                     break;
                 case AbilityPhase.Active:
                     if (_cleave.Tick(dt))
                     {
+                        _context.Logger.Debug($"Voidstep Cleave active phase finished; hits={_cleave.SuccessfulHits}.");
                         RestoreFov();
                         _state.Transition(_token, AbilityPhase.Recovery);
                     }
                     break;
                 case AbilityPhase.Recovery:
-                    {
-                        var progress = Math.Min(1f, _state.PhaseElapsed / 0.25f);
-                        var delta = Math.Max(0f, progress - _recoveryRotationProgress);
-                        _animation.RotateActor(player, _castRecoveryRadians * delta);
-                        _recoveryRotationProgress = progress;
-                        if (_state.PhaseElapsed >= 0.25f)
-                            CompleteCurrent();
-                        break;
-                    }
+                    var progress = Math.Min(1f, _state.PhaseElapsed / 0.25f);
+                    var delta = Math.Max(0f, progress - _recoveryRotationProgress);
+                    _animation.RotateActor(player, _castRecoveryRadians * delta);
+                    _recoveryRotationProgress = progress;
+                    if (_state.PhaseElapsed >= 0.25f)
+                        CompleteCurrent();
+                    break;
             }
         }
 
@@ -308,6 +325,7 @@ namespace Voidstep
             _state.Transition(_token, AbilityPhase.Arriving);
             _state.Transition(_token, AbilityPhase.Active);
             _state.Transition(_token, AbilityPhase.Recovery);
+            _context.Logger.Debug($"Blink completed at {Format(player.Position)}.");
             _hud.ShowAbilityResult(AbilityId.Blink, _context.Energy, _context.Cooldowns);
             CompleteCurrent();
             return true;
@@ -317,14 +335,12 @@ namespace Voidstep
         {
             if (!PayAndStartCooldown(AbilityId.Windblast))
                 return Fail("Not enough Void Energy.");
-
             var hitCount = _windblast.Cast(player);
             if (hitCount <= 0)
             {
                 RollbackPayment(AbilityId.Windblast);
-                return Fail("Windblast found no valid enemy in the cone.");
+                return Fail("Windblast found no valid enemy in the aimed cone.");
             }
-
             _effects.PlaySound("event:/mission/combat/hit/weapon_hit", player.Position);
             CompleteImmediate(AbilityId.Windblast, player);
             _hud.Show($"Windblast affected {hitCount} target{(hitCount == 1 ? string.Empty : "s")}.");
@@ -344,6 +360,7 @@ namespace Voidstep
             _effects.BendTime(player.Position);
             _effects.PlaySound("event:/mission/ambient/night", player.Position);
             CompleteImmediate(AbilityId.BendTime, player);
+            _context.Logger.Debug($"Bend Time started factor={settings.BendTimeFactor:0.00}, duration={settings.BendTimeDuration:0.00}.");
             _hud.ShowAbilityResult(AbilityId.BendTime, _context.Energy, _context.Cooldowns);
             return true;
         }
@@ -351,6 +368,7 @@ namespace Voidstep
         private bool CastDomino(Agent player)
         {
             var count = _domino.Mark(player);
+            _context.Logger.Debug($"Domino targeting selected {count} valid enemies.");
             if (count < 2)
             {
                 _domino.Clear();
@@ -403,6 +421,8 @@ namespace Voidstep
             _recoveryRotationProgress = 0f;
             _castRecoveryRadians = 0f;
             _castOriginalLook = Vec3.Zero;
+            _cleaveWeapon = default(MissionWeapon);
+            RemoveCleaveMarker();
             RestoreFov();
         }
 
@@ -421,12 +441,15 @@ namespace Voidstep
             {
                 try { actor.LookDirection = _castOriginalLook; } catch { }
             }
+            _context.Logger.Debug($"Ability state cancelled reason={reason}.");
             _token = default(CastToken);
             _castActorIndex = -1;
             _destination = Vec3.Invalid;
             _recoveryRotationProgress = 0f;
             _castRecoveryRadians = 0f;
             _castOriginalLook = Vec3.Zero;
+            _cleaveWeapon = default(MissionWeapon);
+            RemoveCleaveMarker();
             RestoreFov();
         }
 
@@ -448,11 +471,18 @@ namespace Voidstep
             {
                 var travel = locked.Position - player.Position;
                 travel.z = 0f;
-                if (travel.Normalize() < 0.001f) travel = player.LookDirection;
+                if (travel.Normalize() < 0.001f) travel = _targeting.GetAimDirection(player);
+                _context.Logger.Debug($"Voidstep Cleave locked enemy={locked.Index} at {Format(locked.Position)}.");
                 return locked.Position + travel * 1.5f;
             }
-            if (_targeting.TryGetAimedGroundPosition(player, range, out var aimed)) return aimed;
-            return _targeting.GetForwardFallback(player, Math.Min(range, 5f));
+            if (_targeting.TryGetAimedGroundPosition(player, range, out var aimed))
+            {
+                _context.Logger.Debug($"Voidstep Cleave selected aimed ground {Format(aimed)}.");
+                return aimed;
+            }
+            var fallback = _targeting.GetForwardFallback(player, Math.Min(range, 5f));
+            _context.Logger.Debug($"Voidstep Cleave used forward fallback {Format(fallback)}.");
+            return fallback;
         }
 
         private void TeleportActor(Agent actor, Vec3 position, bool preserveMomentum)
@@ -496,7 +526,6 @@ namespace Voidstep
             return true;
         }
 
-
         private void RollbackPayment(AbilityId ability)
         {
             var settings = VoidstepSettings.Current;
@@ -507,6 +536,7 @@ namespace Voidstep
 
         private bool Fail(string message)
         {
+            _context.Logger.Debug("Ability rejected: " + message);
             _hud.Show(message);
             return false;
         }
@@ -534,5 +564,14 @@ namespace Voidstep
             catch { }
             _fovOwned = false;
         }
+
+        private void RemoveCleaveMarker()
+        {
+            if (_cleaveMarker == null) return;
+            _effects.RemoveMarker(_cleaveMarker);
+            _cleaveMarker = null;
+        }
+
+        private static string Format(Vec3 value) => $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
     }
 }
