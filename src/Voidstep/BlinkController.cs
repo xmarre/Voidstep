@@ -46,8 +46,8 @@ namespace Voidstep
             {
                 try
                 {
-                    float existingFactor = 0f;
-                    if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, ref existingFactor))
+                    float existingFactor;
+                    if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out existingFactor))
                     {
                         _logger.Debug("Blink aim slowdown skipped because its reserved mission speed request ID is already active.");
                     }
@@ -173,8 +173,8 @@ namespace Voidstep
             {
                 // RemoveTimeSpeedRequest throws when its ID is absent, so always
                 // confirm that the owned request still exists before removing it.
-                float requestedFactor = 0f;
-                if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, ref requestedFactor))
+                float requestedFactor;
+                if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out requestedFactor))
                     _mission.RemoveTimeSpeedRequest(AimTimeRequestId);
             }
             catch (Exception ex) { _logger.Debug("Blink aim time cleanup failed: " + ex.Message); }
