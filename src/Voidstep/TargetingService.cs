@@ -8,6 +8,16 @@ namespace Voidstep
     internal sealed class TargetingService
     {
         private const int MaximumIgnoredRayHits = 6;
+        private static readonly string[] ProjectileNameFragments =
+        {
+            "arrow",
+            "bolt",
+            "missile",
+            "javelin",
+            "throwing_axe",
+            "throwing_knife"
+        };
+
         private readonly Mission _mission;
         private readonly MBList<Agent> _nearby = new MBList<Agent>();
 
@@ -179,9 +189,10 @@ namespace Voidstep
         private static bool LooksLikeProjectileName(string value)
         {
             if (string.IsNullOrEmpty(value)) return false;
-            value = value.ToLowerInvariant();
-            return value.Contains("arrow") || value.Contains("bolt") || value.Contains("missile") ||
-                   value.Contains("javelin") || value.Contains("throwing_axe") || value.Contains("throwing_knife");
+            for (var i = 0; i < ProjectileNameFragments.Length; i++)
+                if (value.IndexOf(ProjectileNameFragments[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            return false;
         }
 
         private static Vec3 ClampToRange(Vec3 origin, Vec3 requested, float range)
