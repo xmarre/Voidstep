@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using HarmonyLib;
 using MCM.Common;
 using TaleWorlds.InputSystem;
@@ -31,32 +33,79 @@ namespace Voidstep
             AbilityId.DarkVision
         };
 
+        private static readonly object CacheSync = new object();
+        private static BindingCache _cache = BindingCache.Empty;
+        private static int _cacheDirty = 1;
+        private static bool _keybindEventsAttached;
+
+        internal static bool IsCacheDirty => Volatile.Read(ref _cacheDirty) != 0;
+
+        internal static void AttachKeybindEvents()
+        {
+            lock (CacheSync)
+            {
+                if (!_keybindEventsAttached)
+                {
+                    HotKeyManager.OnKeybindsChanged += Invalidate;
+                    _keybindEventsAttached = true;
+                }
+                Volatile.Write(ref _cacheDirty, 1);
+            }
+        }
+
+        internal static void DetachKeybindEvents()
+        {
+            lock (CacheSync)
+            {
+                if (_keybindEventsAttached)
+                {
+                    HotKeyManager.OnKeybindsChanged -= Invalidate;
+                    _keybindEventsAttached = false;
+                }
+                Volatile.Write(ref _cache, BindingCache.Empty);
+                Volatile.Write(ref _cacheDirty, 1);
+            }
+        }
+
+        internal static bool RefreshCacheIfChanged()
+        {
+            lock (CacheSync)
+            {
+                var current = Volatile.Read(ref _cache);
+                var dirty = Interlocked.Exchange(ref _cacheDirty, 0) != 0;
+                if (!dirty && CacheMatchesCurrent(current))
+                    return false;
+
+                Volatile.Write(ref _cache, BuildCache());
+                return true;
+            }
+        }
+
         internal static bool TryGetPressedKey(AbilityId ability, out InputKey pressedKey)
         {
             pressedKey = InputKey.Invalid;
-            var hotKey = VoidstepHotKeyContext.Get(ability);
-            if (hotKey == null)
+            var cache = Volatile.Read(ref _cache);
+            var entry = cache.Get(ability);
+            if (entry == null)
                 return false;
 
-            using (InputConflictSuppression.EnterBypass())
+            var currentModifiers = InputConflictSuppression.CurrentModifiers;
+            for (var i = 0; i < entry.Keys.Length; i++)
             {
-                var modifiers = GetModifiers(ability);
-                if (!ModifiersSatisfied(modifiers))
-                    return false;
+                var inputKey = entry.Keys[i];
+                if (!ModifiersMatch(entry.Modifiers, currentModifiers, inputKey))
+                    continue;
+                if (cache.AmbiguousChords.Contains(ChordCode(entry.Modifiers, inputKey)))
+                    continue;
 
-                for (var i = 0; i < hotKey.Keys.Count; i++)
+                using (InputConflictSuppression.EnterBypass())
                 {
-                    var key = hotKey.Keys[i];
-                    if (key == null || key.InputKey == InputKey.Invalid)
+                    if (!Input.IsKeyPressed(inputKey))
                         continue;
-                    if (!Input.IsKeyPressed(key.InputKey))
-                        continue;
-                    if (IsAmbiguousChord(ability, key.InputKey, modifiers))
-                        return false;
-
-                    pressedKey = key.InputKey;
-                    return true;
                 }
+
+                pressedKey = inputKey;
+                return true;
             }
             return false;
         }
@@ -66,80 +115,167 @@ namespace Voidstep
             if (inputKey == InputKey.Invalid)
                 return false;
 
-            for (var i = 0; i < Abilities.Length; i++)
+            var cache = Volatile.Read(ref _cache);
+            if (!cache.BoundPrimaryKeys.Contains(inputKey))
+                return false;
+
+            var currentModifiers = InputConflictSuppression.CurrentModifiers;
+            for (var i = 0; i < cache.Entries.Length; i++)
             {
-                var ability = Abilities[i];
-                var hotKey = VoidstepHotKeyContext.Get(ability);
-                if (hotKey == null || !ContainsKey(hotKey, inputKey))
+                var entry = cache.Entries[i];
+                if (!ContainsKey(entry.Keys, inputKey))
                     continue;
-                if (!ModifiersSatisfied(GetModifiers(ability)))
+                if (!ModifiersMatch(entry.Modifiers, currentModifiers, inputKey))
                     continue;
-                if (Input.IsKeyPressed(inputKey) || Input.IsKeyDown(inputKey) || Input.IsKeyDownImmediate(inputKey) || Input.IsKeyReleased(inputKey))
-                    return true;
+                if (cache.AmbiguousChords.Contains(ChordCode(entry.Modifiers, inputKey)))
+                    continue;
+                return true;
             }
             return false;
         }
 
+        internal static bool IsBoundPrimaryKey(InputKey inputKey)
+        {
+            return inputKey != InputKey.Invalid &&
+                   Volatile.Read(ref _cache).BoundPrimaryKeys.Contains(inputKey);
+        }
+
         internal static string GetSummary()
         {
-            var parts = new string[Abilities.Length];
-            for (var i = 0; i < Abilities.Length; i++)
-                parts[i] = AbilityName(Abilities[i]) + "=" + FormatBinding(Abilities[i]);
-            return string.Join(", ", parts);
+            return Volatile.Read(ref _cache).Summary;
         }
 
         internal static string GetConflictWarning()
         {
-            for (var i = 0; i < Abilities.Length; i++)
-            {
-                var first = Abilities[i];
-                var firstModifiers = GetModifiers(first);
-                var firstHotKey = VoidstepHotKeyContext.Get(first);
-                if (firstHotKey == null)
-                    continue;
-
-                for (var keyIndex = 0; keyIndex < firstHotKey.Keys.Count; keyIndex++)
-                {
-                    var firstKey = firstHotKey.Keys[keyIndex];
-                    if (firstKey == null || firstKey.InputKey == InputKey.Invalid)
-                        continue;
-
-                    for (var j = i + 1; j < Abilities.Length; j++)
-                    {
-                        var second = Abilities[j];
-                        if (firstModifiers != GetModifiers(second))
-                            continue;
-                        var secondHotKey = VoidstepHotKeyContext.Get(second);
-                        if (secondHotKey == null || !ContainsKey(secondHotKey, firstKey.InputKey))
-                            continue;
-
-                        return $"Duplicate Voidstep chord {FormatModifiers(firstModifiers)}{firstKey}: {AbilityName(first)} and {AbilityName(second)}. Rebind one primary key in Options > Keybindings > Voidstep or change one modifier in MCM. The duplicate chord is disabled.";
-                    }
-                }
-            }
-            return null;
+            return Volatile.Read(ref _cache).ConflictWarning;
         }
 
         internal static string FormatBinding(AbilityId ability)
         {
-            var hotKey = VoidstepHotKeyContext.Get(ability);
-            var keyName = "<unbound>";
-            if (hotKey != null)
+            var entry = Volatile.Read(ref _cache).Get(ability);
+            return entry?.Display ?? "<unbound>";
+        }
+
+        private static void Invalidate()
+        {
+            Volatile.Write(ref _cacheDirty, 1);
+        }
+
+        private static bool CacheMatchesCurrent(BindingCache cache)
+        {
+            if (cache == null || cache.Entries.Length != Abilities.Length)
+                return false;
+
+            for (var i = 0; i < Abilities.Length; i++)
             {
-                for (var i = 0; i < hotKey.Keys.Count; i++)
+                var entry = cache.Entries[i];
+                if (entry.Ability != Abilities[i] || entry.Modifiers != ReadConfiguredModifiers(entry.Ability))
+                    return false;
+                if (!KeysMatchCurrent(entry.Ability, entry.Keys))
+                    return false;
+            }
+            return true;
+        }
+
+        private static bool KeysMatchCurrent(AbilityId ability, InputKey[] cachedKeys)
+        {
+            var hotKey = VoidstepHotKeyContext.Get(ability);
+            if (hotKey == null)
+                return cachedKeys.Length == 0;
+
+            var cachedIndex = 0;
+            for (var i = 0; i < hotKey.Keys.Count; i++)
+            {
+                var key = hotKey.Keys[i];
+                if (key == null || key.InputKey == InputKey.Invalid)
+                    continue;
+                if (cachedIndex >= cachedKeys.Length || cachedKeys[cachedIndex] != key.InputKey)
+                    return false;
+                cachedIndex++;
+            }
+            return cachedIndex == cachedKeys.Length;
+        }
+
+        private static BindingCache BuildCache()
+        {
+            var entries = new BindingEntry[Abilities.Length];
+            var boundPrimaryKeys = new HashSet<InputKey>();
+            for (var i = 0; i < Abilities.Length; i++)
+            {
+                var ability = Abilities[i];
+                var keys = ReadCurrentKeys(ability);
+                for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+                    boundPrimaryKeys.Add(keys[keyIndex]);
+
+                entries[i] = new BindingEntry(
+                    ability,
+                    ReadConfiguredModifiers(ability),
+                    keys);
+            }
+
+            var ambiguousChords = new HashSet<long>();
+            string conflictWarning = null;
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var first = entries[i];
+                for (var j = i + 1; j < entries.Length; j++)
                 {
-                    var key = hotKey.Keys[i];
-                    if (key == null || key.InputKey == InputKey.Invalid || key.IsControllerInput)
+                    var second = entries[j];
+                    if (first.Modifiers != second.Modifiers)
                         continue;
-                    keyName = key.ToString();
-                    break;
+
+                    for (var keyIndex = 0; keyIndex < first.Keys.Length; keyIndex++)
+                    {
+                        var inputKey = first.Keys[keyIndex];
+                        if (!ContainsKey(second.Keys, inputKey))
+                            continue;
+
+                        ambiguousChords.Add(ChordCode(first.Modifiers, inputKey));
+                        if (conflictWarning == null)
+                        {
+                            conflictWarning =
+                                $"Duplicate Voidstep chord {FormatModifiers(first.Modifiers)}{KeyName(inputKey)}: " +
+                                $"{AbilityName(first.Ability)} and {AbilityName(second.Ability)}. " +
+                                "Rebind one primary key in Options > Keybindings > Voidstep or change one modifier in MCM. " +
+                                "The duplicate ability chord is disabled and the native game action remains available.";
+                        }
+                    }
                 }
             }
 
-            return FormatModifiers(GetModifiers(ability)) + keyName;
+            var summaryParts = new string[entries.Length];
+            for (var i = 0; i < entries.Length; i++)
+            {
+                entries[i].Display = FormatModifiers(entries[i].Modifiers) +
+                                     (entries[i].Keys.Length > 0 ? KeyName(entries[i].Keys[0]) : "<unbound>");
+                summaryParts[i] = AbilityName(entries[i].Ability) + "=" + entries[i].Display;
+            }
+
+            return new BindingCache(
+                entries,
+                boundPrimaryKeys,
+                ambiguousChords,
+                string.Join(", ", summaryParts),
+                conflictWarning);
         }
 
-        internal static VoidstepModifiers GetModifiers(AbilityId ability)
+        private static InputKey[] ReadCurrentKeys(AbilityId ability)
+        {
+            var hotKey = VoidstepHotKeyContext.Get(ability);
+            if (hotKey == null)
+                return Array.Empty<InputKey>();
+
+            var keys = new List<InputKey>(hotKey.Keys.Count);
+            for (var i = 0; i < hotKey.Keys.Count; i++)
+            {
+                var key = hotKey.Keys[i];
+                if (key != null && key.InputKey != InputKey.Invalid)
+                    keys.Add(key.InputKey);
+            }
+            return keys.ToArray();
+        }
+
+        private static VoidstepModifiers ReadConfiguredModifiers(AbilityId ability)
         {
             var settings = VoidstepSettings.Current;
             switch (ability)
@@ -154,43 +290,20 @@ namespace Voidstep
             }
         }
 
-        private static bool IsAmbiguousChord(AbilityId ability, InputKey inputKey, VoidstepModifiers modifiers)
+        private static bool ModifiersMatch(VoidstepModifiers required, VoidstepModifiers current, InputKey primaryKey)
         {
-            for (var i = 0; i < Abilities.Length; i++)
-            {
-                var other = Abilities[i];
-                if (other == ability || GetModifiers(other) != modifiers)
-                    continue;
-                var otherHotKey = VoidstepHotKeyContext.Get(other);
-                if (otherHotKey != null && ContainsKey(otherHotKey, inputKey))
-                    return true;
-            }
-            return false;
+            return (current & ~ModifierForPrimaryKey(primaryKey)) == required;
         }
 
-        private static bool ContainsKey(HotKey hotKey, InputKey inputKey)
+        private static VoidstepModifiers ModifierForPrimaryKey(InputKey inputKey)
         {
-            for (var i = 0; i < hotKey.Keys.Count; i++)
-            {
-                var key = hotKey.Keys[i];
-                if (key != null && key.InputKey == inputKey)
-                    return true;
-            }
-            return false;
-        }
-
-        private static bool ModifiersSatisfied(VoidstepModifiers modifiers) => GetCurrentModifiers() == modifiers;
-
-        private static VoidstepModifiers GetCurrentModifiers()
-        {
-            var result = VoidstepModifiers.None;
-            if (Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl))
-                result |= VoidstepModifiers.Control;
-            if (Input.IsKeyDown(InputKey.LeftAlt) || Input.IsKeyDown(InputKey.RightAlt))
-                result |= VoidstepModifiers.Alt;
-            if (Input.IsKeyDown(InputKey.LeftShift) || Input.IsKeyDown(InputKey.RightShift))
-                result |= VoidstepModifiers.Shift;
-            return result;
+            if (inputKey == InputKey.LeftControl || inputKey == InputKey.RightControl)
+                return VoidstepModifiers.Control;
+            if (inputKey == InputKey.LeftAlt || inputKey == InputKey.RightAlt)
+                return VoidstepModifiers.Alt;
+            if (inputKey == InputKey.LeftShift || inputKey == InputKey.RightShift)
+                return VoidstepModifiers.Shift;
+            return VoidstepModifiers.None;
         }
 
         private static VoidstepModifiers ParseModifiers(Dropdown<string> setting)
@@ -207,6 +320,26 @@ namespace Voidstep
             if (value.IndexOf("Shift", StringComparison.OrdinalIgnoreCase) >= 0)
                 result |= VoidstepModifiers.Shift;
             return result;
+        }
+
+        private static bool ContainsKey(InputKey[] keys, InputKey inputKey)
+        {
+            for (var i = 0; i < keys.Length; i++)
+            {
+                if (keys[i] == inputKey)
+                    return true;
+            }
+            return false;
+        }
+
+        private static long ChordCode(VoidstepModifiers modifiers, InputKey inputKey)
+        {
+            return ((long)(int)modifiers << 32) | (uint)(int)inputKey;
+        }
+
+        private static string KeyName(InputKey inputKey)
+        {
+            return new Key(inputKey).ToString();
         }
 
         private static string FormatModifiers(VoidstepModifiers modifiers)
@@ -231,6 +364,62 @@ namespace Voidstep
                 default: return ability.ToString();
             }
         }
+
+        private sealed class BindingEntry
+        {
+            internal BindingEntry(AbilityId ability, VoidstepModifiers modifiers, InputKey[] keys)
+            {
+                Ability = ability;
+                Modifiers = modifiers;
+                Keys = keys;
+                Display = "<unbound>";
+            }
+
+            internal AbilityId Ability { get; }
+            internal VoidstepModifiers Modifiers { get; }
+            internal InputKey[] Keys { get; }
+            internal string Display { get; set; }
+        }
+
+        private sealed class BindingCache
+        {
+            internal static readonly BindingCache Empty = new BindingCache(
+                Array.Empty<BindingEntry>(),
+                new HashSet<InputKey>(),
+                new HashSet<long>(),
+                "<bindings unavailable>",
+                null);
+
+            internal BindingCache(
+                BindingEntry[] entries,
+                HashSet<InputKey> boundPrimaryKeys,
+                HashSet<long> ambiguousChords,
+                string summary,
+                string conflictWarning)
+            {
+                Entries = entries;
+                BoundPrimaryKeys = boundPrimaryKeys;
+                AmbiguousChords = ambiguousChords;
+                Summary = summary;
+                ConflictWarning = conflictWarning;
+            }
+
+            internal BindingEntry[] Entries { get; }
+            internal HashSet<InputKey> BoundPrimaryKeys { get; }
+            internal HashSet<long> AmbiguousChords { get; }
+            internal string Summary { get; }
+            internal string ConflictWarning { get; }
+
+            internal BindingEntry Get(AbilityId ability)
+            {
+                for (var i = 0; i < Entries.Length; i++)
+                {
+                    if (Entries[i].Ability == ability)
+                        return Entries[i];
+                }
+                return null;
+            }
+        }
     }
 
     internal static class InputConflictSuppression
@@ -238,10 +427,23 @@ namespace Voidstep
         [ThreadStatic]
         private static int _bypassDepth;
 
-        private static readonly HashSet<InputKey> LatchedKeys = new HashSet<InputKey>();
-        private static readonly List<InputKey> ReleaseBuffer = new List<InputKey>(8);
+        private static readonly ConcurrentDictionary<InputKey, byte> LatchedKeys =
+            new ConcurrentDictionary<InputKey, byte>();
+
+        private static int _currentModifiers;
+        private static int _modifierSnapshotReady;
 
         internal static bool IsBypassed => _bypassDepth > 0;
+
+        internal static VoidstepModifiers CurrentModifiers
+        {
+            get
+            {
+                if (Volatile.Read(ref _modifierSnapshotReady) == 0)
+                    CaptureCurrentModifiers();
+                return (VoidstepModifiers)Volatile.Read(ref _currentModifiers);
+            }
+        }
 
         internal static BypassScope EnterBypass()
         {
@@ -249,61 +451,76 @@ namespace Voidstep
             return new BypassScope();
         }
 
+        internal static void CaptureCurrentModifiers()
+        {
+            var result = VoidstepModifiers.None;
+            using (EnterBypass())
+            {
+                if (Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl))
+                    result |= VoidstepModifiers.Control;
+                if (Input.IsKeyDown(InputKey.LeftAlt) || Input.IsKeyDown(InputKey.RightAlt))
+                    result |= VoidstepModifiers.Alt;
+                if (Input.IsKeyDown(InputKey.LeftShift) || Input.IsKeyDown(InputKey.RightShift))
+                    result |= VoidstepModifiers.Shift;
+            }
+
+            Volatile.Write(ref _currentModifiers, (int)result);
+            Volatile.Write(ref _modifierSnapshotReady, 1);
+        }
+
         internal static void Latch(InputKey inputKey)
         {
             if (inputKey != InputKey.Invalid)
-                LatchedKeys.Add(inputKey);
+                LatchedKeys.TryAdd(inputKey, 0);
         }
 
         internal static void RefreshLatches()
         {
-            if (LatchedKeys.Count == 0)
+            if (LatchedKeys.IsEmpty)
                 return;
 
-            ReleaseBuffer.Clear();
             using (EnterBypass())
             {
-                foreach (var inputKey in LatchedKeys)
+                foreach (var inputKey in LatchedKeys.Keys)
                 {
                     if (!Input.IsKeyPressed(inputKey) && !Input.IsKeyDown(inputKey) &&
                         !Input.IsKeyDownImmediate(inputKey) && !Input.IsKeyReleased(inputKey))
-                        ReleaseBuffer.Add(inputKey);
+                    {
+                        byte ignored;
+                        LatchedKeys.TryRemove(inputKey, out ignored);
+                    }
                 }
             }
-
-            for (var i = 0; i < ReleaseBuffer.Count; i++)
-                LatchedKeys.Remove(ReleaseBuffer[i]);
-            ReleaseBuffer.Clear();
         }
 
         internal static void Reset()
         {
             LatchedKeys.Clear();
-            ReleaseBuffer.Clear();
+            Volatile.Write(ref _currentModifiers, 0);
+            Volatile.Write(ref _modifierSnapshotReady, 0);
         }
 
         internal static bool ShouldSuppress(InputKey inputKey)
         {
-            if (IsBypassed || !RuntimeCanSuppress() || inputKey == InputKey.Invalid)
+            if (IsBypassed || inputKey == InputKey.Invalid)
                 return false;
-            if (LatchedKeys.Contains(inputKey))
+            if (LatchedKeys.ContainsKey(inputKey))
                 return true;
+            if (!VoidstepInputBindings.IsBoundPrimaryKey(inputKey))
+                return false;
+            if (!RuntimeCanSuppress())
+                return false;
+            if (!VoidstepInputBindings.IsChordActiveForKey(inputKey))
+                return false;
 
-            using (EnterBypass())
-            {
-                if (!VoidstepInputBindings.IsChordActiveForKey(inputKey))
-                    return false;
-            }
-
-            LatchedKeys.Add(inputKey);
+            LatchedKeys.TryAdd(inputKey, 0);
             return true;
         }
 
         private static bool RuntimeCanSuppress()
         {
-            if (!VoidstepSubModule.InputSuppressionReady || !VoidstepSubModule.NativeHotkeysReady || Input.IsOnScreenKeyboardActive)
-                return false;
-            if (!VoidstepSettings.Current.Enabled)
+            if (!VoidstepSubModule.InputSuppressionReady || !VoidstepSubModule.NativeHotkeysReady ||
+                Input.IsOnScreenKeyboardActive || !VoidstepSettings.Current.Enabled)
                 return false;
 
             var mission = Mission.Current;
@@ -318,6 +535,15 @@ namespace Voidstep
                 if (_bypassDepth > 0)
                     _bypassDepth--;
             }
+        }
+    }
+
+    [HarmonyPatch(typeof(Input), nameof(Input.UpdateKeyData), typeof(byte[]))]
+    internal static class RawInputFrameSnapshotPatch
+    {
+        private static void Postfix()
+        {
+            InputConflictSuppression.CaptureCurrentModifiers();
         }
     }
 
@@ -344,8 +570,11 @@ namespace Voidstep
     {
         private static void Postfix(InputKey __0, ref Vec2 __result)
         {
-            if (InputConflictSuppression.ShouldSuppress(__0))
+            if ((__result.x != 0f || __result.y != 0f) &&
+                InputConflictSuppression.ShouldSuppress(__0))
+            {
                 __result = Vec2.Zero;
+            }
         }
     }
 }
