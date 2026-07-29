@@ -7,6 +7,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from metadata_reader import CLR
 
 REQUIRED = {
+    "TaleWorlds.Library.dll": {
+        "TaleWorlds.Library.MBCommon": {
+            "GetApplicationTime": [[]],
+        },
+    },
     "TaleWorlds.MountAndBlade.dll": {
         "TaleWorlds.MountAndBlade.MBSubModuleBase": {
             "OnMissionBehaviorInitialize": [["TaleWorlds.MountAndBlade.Mission"]],
@@ -37,6 +42,30 @@ REQUIRED = {
             "SetCurrentActionSpeed": [["int", "float"]],
             "RegisterBlow": None,
         },
+        "TaleWorlds.MountAndBlade.AgentDrivenProperties": {
+            "get_MaxSpeedMultiplier": None,
+            "set_MaxSpeedMultiplier": None,
+            "get_CombatMaxSpeedMultiplier": None,
+            "set_CombatMaxSpeedMultiplier": None,
+            "get_TopSpeedReachDuration": None,
+            "set_TopSpeedReachDuration": None,
+            "get_SwingSpeedMultiplier": None,
+            "set_SwingSpeedMultiplier": None,
+            "get_ThrustOrRangedReadySpeedMultiplier": None,
+            "set_ThrustOrRangedReadySpeedMultiplier": None,
+            "get_ReloadSpeed": None,
+            "set_ReloadSpeed": None,
+            "get_BipedalRangedReadySpeedMultiplier": None,
+            "set_BipedalRangedReadySpeedMultiplier": None,
+            "get_BipedalRangedReloadSpeedMultiplier": None,
+            "set_BipedalRangedReloadSpeedMultiplier": None,
+            "get_MountSpeed": None,
+            "set_MountSpeed": None,
+            "get_MountManeuver": None,
+            "set_MountManeuver": None,
+            "get_MountDashAccelerationMultiplier": None,
+            "set_MountDashAccelerationMultiplier": None,
+        },
         "TaleWorlds.MountAndBlade.AttackCollisionData": {
             "GetAttackCollisionDataForDebugPurpose": None,
         },
@@ -55,7 +84,19 @@ REQUIRED = {
         "TaleWorlds.Engine.GameEntity": {
             "CreateEmpty": [["TaleWorlds.Engine.Scene", "bool", "bool", "bool"]],
             "SetContourColor": [["System.Nullable`1<uint>", "bool"]],
+            "AddMesh": None,
             "Remove": [["int"]],
+        },
+        "TaleWorlds.Engine.Mesh": {
+            "CreateMeshWithMaterial": None,
+            "GetMaterial": None,
+            "LockEditDataWrite": None,
+            "AddTriangle": None,
+            "UnlockEditDataWrite": None,
+            "ComputeNormals": None,
+            "ComputeTangents": None,
+            "RecomputeBoundingBox": None,
+            "PreloadForRendering": None,
         },
     },
     "TaleWorlds.InputSystem.dll": {
