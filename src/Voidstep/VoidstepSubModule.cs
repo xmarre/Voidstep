@@ -37,7 +37,7 @@ namespace Voidstep
         protected override void OnBeforeInitialModuleScreenSetAsRoot()
         {
             base.OnBeforeInitialModuleScreenSetAsRoot();
-            NativeHotkeysReady = VoidstepHotKeyContext.TryRegister(_logger);
+            NativeHotkeysReady = TryInitializeNativeHotkeys(_logger);
         }
 
         protected override void OnSubModuleUnloaded()
@@ -45,6 +45,8 @@ namespace Voidstep
             InputSuppressionReady = false;
             NativeHotkeysReady = false;
             InputConflictSuppression.Reset();
+            VoidstepInputBindings.DetachKeybindEvents();
+            VoidstepHotKeyContext.Clear();
             if (_harmony != null && !TryUnpatchOwnedPatches())
             {
                 _logger?.Error(
@@ -64,7 +66,7 @@ namespace Voidstep
 
             var logger = _logger ?? new VoidstepLogger();
             if (!NativeHotkeysReady)
-                NativeHotkeysReady = VoidstepHotKeyContext.TryRegister(logger);
+                NativeHotkeysReady = TryInitializeNativeHotkeys(logger);
             if (!InputSuppressionReady || _harmony == null || !NativeHotkeysReady)
             {
                 logger.Error(
@@ -84,9 +86,21 @@ namespace Voidstep
             }
         }
 
+        private static bool TryInitializeNativeHotkeys(VoidstepLogger logger)
+        {
+            if (!VoidstepHotKeyContext.TryRegister(logger))
+                return false;
+
+            VoidstepInputBindings.AttachKeybindEvents();
+            return true;
+        }
+
         private static void TryCleanFailedInstallation()
         {
             InputSuppressionReady = false;
+            InputConflictSuppression.Reset();
+            VoidstepInputBindings.DetachKeybindEvents();
+            VoidstepHotKeyContext.Clear();
             if (_harmony == null)
                 return;
 
