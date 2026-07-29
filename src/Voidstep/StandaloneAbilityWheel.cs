@@ -4,6 +4,7 @@ using System.Reflection;
 using TaleWorlds.Core;
 using TaleWorlds.Engine;
 using TaleWorlds.InputSystem;
+using TaleWorlds.Library;
 using Voidstep.Core;
 
 namespace Voidstep
@@ -81,10 +82,10 @@ namespace Voidstep
 
         private void UpdateSelection()
         {
-            var centre = new TaleWorlds.Library.Vec2(
+            var centre = new Vec2(
                 Screen.RealScreenResolutionWidth * 0.5f,
                 Screen.RealScreenResolutionHeight * 0.5f);
-            TaleWorlds.Library.Vec2 mouse;
+            Vec2 mouse;
             using (InputConflictSuppression.EnterBypass())
                 mouse = Input.MousePositionPixel;
             var delta = mouse - centre;
