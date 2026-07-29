@@ -63,7 +63,7 @@ namespace Voidstep
 
         internal static bool IsChordActiveForKey(InputKey inputKey)
         {
-            if (inputKey == InputKey.Invalid || IsModifierKey(inputKey))
+            if (inputKey == InputKey.Invalid)
                 return false;
 
             for (var i = 0; i < Abilities.Length; i++)
@@ -179,14 +179,18 @@ namespace Voidstep
             return false;
         }
 
-        private static bool ModifiersSatisfied(VoidstepModifiers modifiers)
+        private static bool ModifiersSatisfied(VoidstepModifiers modifiers) => GetCurrentModifiers() == modifiers;
+
+        private static VoidstepModifiers GetCurrentModifiers()
         {
-            var control = Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl);
-            var alt = Input.IsKeyDown(InputKey.LeftAlt) || Input.IsKeyDown(InputKey.RightAlt);
-            var shift = Input.IsKeyDown(InputKey.LeftShift) || Input.IsKeyDown(InputKey.RightShift);
-            return (!modifiers.HasFlag(VoidstepModifiers.Control) || control) &&
-                   (!modifiers.HasFlag(VoidstepModifiers.Alt) || alt) &&
-                   (!modifiers.HasFlag(VoidstepModifiers.Shift) || shift);
+            var result = VoidstepModifiers.None;
+            if (Input.IsKeyDown(InputKey.LeftControl) || Input.IsKeyDown(InputKey.RightControl))
+                result |= VoidstepModifiers.Control;
+            if (Input.IsKeyDown(InputKey.LeftAlt) || Input.IsKeyDown(InputKey.RightAlt))
+                result |= VoidstepModifiers.Alt;
+            if (Input.IsKeyDown(InputKey.LeftShift) || Input.IsKeyDown(InputKey.RightShift))
+                result |= VoidstepModifiers.Shift;
+            return result;
         }
 
         private static VoidstepModifiers ParseModifiers(Dropdown<string> setting)
@@ -227,11 +231,6 @@ namespace Voidstep
                 default: return ability.ToString();
             }
         }
-
-        private static bool IsModifierKey(InputKey inputKey) =>
-            inputKey == InputKey.LeftControl || inputKey == InputKey.RightControl ||
-            inputKey == InputKey.LeftAlt || inputKey == InputKey.RightAlt ||
-            inputKey == InputKey.LeftShift || inputKey == InputKey.RightShift;
     }
 
     internal static class InputConflictSuppression
