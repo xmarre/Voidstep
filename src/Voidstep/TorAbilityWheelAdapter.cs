@@ -17,6 +17,7 @@ namespace Voidstep
         private readonly VoidstepLogger _logger;
         private readonly Dictionary<object, AbilityId> _proxies =
             new Dictionary<object, AbilityId>(ReferenceEqualityComparer.Instance);
+        private readonly List<string> _donorSprites = new List<string>(8);
         private Harmony _harmony;
         private Assembly _torAssembly;
         private Type _abilityType;
@@ -38,8 +39,10 @@ namespace Voidstep
         private object _component;
         private object _logic;
         private IList _knownAbilities;
+        private bool _apiReady;
         private bool _available;
         private bool _targetingOwned;
+        private int _lastState = -1;
 
         internal TorAbilityWheelAdapter(Mission mission, AbilitySelectionController selection, VoidstepLogger logger)
         {
@@ -54,7 +57,7 @@ namespace Voidstep
 
         internal void Tick()
         {
-            if (!_available)
+            if (!_apiReady)
                 return;
 
             var currentAgent = _mission.MainAgent;
@@ -63,18 +66,23 @@ namespace Voidstep
                 if (_targetingOwned)
                     _selection.Cancel(true);
                 _targetingOwned = false;
+                _available = false;
+                _lastState = -1;
                 return;
             }
 
             if (!ReferenceEquals(currentAgent, _agent) || _component == null || _knownAbilities == null)
                 AttachToAgent(currentAgent);
-            if (_component == null)
+            if (!_available || _component == null)
                 return;
 
             if (_logic == null)
                 _logic = GetMissionBehavior(_abilityManagerLogicType);
             if (_logic == null)
+            {
+                _available = false;
                 return;
+            }
 
             object currentAbility = null;
             var state = -1;
@@ -86,7 +94,14 @@ namespace Voidstep
             catch (Exception ex)
             {
                 _logger.Debug("TOR wheel state read failed safely: " + Unwrap(ex).Message);
+                _available = false;
                 return;
+            }
+
+            if (state == 1 && _lastState != 1 && _selection.HasSelection)
+            {
+                _selection.Cancel(true);
+                _logger.Debug("Opening TOR's Q wheel cancelled the previous Voidstep selection.");
             }
 
             if (state == 2 && TryGetProxyAbility(currentAbility, out var ability))
@@ -101,6 +116,8 @@ namespace Voidstep
                 if (_selection.HasSelection)
                     _selection.Cancel(true);
             }
+
+            _lastState = state;
         }
 
         internal bool TryGetProxyAbility(object instance, out AbilityId ability)
@@ -125,6 +142,7 @@ namespace Voidstep
             finally
             {
                 _targetingOwned = false;
+                _lastState = -1;
             }
         }
 
@@ -136,11 +154,14 @@ namespace Voidstep
             try { _harmony?.UnpatchAll(HarmonyId); }
             catch (Exception ex) { _logger.Debug("TOR wheel patch cleanup failed safely: " + ex.Message); }
             _harmony = null;
+            _apiReady = false;
             _available = false;
             _logic = null;
             _component = null;
             _knownAbilities = null;
             _agent = null;
+            _lastState = -1;
+            _donorSprites.Clear();
             _proxies.Clear();
         }
 
@@ -185,11 +206,13 @@ namespace Voidstep
                 if (baseDisabled != null) _harmony.Patch(baseDisabled, prefix: prefix);
                 if (spellDisabled != null && spellDisabled != baseDisabled) _harmony.Patch(spellDisabled, prefix: prefix);
 
-                _available = true;
-                _logger.Info("TOR 1.16 ability-wheel integration initialized; Voidstep abilities will be injected into the existing Q wheel.");
+                _apiReady = true;
+                _available = false;
+                _logger.Info("TOR 1.16 ability-wheel API detected; Voidstep injection will activate after the main agent's TOR ability component is available.");
             }
             catch (Exception ex)
             {
+                _apiReady = false;
                 _available = false;
                 try { _harmony?.UnpatchAll(HarmonyId); } catch { }
                 _harmony = null;
@@ -204,31 +227,43 @@ namespace Voidstep
             _component = null;
             _knownAbilities = null;
             _logic = null;
+            _available = false;
+            _lastState = -1;
             try
             {
                 var getComponent = _agentGetComponent.MakeGenericMethod(_abilityComponentType);
                 _component = getComponent.Invoke(agent, null);
                 if (_component == null)
                 {
-                    _logger.Debug("TOR main agent has no AbilityComponent yet; Voidstep wheel injection will retry.");
+                    _logger.Debug("TOR main agent has no AbilityComponent yet; using the standalone Voidstep wheel and retrying TOR attachment.");
                     return;
                 }
                 _knownAbilities = _knownAbilitiesProperty.GetValue(_component, null) as IList;
                 if (_knownAbilities == null)
                     throw new InvalidCastException("TOR KnownAbilitySystem does not expose IList semantics.");
+                _logic = GetMissionBehavior(_abilityManagerLogicType);
+                if (_logic == null)
+                {
+                    _logger.Debug("TOR ability-manager mission logic is not ready; using the standalone Voidstep wheel and retrying.");
+                    return;
+                }
                 InjectProxies(agent);
+                _available = true;
             }
             catch (Exception ex)
             {
+                RemoveInjectedProxies();
                 _component = null;
                 _knownAbilities = null;
-                _logger.Debug("TOR main-agent wheel attachment failed safely: " + Unwrap(ex).Message);
+                _logic = null;
+                _available = false;
+                _logger.Debug("TOR main-agent wheel attachment failed safely; standalone wheel remains active: " + Unwrap(ex).Message);
             }
         }
 
         private void InjectProxies(Agent agent)
         {
-            var donorSprite = ResolveDonorSprite();
+            ResolveDonorSprites();
             for (var i = 0; i < VoidstepInputBindings.Abilities.Length; i++)
             {
                 var abilityId = VoidstepInputBindings.Abilities[i];
@@ -242,12 +277,12 @@ namespace Voidstep
                 var template = Activator.CreateInstance(_abilityTemplateType);
                 SetProperty(template, "StringID", AbilityPresentation.TorStringId(abilityId));
                 SetProperty(template, "Name", "[Voidstep] " + AbilityPresentation.Name(abilityId));
-                SetProperty(template, "SpriteName", donorSprite);
+                SetProperty(template, "SpriteName", _donorSprites[i % _donorSprites.Count]);
                 SetProperty(template, "TooltipDescription", AbilityPresentation.Description(abilityId));
-                SetProperty(template, "AbilityType", Enum.ToObject(_abilityTemplateType.Assembly.GetType("TOR_Core.AbilitySystem.AbilityType"), 1));
-                SetProperty(template, "AbilityTargetType", Enum.ToObject(_abilityTemplateType.Assembly.GetType("TOR_Core.AbilitySystem.AbilityTargetType"), 5));
-                SetProperty(template, "CrosshairType", Enum.ToObject(_abilityTemplateType.Assembly.GetType("TOR_Core.AbilitySystem.Crosshairs.CrosshairType"), 5));
-                SetProperty(template, "CastType", Enum.ToObject(_abilityTemplateType.Assembly.GetType("TOR_Core.AbilitySystem.CastType"), 0));
+                SetProperty(template, "AbilityType", Enum.ToObject(RequireType("TOR_Core.AbilitySystem.AbilityType"), 1));
+                SetProperty(template, "AbilityTargetType", Enum.ToObject(RequireType("TOR_Core.AbilitySystem.AbilityTargetType"), 5));
+                SetProperty(template, "CrosshairType", Enum.ToObject(RequireType("TOR_Core.AbilitySystem.Crosshairs.CrosshairType"), 5));
+                SetProperty(template, "CastType", Enum.ToObject(RequireType("TOR_Core.AbilitySystem.CastType"), 0));
                 SetProperty(template, "CoolDown", 0);
                 SetProperty(template, "WindsOfMagicCost", 0);
                 SetProperty(template, "CastTime", 0f);
@@ -268,7 +303,7 @@ namespace Voidstep
                 _knownAbilities.Add(proxy);
                 _proxies.Add(proxy, abilityId);
             }
-            _logger.Info("Injected six Voidstep selections into TOR's existing Q ability wheel.");
+            _logger.Info("Injected six distinguishable Voidstep selections into TOR's existing Q ability wheel.");
         }
 
         private object FindProxyByStringId(string stringId)
@@ -286,8 +321,9 @@ namespace Voidstep
             return null;
         }
 
-        private string ResolveDonorSprite()
+        private void ResolveDonorSprites()
         {
+            _donorSprites.Clear();
             if (_knownAbilities != null)
             {
                 var templateProperty = _abilityType.GetProperty("Template", BindingFlags.Instance | BindingFlags.Public);
@@ -296,10 +332,17 @@ namespace Voidstep
                 {
                     var template = templateProperty?.GetValue(_knownAbilities[i], null);
                     var sprite = template == null ? null : spriteProperty?.GetValue(template, null) as string;
-                    if (!string.IsNullOrWhiteSpace(sprite)) return sprite;
+                    if (string.IsNullOrWhiteSpace(sprite) || _donorSprites.Contains(sprite))
+                        continue;
+                    _donorSprites.Add(sprite);
+                    if (_donorSprites.Count >= VoidstepInputBindings.Abilities.Length)
+                        break;
                 }
             }
-            return "default_spell";
+            if (_donorSprites.Count == 0)
+                _donorSprites.Add("default_spell");
+            while (_donorSprites.Count < VoidstepInputBindings.Abilities.Length)
+                _donorSprites.Add(_donorSprites[_donorSprites.Count % Math.Max(1, _donorSprites.Count)]);
         }
 
         private void RemoveInjectedProxies()
@@ -313,6 +356,7 @@ namespace Voidstep
                 }
             }
             _proxies.Clear();
+            _donorSprites.Clear();
         }
 
         private object GetMissionBehavior(Type behaviorType)
