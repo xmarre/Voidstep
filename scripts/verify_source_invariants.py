@@ -9,6 +9,14 @@ files = {p.name: p.read_text(encoding='utf-8') for p in runtime.glob('*.cs')}
 all_text = '\n'.join(files.values())
 time_control = files.get('TimeControlService.cs', '')
 blink = files.get('BlinkController.cs', '')
+ability_manager = files.get('AbilityManager.cs', '')
+cleave = files.get('CleaveSweepController.cs', '')
+submodule = files.get('VoidstepSubModule.cs', '')
+input_router = files.get('InputRouter.cs', '')
+input_suppression = files.get('MissionOrderInputSuppression.cs', '')
+weapon_validation = files.get('WeaponValidation.cs', '')
+dark_vision = files.get('DarkVisionService.cs', '')
+blow_factory = files.get('BlowFactory.cs', '')
 
 time_release_guard = re.search(
     r'private bool TryCompleteRelease\(\)\s*\{.*?'
@@ -29,30 +37,42 @@ blink_release_guard = re.search(
     blink,
     re.DOTALL)
 
+uncapped_cleave_schedule = re.search(
+    r'SweepPlanner\.BuildSchedule\(\s*_candidates,\s*_startAngle,\s*_sweepRadians,\s*_direction,\s*_radius,\s*0,\s*_schedule\);',
+    cleave,
+    re.DOTALL)
+
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
     'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs',''),
     'ctrl number defaults': all(f'new Dropdown<string>(KeyOptions, {i})' in files.get('VoidstepSettings.cs','') for i in range(6)) and 'RequireControlModifier { get; set; } = true;' in files.get('VoidstepSettings.cs',''),
-    'formation input suppressed only through game keys': 'SelectOrder1' in files.get('MissionOrderInputSuppression.cs','') and 'InputContext' in files.get('MissionOrderInputSuppression.cs','') and 'IsControlDown()' in files.get('MissionOrderInputSuppression.cs','') and 'object[] __args' not in files.get('MissionOrderInputSuppression.cs',''),
+    'formation input suppressed only through game keys': 'SelectOrder1' in input_suppression and 'InputContext' in input_suppression and 'IsControlDown()' in input_suppression and 'object[] __args' not in input_suppression,
+    'ability input fails closed with suppression ownership': 'InputSuppressionReady { get; private set; }' in submodule and 'if (!InputSuppressionReady || _harmony == null)' in submodule and 'if (!VoidstepSubModule.InputSuppressionReady)' in input_router and '!VoidstepSubModule.InputSuppressionReady' in input_suppression,
+    'harmony cleanup retains ownership on failure': 'for (var attempt = 1; attempt <= 2; attempt++)' in submodule and 'submodule unload was aborted' in submodule and re.search(r'if \(_harmony != null && !TryUnpatchOwnedPatches\(\)\)\s*\{.*?return;\s*\}', submodule, re.DOTALL) is not None,
     'legacy numpad defaults migrate': 'MigrateLegacyDefaultControls' in files.get('VoidstepSettings.cs','') and '"Numpad1"' in files.get('VoidstepSettings.cs',''),
     'camera aligned targeting': 'GetCameraFrame()' in files.get('TargetingService.cs','') and 'GetAimDirection' in files.get('TargetingService.cs',''),
     'visible marker mesh': 'Mesh.GetFromResource' in files.get('EffectController.cs','') and 'entity.AddMesh' in files.get('EffectController.cs',''),
-    'cleave preserves weapon snapshot': 'MissionWeapon _cleaveWeapon' in files.get('AbilityManager.cs','') and 'MissionWeapon _weapon' in files.get('CleaveSweepController.cs','') and 'attacker.WieldedWeapon' not in files.get('BlowFactory.cs',''),
+    'cleave preserves weapon snapshot': 'MissionWeapon _cleaveWeapon' in ability_manager and 'MissionWeapon _weapon' in cleave and 'attacker.WieldedWeapon' not in blow_factory,
+    'cleave rejects non-melee weapons twice': ability_manager.count('WeaponValidation.IsUsableMeleeWeapon') >= 1 and cleave.count('WeaponValidation.IsUsableMeleeWeapon') >= 1 and 'CurrentUsageItem' in weapon_validation and 'IsMeleeWeapon' in weapon_validation,
+    'cleave refunds paid pre-effect failures': ability_manager.count('RollbackPayment(AbilityId.VoidstepCleave)') >= 2,
+    'cleave schedules all candidates before successful cap': uncapped_cleave_schedule is not None and '_successfulHits >= _maximumTargets' in cleave,
+    'cleave uses public swing damage API': 'weapon.GetModifiedSwingDamageForCurrentUsage()' in blow_factory and 'GetSwingDamage' not in blow_factory,
     'cleave does not force victim action': 'act_strike_bent_over' not in files.get('AnimationController.cs','') and 'SetActionChannel' not in files.get('AnimationController.cs',''),
-    'per-cast hit registry': 'HitRegistry<int> _hits' in files.get('CleaveSweepController.cs',''),
-    'cleave deterministic cleanup': '_hits.Clear();' in files.get('CleaveSweepController.cs','') and '_snapshotSchedule.Clear();' in files.get('CleaveSweepController.cs',''),
+    'per-cast hit registry': 'HitRegistry<int> _hits' in cleave,
+    'cleave deterministic cleanup': '_hits.Clear();' in cleave and '_snapshotSchedule.Clear();' in cleave,
     'time request ownership retained through cleanup': '_cleanupPending' in time_control and '_ownership.TryGet(_token, out requestId)' in time_control and time_release_guard is not None and time_control.count('RemoveTimeSpeedRequest(') == 1,
     'blink request ownership retained through cleanup': '_timeCleanupPending' in blink and blink_release_guard is not None and blink.count('RemoveTimeSpeedRequest(') == 1,
     'domino index storage': 'Dictionary<int, Agent> _linked' in files.get('DominoLinkService.cs','') and 'FindAgentWithIndex' in files.get('DominoLinkService.cs',''),
     'domino recursion guard': 'RecursionGuard<int>' in files.get('DominoLinkService.cs','') and '(blow.BlowFlag & BlowFlags.NoSound) != 0' in files.get('DominoLinkService.cs',''),
-    'dark vision immediate and throttled': 'Refresh();' in files.get('DarkVisionService.cs','') and 'DarkVisionRefreshInterval' in files.get('DarkVisionService.cs',''),
+    'dark vision immediate and throttled': 'Refresh();' in dark_vision and 'DarkVisionRefreshInterval' in dark_vision,
+    'dark vision counts successful contours only': 'if (TrySetContour(agent, color))' in dark_vision and 'private static bool ClearContour' in dark_vision and 'if (ClearContour(' in dark_vision,
     'no campaign behavior': 'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
     'no global agent collection': not re.search(r'\bstatic\s+readonly\s+.*(?:\bAgent\b|\bList<Agent>\b|\bHashSet<Agent>\b)', all_text),
     'no full all-agent scan': 'AllAgents' not in files.get('VoidstepMissionBehavior.cs','') and 'Agents)' not in files.get('VoidstepMissionBehavior.cs',''),
     'mission end cleanup': 'Cleanup(CancelReason.MissionEnded)' in files.get('VoidstepMissionBehavior.cs',''),
     'missing effects are nonfatal': 'Optional particle failed' in files.get('EffectController.cs','') and 'return -1;' in files.get('EffectController.cs',''),
-    'whole-cast target cap': '_successfulHits >= _maximumTargets' in files.get('CleaveSweepController.cs',''),
-    'dark vision reuses stale buffer': 'List<int> _staleBuffer' in files.get('DarkVisionService.cs','') and 'new List<int>' not in files.get('DarkVisionService.cs','').split('private void Refresh()',1)[-1],
+    'whole-cast target cap': '_successfulHits >= _maximumTargets' in cleave,
+    'dark vision reuses stale buffer': 'List<int> _staleBuffer' in dark_vision and 'new List<int>' not in dark_vision.split('private void Refresh()',1)[-1],
     'domino reuses snapshot buffer': 'List<int> _snapshotBuffer' in files.get('DominoLinkService.cs','') and 'new List<int>' not in files.get('DominoLinkService.cs','').split('public void Tick()',1)[-1],
 }
 failed = [name for name, ok in checks.items() if not ok]
