@@ -1,4 +1,5 @@
 using System;
+using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using Voidstep.Core;
 
@@ -13,6 +14,7 @@ namespace Voidstep
         private long _token;
         private float _remaining;
         private float _factor = 1f;
+        private float _lastApplicationTime;
         private Agent _player;
         private Agent _mount;
         private bool _playerCompensationApplied;
@@ -68,6 +70,7 @@ namespace Voidstep
             var minimum = allowCompleteSuspension ? 0f : 0.02f;
             _factor = Math.Max(minimum, Math.Min(1f, requestedFactor));
             _remaining = duration;
+            _lastApplicationTime = MBCommon.GetApplicationTime();
             _player = player;
             _mount = player.MountAgent != null && player.MountAgent.IsActive() ? player.MountAgent : null;
             _actionSpeedFailureLogged = false;
@@ -114,7 +117,10 @@ namespace Voidstep
                 return;
             }
 
-            _remaining -= Math.Max(0f, dt);
+            var now = MBCommon.GetApplicationTime();
+            var realDt = _lastApplicationTime > 0f ? Math.Max(0f, now - _lastApplicationTime) : Math.Max(0f, dt);
+            _lastApplicationTime = now;
+            _remaining -= realDt;
             if (VoidstepSettings.Current.PreservePlayerSpeed && _factor > 0.001f && _factor < 0.999f)
             {
                 var compensation = Math.Min(8f, 1f / _factor);
@@ -337,6 +343,7 @@ namespace Voidstep
             _mount = null;
             _factor = 1f;
             _remaining = 0f;
+            _lastApplicationTime = 0f;
         }
 
         private static bool Approximately(float left, float right) => Math.Abs(left - right) <= 0.001f * Math.Max(1f, Math.Max(Math.Abs(left), Math.Abs(right)));
