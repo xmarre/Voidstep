@@ -16,6 +16,7 @@ namespace Voidstep
         private bool _cleaned;
         private bool _wasEnabled;
         private bool _readyNoticeShown;
+        private string _lastBindingConflict;
 
         public VoidstepMissionBehavior(VoidstepLogger logger)
         {
@@ -51,6 +52,7 @@ namespace Voidstep
                 _lastPlayer = Mission.MainAgent;
                 _wasEnabled = settings.Enabled;
                 _logger.Info($"Mission behavior initialized. Controls: {VoidstepInputBindings.GetSummary()}. Primary keys: Options > Keybindings > Voidstep. Modifiers: MCM > Controls. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+                CheckBindingConflict();
             }
             catch (Exception ex)
             {
@@ -93,6 +95,7 @@ namespace Voidstep
                     _logger.Info($"Runtime ready. Controls: {controls}.");
                     TryDisplayNotice($"Voidstep v1.0.5 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
                 }
+                CheckBindingConflict();
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
                     _manager.OnPlayerAgentChanged(_lastPlayer, current);
@@ -109,6 +112,23 @@ namespace Voidstep
                 _logger.Error("A mission tick failed; all owned ability state was cleaned up.", ex);
                 Cleanup(CancelReason.Exception);
             }
+        }
+
+        private void CheckBindingConflict()
+        {
+            var conflict = VoidstepInputBindings.GetConflictWarning();
+            if (string.Equals(conflict, _lastBindingConflict, StringComparison.Ordinal))
+                return;
+
+            _lastBindingConflict = conflict;
+            if (string.IsNullOrEmpty(conflict))
+            {
+                _logger.Info("Voidstep ability-chord conflicts cleared.");
+                return;
+            }
+
+            _logger.Info("Control conflict: " + conflict);
+            TryDisplayNotice("Voidstep: " + conflict);
         }
 
         private void TryDisplayNotice(string message)
@@ -180,6 +200,7 @@ namespace Voidstep
             _manager = null;
             _input = null;
             _lastPlayer = null;
+            _lastBindingConflict = null;
         }
     }
 }
