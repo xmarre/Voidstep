@@ -204,13 +204,14 @@ namespace Voidstep
                     var target = ResolveLinkedAgent(entry.TargetId, identity);
                     if (!IsLinkedAgentValid(target)) { Remove(entry.TargetId); continue; }
 
-                    if (entry.Lethal)
+                    var mayKill = entry.Lethal || entry.Damage >= Math.Ceiling(target.Health);
+                    if (mayKill)
                         _propagatedDeathSuppression[entry.TargetId] = _tickSerial + PropagatedDeathSuppressionTicks;
                     if (_blows.ApplyDirectBlow(_player, target, entry.Damage, entry.DamageType, entry.Flags, entry.Magnitude))
                     {
                         applied++;
                     }
-                    else if (entry.Lethal)
+                    else if (mayKill)
                     {
                         _propagatedDeathSuppression.Remove(entry.TargetId);
                     }
