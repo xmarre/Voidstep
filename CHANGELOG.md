@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.9
+
+- Fixed Bend Time corrupting native mission memory by writing action-speed values to unsupported Bannerlord action channels 2 and 3.
+- Restricted Bend Time action-speed compensation and restoration to the two verified native agent channels, 0 and 1.
+- Preserved locomotion, combat movement, swing, ready, reload, ranged and mount compensation while removing the out-of-range native writes.
+- Added a locked source invariant that rejects any return to four-channel Bend Time mutation.
+
 ## 1.0.8
 
 - Fixed Domino re-entering Bannerlord's native melee-hit callback by deferring propagated blows until the following mission tick.
@@ -19,7 +26,7 @@
 - Expanded Cleave fallback coverage with additional rings and angular samples while retaining mission-boundary, wall, terrain, cliff, occupancy and configured-range checks.
 - Changed Blink destination selection from partial slowdown to an owned zero-speed mission request that freezes the outside world until confirmation, cancellation or expiry.
 - Made Blink preview refresh and timeout use application time so targeting remains responsive while mission time is frozen.
-- Expanded Bend Time player compensation from two animation channels to locomotion, combat movement, swing, ready, reload, ranged ready/reload and all four action channels.
+- Expanded Bend Time player compensation from two animation channels to locomotion, combat movement, swing, ready, reload, ranged ready/reload and the two verified native action channels.
 - Added equivalent speed and maneuver compensation for the controlled mount.
 - Added ownership-checked Bend Time restoration so cleanup does not overwrite values changed by another system during the effect.
 - Added source invariants for casting sigils, Blink freeze behavior, complete Cleave fallback search and Bend Time player/mount compensation.
