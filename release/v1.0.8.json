@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.8",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Deferred Domino propagation, visible placement reticles, native cast actions, and sweep-synchronised Cleave animation."
+}
