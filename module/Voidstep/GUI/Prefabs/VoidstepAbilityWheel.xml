@@ -2,7 +2,7 @@
   <Window>
     <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent" DoNotAcceptEvents="true">
       <Children>
-        <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="620" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="BlankWhiteSquare_9" Brush.Color="#180018D8" IsCircular="true" />
+        <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="620" SuggestedHeight="620" HorizontalAlignment="Center" VerticalAlignment="Center" Brush="BlankWhiteSquare_9" Brush.Color="#180018D8" />
         <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="330" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionYOffset="-235" Brush="SPGeneral" Brush.FontSize="28" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@CleaveText" />
         <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionXOffset="225" PositionYOffset="-118" Brush="SPGeneral" Brush.FontSize="26" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@BlinkText" />
         <TextWidget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" SuggestedWidth="300" SuggestedHeight="52" HorizontalAlignment="Center" VerticalAlignment="Center" PositionXOffset="225" PositionYOffset="118" Brush="SPGeneral" Brush.FontSize="26" Brush.TextHorizontalAlignment="Center" Brush.TextVerticalAlignment="Center" Text="@WindblastText" />
