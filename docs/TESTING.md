@@ -31,6 +31,22 @@ python scripts/verify_source_invariants.py
 python scripts/validate_api_surface.py references/runtime
 ```
 
+## Required input-binding matrix
+
+A release must record pass/fail and logs for:
+
+- `Ctrl+1` through `Ctrl+6` activate only the corresponding Voidstep ability
+- plain `1` through `6` still select formations with the default Control modifiers
+- releasing Control before releasing the number key does not trigger a delayed formation command
+- rebinding an ability primary key under `Options > Keybindings > Voidstep` persists after restarting the game
+- binding to a weapon-slot key suppresses only that weapon-slot action while the complete ability chord is active
+- binding to a movement key suppresses movement while the complete chord is active and preserves ordinary movement without the configured modifier
+- binding to an attack or mouse button suppresses the native action while the complete chord is active
+- modifier values None, Control, Alt, Shift and combined modifiers activate exactly as configured
+- two abilities deliberately assigned the same chord produce a visible/logged configuration conflict and never activate both from one press
+- opening text input or the on-screen keyboard disables ability polling and suppression
+- mission end, player death and disabling Voidstep clear every latched input key
+
 ## Required Bannerlord runtime matrix
 
 A release must record pass/fail and logs for:
@@ -55,4 +71,4 @@ A release must record pass/fail and logs for:
 - native game without TOR
 - TOR 1.16 battle mission
 
-No document in this repository treats this matrix as passed until Bannerlord is actually launched and the scenarios are executed.
+No document in this repository treats these matrices as passed until Bannerlord is actually launched and the scenarios are executed.

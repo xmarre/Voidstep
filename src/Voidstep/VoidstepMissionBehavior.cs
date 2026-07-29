@@ -8,6 +8,8 @@ namespace Voidstep
 {
     internal sealed class VoidstepMissionBehavior : MissionLogic
     {
+        private const float BindingRefreshInterval = 0.25f;
+
         private readonly VoidstepLogger _logger;
         private AbilityManager _manager;
         private InputRouter _input;
@@ -16,7 +18,9 @@ namespace Voidstep
         private bool _cleaned;
         private bool _wasEnabled;
         private bool _readyNoticeShown;
-        private bool _controlConflictWarningShown;
+        private bool _bindingConflictInitialized;
+        private float _bindingRefreshRemaining;
+        private string _lastBindingConflict;
 
         public VoidstepMissionBehavior(VoidstepLogger logger)
         {
@@ -42,16 +46,19 @@ namespace Voidstep
             _logger.Info($"Mission behavior initialization started during {lifecycleStage}.");
             try
             {
-                var settings = VoidstepSettings.Current;
-                if (settings.MigrateLegacyDefaultControls())
-                    _logger.Info("Migrated the v1.0.2/v1.0.3 Numpad defaults to Ctrl+1 through Ctrl+6. Plain number-row formation controls remain active.");
+                if (!VoidstepSubModule.NativeHotkeysReady || VoidstepHotKeyContext.Current == null)
+                    throw new InvalidOperationException("Native Voidstep hotkeys are not registered.");
 
+                VoidstepInputBindings.RefreshCacheIfChanged();
+                var settings = VoidstepSettings.Current;
                 var context = new AbilityContext(Mission, _logger);
                 _manager = new AbilityManager(context);
                 _input = new InputRouter(Mission, _logger);
                 _lastPlayer = Mission.MainAgent;
                 _wasEnabled = settings.Enabled;
-                _logger.Info($"Mission behavior initialized. Controls: {settings.GetControlSummary()}. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+                _bindingRefreshRemaining = BindingRefreshInterval;
+                _logger.Info($"Mission behavior initialized. Controls: {VoidstepInputBindings.GetSummary()}. Primary keys: Options > Keybindings > Voidstep. Modifiers: MCM > Controls. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+                CheckBindingConflict();
             }
             catch (Exception ex)
             {
@@ -76,6 +83,7 @@ namespace Voidstep
                 {
                     if (_wasEnabled) _manager.Cleanup(CancelReason.UserCancelled);
                     _wasEnabled = false;
+                    InputConflictSuppression.Reset();
                     return;
                 }
                 _wasEnabled = true;
@@ -85,20 +93,15 @@ namespace Voidstep
                     return;
                 }
 
+                RefreshBindings(dt);
+
                 var current = Mission.MainAgent;
                 if (!_readyNoticeShown && current != null && current.IsActive())
                 {
                     _readyNoticeShown = true;
-                    var controls = settings.GetControlSummary();
+                    var controls = VoidstepInputBindings.GetSummary();
                     _logger.Info($"Runtime ready. Controls: {controls}.");
-                    TryDisplayNotice($"Voidstep v1.0.4 active — {controls}.");
-                }
-                if (!_controlConflictWarningShown && settings.HasNumberRowConflict())
-                {
-                    _controlConflictWarningShown = true;
-                    const string warning = "Number-row bindings without Ctrl also trigger Bannerlord formation selection. Enable the Ctrl modifier or choose another key.";
-                    _logger.Info("Control warning: " + warning);
-                    TryDisplayNotice("Voidstep: " + warning);
+                    TryDisplayNotice($"Voidstep v1.0.5 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
@@ -116,6 +119,43 @@ namespace Voidstep
                 _logger.Error("A mission tick failed; all owned ability state was cleaned up.", ex);
                 Cleanup(CancelReason.Exception);
             }
+        }
+
+        private void RefreshBindings(float dt)
+        {
+            _bindingRefreshRemaining -= dt;
+            if (!VoidstepInputBindings.IsCacheDirty && _bindingRefreshRemaining > 0f)
+                return;
+
+            _bindingRefreshRemaining = BindingRefreshInterval;
+            if (!VoidstepInputBindings.RefreshCacheIfChanged())
+                return;
+
+            _logger.Info("Control bindings refreshed. Controls: " + VoidstepInputBindings.GetSummary() + ".");
+            CheckBindingConflict();
+        }
+
+        private void CheckBindingConflict()
+        {
+            var conflict = VoidstepInputBindings.GetConflictWarning();
+            if (_bindingConflictInitialized &&
+                string.Equals(conflict, _lastBindingConflict, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var hadConflict = _bindingConflictInitialized && !string.IsNullOrEmpty(_lastBindingConflict);
+            _bindingConflictInitialized = true;
+            _lastBindingConflict = conflict;
+            if (string.IsNullOrEmpty(conflict))
+            {
+                if (hadConflict)
+                    _logger.Info("Voidstep ability-chord conflicts cleared.");
+                return;
+            }
+
+            _logger.Info("Control conflict: " + conflict);
+            TryDisplayNotice("Voidstep: " + conflict);
         }
 
         private void TryDisplayNotice(string message)
@@ -181,10 +221,14 @@ namespace Voidstep
             _cleaned = true;
             try { _manager?.Cleanup(reason); }
             catch (Exception ex) { _logger?.Error("Mission cleanup encountered an error.", ex); }
+            try { _input?.Cleanup(); }
+            catch (Exception ex) { _logger?.Error("Input cleanup encountered an error.", ex); }
             _logger?.Info("Mission behavior cleaned up.");
             _manager = null;
             _input = null;
             _lastPlayer = null;
+            _lastBindingConflict = null;
+            _bindingConflictInitialized = false;
         }
     }
 }

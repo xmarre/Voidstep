@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.5",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Native configurable ability bindings with generic underlying-input suppression."
+}

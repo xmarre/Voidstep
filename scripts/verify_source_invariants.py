@@ -12,8 +12,11 @@ blink = files.get('BlinkController.cs', '')
 ability_manager = files.get('AbilityManager.cs', '')
 cleave = files.get('CleaveSweepController.cs', '')
 submodule = files.get('VoidstepSubModule.cs', '')
+mission_behavior = files.get('VoidstepMissionBehavior.cs', '')
 input_router = files.get('InputRouter.cs', '')
-input_suppression = files.get('MissionOrderInputSuppression.cs', '')
+input_bindings = files.get('VoidstepInputBindings.cs', '')
+hotkey_context = files.get('VoidstepHotKeyContext.cs', '')
+settings = files.get('VoidstepSettings.cs', '')
 weapon_validation = files.get('WeaponValidation.cs', '')
 dark_vision = files.get('DarkVisionService.cs', '')
 blow_factory = files.get('BlowFactory.cs', '')
@@ -42,14 +45,45 @@ uncapped_cleave_schedule = re.search(
     cleave,
     re.DOTALL)
 
+duplicate_passthrough = re.search(
+    r'internal static bool IsChordActiveForKey\(InputKey inputKey\).*?'
+    r'AmbiguousChords\.Contains\(ChordCode\(entry\.Modifiers, inputKey\)\)\)\s*continue;',
+    input_bindings,
+    re.DOTALL)
+
+hot_path_order = re.search(
+    r'internal static bool ShouldSuppress\(InputKey inputKey\).*?'
+    r'LatchedKeys\.ContainsKey\(inputKey\).*?'
+    r'IsBoundPrimaryKey\(inputKey\).*?'
+    r'RuntimeCanSuppress\(\)',
+    input_bindings,
+    re.DOTALL)
+
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
-    'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs',''),
-    'ctrl number defaults': all(f'new Dropdown<string>(KeyOptions, {i})' in files.get('VoidstepSettings.cs','') for i in range(6)) and 'RequireControlModifier { get; set; } = true;' in files.get('VoidstepSettings.cs',''),
-    'formation input suppressed only through game keys': 'SelectOrder1' in input_suppression and 'InputContext' in input_suppression and 'IsControlDown()' in input_suppression and 'object[] __args' not in input_suppression,
-    'ability input fails closed with suppression ownership': 'InputSuppressionReady { get; private set; }' in submodule and 'if (!InputSuppressionReady || _harmony == null)' in submodule and 'if (!VoidstepSubModule.InputSuppressionReady)' in input_router and '!VoidstepSubModule.InputSuppressionReady' in input_suppression,
+    'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in mission_behavior and 'EnsureInitialized("EarlyStart")' in mission_behavior,
+    'native serialized hotkeys shown in options': 'AuxiliarySerializedAndShownInOptions' in hotkey_context and hotkey_context.count('RegisterHotKey(new HotKey(') == 6 and 'HotKeyManager.RegisterContext(context, false, true)' in hotkey_context,
+    'native hotkey localization is retry safe': '_localizedTextRegistered' in hotkey_context and 'EnsureLocalizedText();' in hotkey_context and hotkey_context.count('TryGetText(') >= 3,
+    'hotkey context survives reload identity and clears on unload': 'internal static GameKeyContext Current' in hotkey_context and 'Current = category;' in hotkey_context and 'internal static void Clear()' in hotkey_context and 'VoidstepHotKeyContext.Clear();' in submodule,
+    'arbitrary primary keys replace hardcoded key list': 'KeyOptions' not in settings and 'VoidstepKey' not in settings and 'RequireControlModifier' not in settings and 'ModifierOptions' in settings,
+    'per ability modifiers configurable': all(name in settings for name in ('VoidstepModifier', 'BlinkModifier', 'WindblastModifier', 'BendTimeModifier', 'DominoModifier', 'DarkVisionModifier')),
+    'input router polls cached native bindings': 'VoidstepInputBindings.TryGetPressedKey' in input_router and 'InputConflictSuppression.Latch' in input_router and 'Enum.TryParse' not in input_router,
+    'immutable binding cache covers hot paths': 'private sealed class BindingCache' in input_bindings and 'BoundPrimaryKeys' in input_bindings and 'RefreshCacheIfChanged()' in input_bindings and 'Volatile.Read(ref _cache)' in input_bindings,
+    'binding cache invalidates on native changes': 'HotKeyManager.OnKeybindsChanged += Invalidate' in input_bindings and 'HotKeyManager.OnKeybindsChanged -= Invalidate' in input_bindings and 'IsCacheDirty' in input_bindings,
+    'modifier strings are parsed only during cache refresh': input_bindings.count('ParseModifiers(') == 7 and 'ReadConfiguredModifiers' in input_bindings,
+    'exact modifier combinations preserve modifier primary keys': 'current & ~ModifierForPrimaryKey(primaryKey)' in input_bindings and 'GetCurrentModifiers() == modifiers' not in input_bindings,
+    'duplicate chords rejected while native action passes through': duplicate_passthrough is not None and 'native game action remains available' in input_bindings,
+    'generic raw input boolean suppression': all(name in input_bindings for name in ('nameof(Input.IsKeyPressed)', 'nameof(Input.IsKeyDown)', 'nameof(Input.IsKeyDownImmediate)', 'nameof(Input.IsKeyReleased)')),
+    'generic raw input axis suppression': 'nameof(Input.GetKeyState)' in input_bindings and '__result = Vec2.Zero;' in input_bindings,
+    'current modifiers captured once from input update': 'nameof(Input.UpdateKeyData)' in input_bindings and 'CaptureCurrentModifiers();' in input_bindings and '_modifierSnapshotReady' in input_bindings,
+    'suppression preserves own polling through bypass': '[ThreadStatic]' in input_bindings and 'EnterBypass()' in input_bindings and 'IsBypassed' in input_bindings,
+    'suppression latches are thread safe': 'ConcurrentDictionary<InputKey, byte> LatchedKeys' in input_bindings and 'LatchedKeys.TryAdd' in input_bindings and 'LatchedKeys.TryRemove' in input_bindings,
+    'suppression latches complete chord lifecycle': 'RefreshLatches()' in input_bindings and 'Input.IsKeyReleased(inputKey)' in input_bindings,
+    'unbound raw keys exit before mission checks': hot_path_order is not None,
+    'binding conflict checks are throttled and change driven': 'BindingRefreshInterval' in mission_behavior and 'RefreshBindings(dt);' in mission_behavior and mission_behavior.count('CheckBindingConflict();') == 2,
+    'ability input fails closed with both ownership gates': 'InputSuppressionReady { get; private set; }' in submodule and 'NativeHotkeysReady { get; private set; }' in submodule and 'if (!InputSuppressionReady || _harmony == null || !NativeHotkeysReady)' in submodule and '!VoidstepSubModule.NativeHotkeysReady' in input_router,
+    'hotkey event and context teardown are explicit': 'DetachKeybindEvents();' in submodule and 'VoidstepHotKeyContext.Clear();' in submodule and 'InputConflictSuppression.Reset();' in submodule,
     'harmony cleanup retains ownership on failure': 'for (var attempt = 1; attempt <= 2; attempt++)' in submodule and 'submodule unload was aborted' in submodule and re.search(r'if \(_harmony != null && !TryUnpatchOwnedPatches\(\)\)\s*\{.*?return;\s*\}', submodule, re.DOTALL) is not None,
-    'legacy numpad defaults migrate': 'MigrateLegacyDefaultControls' in files.get('VoidstepSettings.cs','') and '"Numpad1"' in files.get('VoidstepSettings.cs',''),
     'camera aligned targeting': 'GetCameraFrame()' in files.get('TargetingService.cs','') and 'GetAimDirection' in files.get('TargetingService.cs',''),
     'visible marker mesh': 'Mesh.GetFromResource' in files.get('EffectController.cs','') and 'entity.AddMesh' in files.get('EffectController.cs',''),
     'cleave preserves weapon snapshot': 'MissionWeapon _cleaveWeapon' in ability_manager and 'MissionWeapon _weapon' in cleave and 'attacker.WieldedWeapon' not in blow_factory,
@@ -68,8 +102,8 @@ checks = {
     'dark vision counts successful contours only': 'if (TrySetContour(agent, color))' in dark_vision and 'private static bool ClearContour' in dark_vision and 'if (ClearContour(' in dark_vision,
     'no campaign behavior': 'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
     'no global agent collection': not re.search(r'\bstatic\s+readonly\s+.*(?:\bAgent\b|\bList<Agent>\b|\bHashSet<Agent>\b)', all_text),
-    'no full all-agent scan': 'AllAgents' not in files.get('VoidstepMissionBehavior.cs','') and 'Agents)' not in files.get('VoidstepMissionBehavior.cs',''),
-    'mission end cleanup': 'Cleanup(CancelReason.MissionEnded)' in files.get('VoidstepMissionBehavior.cs',''),
+    'no full all-agent scan': 'AllAgents' not in mission_behavior and 'Agents)' not in mission_behavior,
+    'mission end cleanup': 'Cleanup(CancelReason.MissionEnded)' in mission_behavior,
     'missing effects are nonfatal': 'Optional particle failed' in files.get('EffectController.cs','') and 'return -1;' in files.get('EffectController.cs',''),
     'whole-cast target cap': '_successfulHits >= _maximumTargets' in cleave,
     'dark vision reuses stale buffer': 'List<int> _staleBuffer' in dark_vision and 'new List<int>' not in dark_vision.split('private void Refresh()',1)[-1],

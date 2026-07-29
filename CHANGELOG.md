@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.5
+
+- Replaced the limited MCM primary-key dropdowns with six native serialized Bannerlord bindings under `Options > Keybindings > Voidstep`.
+- Made every ability primary key rebindable to any keyboard or mouse button accepted by Bannerlord's keybinding screen.
+- Added a separate configurable modifier combination for each ability in MCM, including no modifier and Control, Alt, Shift combinations.
+- Removed the ineffective v1.0.4 GameKey-overload interception and moved conflict handling to Bannerlord's lower-level input API.
+- Suppressed the configured primary key at the raw boolean input layer while the complete ability chord is active.
+- Suppressed the same key at the raw axis layer, preventing movement bindings and other axis consumers from also activating.
+- Latched suppression from chord press through release so releasing a modifier before the primary key cannot trigger the underlying native action afterward.
+- Preserved the unmodified native key whenever an ability modifier is configured, so plain `1` through `6` still perform formation selection with the default controls.
+- Added fail-closed native-hotkey registration and runtime diagnostics showing the resolved live chords.
+
 ## 1.0.4
 
 - Restored `Ctrl+1` through `Ctrl+6` as the default ability controls.

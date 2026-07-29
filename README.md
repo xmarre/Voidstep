@@ -14,18 +14,30 @@ Mission-scoped single-player combat abilities for **Mount & Blade II: Bannerlord
 - **Dark Vision** immediately highlights nearby hostiles and refreshes them at a configurable low frequency. It never performs a full-agent scan every frame and clears every contour it applies.
 - **Void Energy** is mission-local, configurable, regenerating and supports cooldown-only or unlimited modes.
 
-## Default controls
+## Controls
 
 | Ability | Default |
 |---|---|
 | Voidstep Cleave | `Ctrl+1` |
-| Blink | `Ctrl+2`, then `Ctrl+2` to confirm |
+| Blink | `Ctrl+2`, then the same chord to confirm |
 | Windblast | `Ctrl+3` |
 | Bend Time | `Ctrl+4` |
 | Domino | `Ctrl+5` |
 | Dark Vision | `Ctrl+6` |
 
-Keys are editable through MCM. Voidstep suppresses only the corresponding Bannerlord `SelectOrder1`–`SelectOrder6` mission command while Ctrl is held and that chord is bound to an ability. Plain `1`–`6` therefore continue to select formations normally. Untouched v1.0.2/v1.0.3 Numpad defaults migrate automatically to `Ctrl+1`–`Ctrl+6`.
+The six **primary keys are native serialized Bannerlord bindings**. Change them under:
+
+```text
+Options > Keybindings > Voidstep
+```
+
+Any keyboard or mouse button accepted by Bannerlord's keybinding screen can be selected. Each ability's optional modifier combination is configured separately under:
+
+```text
+MCM > Voidstep > Controls
+```
+
+Available modifier combinations are None, Control, Alt, Shift and their combinations. When the completed ability chord is active, Voidstep suppresses the same underlying raw key from the rest of Bannerlord for that press. Suppression remains latched until the primary key is released, even if the modifier is released first. This prevents formations, weapon slots, movement, attacks or another native action bound to the primary key from also firing. When a modifier is configured, pressing the primary key without that modifier remains completely native.
 
 ## Ability details
 
@@ -39,7 +51,7 @@ Live targeting allows an enemy entering an unpassed section of the sweep to be h
 
 ### Blink
 
-Press once to enter aiming and display a mesh-backed world marker. Green means the current validated destination is usable; red means validation failed. Move the camera to reposition the target, then press the Blink key again to confirm. Enemy-relative Blink places the requested point beyond the target and lets the common teleport validator select a safe nearby fallback. The temporary aiming slowdown has its own mission request ID and is removed on confirmation, timeout, death, replacement or mission end.
+Press once to enter aiming and display a mesh-backed world marker. Green means the current validated destination is usable; red means validation failed. Move the camera to reposition the target, then press the Blink chord again to confirm. Enemy-relative Blink places the requested point beyond the target and lets the common teleport validator select a safe nearby fallback. The temporary aiming slowdown has its own mission request ID and is removed on confirmation, timeout, death, replacement or mission end.
 
 ### Windblast
 
@@ -91,15 +103,15 @@ The Old Realms is optional. Voidstep detects TOR at runtime only to select optio
 
 ## MCM settings
 
-MCM exposes the master switch, six ability keys, control modifier, Void Energy modes and values, per-ability costs and cooldowns, teleport ranges, cleave radius, sweep, damage, direction, target cap, friendly fire, mounts, knockback and snapshot mode, Blink wall and momentum settings, Windblast cone values, Bend Time factor and duration, Domino propagation options, Dark Vision range and refresh interval, effect intensity, camera emphasis and debug logging.
+MCM exposes the six per-ability modifier combinations, master switch, Void Energy modes and values, per-ability costs and cooldowns, teleport ranges, cleave radius, sweep, damage, direction, target cap, friendly fire, mounts, knockback and snapshot mode, Blink wall and momentum settings, Windblast cone values, Bend Time factor and duration, Domino propagation options, Dark Vision range and refresh interval, effect intensity, camera emphasis and debug logging. Primary keys are configured through Bannerlord's native Keybindings screen, not a limited MCM dropdown.
 
 ## Presentation approach
 
-Voidstep does not force a fabricated or victim-reaction animation onto the player. Cleave presentation is built from validated teleport phases, a visible destination marker, actor rotation, weapon-trail effects, impacts, sound and angle-synchronised native blows. This preserves Bannerlord's current melee weapon and combat-action ownership while keeping the combat effect independent from a future authored skeletal animation asset.
+Voidstep does not force a fabricated or victim-reaction animation onto the player. Cleave presentation is built from validated teleport phases, a visible destination marker, actor rotation, weapon-trail effects, impacts, sound and angle-synchronised native blows. This preserves Bannerlord's current melee weapon and combat-action ownership while keeping the combat effect independent from a future-authored skeletal animation asset.
 
 ## Diagnostics
 
-Enable **Debug logging** in MCM when testing. The log records every accepted input and ability stage, including camera aim, selected destination, validation result, teleport completion, candidate counts, registered Cleave hits, Windblast hits, Bend Time request acquisition, Domino links and Dark Vision highlight counts.
+Enable **Debug logging** in MCM when testing. The log records the resolved native chord for every accepted input and every ability stage, including camera aim, selected destination, validation result, teleport completion, candidate counts, registered Cleave hits, Windblast hits, Bend Time request acquisition, Domino links and Dark Vision highlight counts.
 
 Primary log location:
 
@@ -111,7 +123,8 @@ Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log
 
 - No campaign behavior is registered.
 - No campaign-map tick is used.
-- Harmony is used only to suppress matching formation-selection GameKeys during active Ctrl ability chords.
+- Harmony masks only the configured ability primary key while its complete modifier chord is active in a live mission.
+- Boolean key state and movement-axis reads are both covered, so a reserved chord cannot leak into another native action.
 - No static collection stores mission agents.
 - Runtime state is created per mission and discarded on mission end.
 - Native and TOR particle lookups are optional and non-fatal.
