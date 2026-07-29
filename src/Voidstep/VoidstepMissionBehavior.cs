@@ -8,6 +8,8 @@ namespace Voidstep
 {
     internal sealed class VoidstepMissionBehavior : MissionLogic
     {
+        private const float BindingRefreshInterval = 0.25f;
+
         private readonly VoidstepLogger _logger;
         private AbilityManager _manager;
         private InputRouter _input;
@@ -16,6 +18,8 @@ namespace Voidstep
         private bool _cleaned;
         private bool _wasEnabled;
         private bool _readyNoticeShown;
+        private bool _bindingConflictInitialized;
+        private float _bindingRefreshRemaining;
         private string _lastBindingConflict;
 
         public VoidstepMissionBehavior(VoidstepLogger logger)
@@ -45,12 +49,14 @@ namespace Voidstep
                 if (!VoidstepSubModule.NativeHotkeysReady || VoidstepHotKeyContext.Current == null)
                     throw new InvalidOperationException("Native Voidstep hotkeys are not registered.");
 
+                VoidstepInputBindings.RefreshCacheIfChanged();
                 var settings = VoidstepSettings.Current;
                 var context = new AbilityContext(Mission, _logger);
                 _manager = new AbilityManager(context);
                 _input = new InputRouter(Mission, _logger);
                 _lastPlayer = Mission.MainAgent;
                 _wasEnabled = settings.Enabled;
+                _bindingRefreshRemaining = BindingRefreshInterval;
                 _logger.Info($"Mission behavior initialized. Controls: {VoidstepInputBindings.GetSummary()}. Primary keys: Options > Keybindings > Voidstep. Modifiers: MCM > Controls. Log: {_logger.PrimaryPath ?? "engine log only"}.");
                 CheckBindingConflict();
             }
@@ -87,6 +93,8 @@ namespace Voidstep
                     return;
                 }
 
+                RefreshBindings(dt);
+
                 var current = Mission.MainAgent;
                 if (!_readyNoticeShown && current != null && current.IsActive())
                 {
@@ -95,7 +103,6 @@ namespace Voidstep
                     _logger.Info($"Runtime ready. Controls: {controls}.");
                     TryDisplayNotice($"Voidstep v1.0.5 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
                 }
-                CheckBindingConflict();
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
                     _manager.OnPlayerAgentChanged(_lastPlayer, current);
@@ -114,16 +121,36 @@ namespace Voidstep
             }
         }
 
+        private void RefreshBindings(float dt)
+        {
+            _bindingRefreshRemaining -= dt;
+            if (!VoidstepInputBindings.IsCacheDirty && _bindingRefreshRemaining > 0f)
+                return;
+
+            _bindingRefreshRemaining = BindingRefreshInterval;
+            if (!VoidstepInputBindings.RefreshCacheIfChanged())
+                return;
+
+            _logger.Info("Control bindings refreshed. Controls: " + VoidstepInputBindings.GetSummary() + ".");
+            CheckBindingConflict();
+        }
+
         private void CheckBindingConflict()
         {
             var conflict = VoidstepInputBindings.GetConflictWarning();
-            if (string.Equals(conflict, _lastBindingConflict, StringComparison.Ordinal))
+            if (_bindingConflictInitialized &&
+                string.Equals(conflict, _lastBindingConflict, StringComparison.Ordinal))
+            {
                 return;
+            }
 
+            var hadConflict = _bindingConflictInitialized && !string.IsNullOrEmpty(_lastBindingConflict);
+            _bindingConflictInitialized = true;
             _lastBindingConflict = conflict;
             if (string.IsNullOrEmpty(conflict))
             {
-                _logger.Info("Voidstep ability-chord conflicts cleared.");
+                if (hadConflict)
+                    _logger.Info("Voidstep ability-chord conflicts cleared.");
                 return;
             }
 
@@ -201,6 +228,7 @@ namespace Voidstep
             _input = null;
             _lastPlayer = null;
             _lastBindingConflict = null;
+            _bindingConflictInitialized = false;
         }
     }
 }
