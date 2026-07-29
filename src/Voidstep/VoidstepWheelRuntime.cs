@@ -15,9 +15,14 @@ namespace Voidstep
             }
         }
 
-        internal static void Attach(AbilityWheelCoordinator coordinator)
+        internal static void Attach(AbilityWheelCoordinator coordinator, VoidstepLogger logger)
         {
-            lock (Sync) _current = coordinator;
+            lock (Sync)
+            {
+                if (_current != null && !ReferenceEquals(_current, coordinator))
+                    logger?.Info("Replacing a stale Voidstep ability-wheel coordinator from an earlier mission runtime.");
+                _current = coordinator;
+            }
         }
 
         internal static void Detach(AbilityWheelCoordinator coordinator)
