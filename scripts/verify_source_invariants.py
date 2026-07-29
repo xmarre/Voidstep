@@ -121,6 +121,8 @@ def mask_csharp_noncode(source):
 
 
 def extract_braced_body(source, opening_brace):
+    if opening_brace < 0 or opening_brace >= len(source) or source[opening_brace] != '{':
+        return None
     depth = 0
     for index in range(opening_brace, len(source)):
         if source[index] == '{':
@@ -137,6 +139,8 @@ def extract_method(masked_source, declaration_pattern):
     if len(matches) != 1:
         return None
     opening = masked_source.find('{', matches[0].start(), matches[0].end())
+    if opening < 0:
+        return None
     return extract_braced_body(masked_source, opening)
 
 
@@ -157,8 +161,14 @@ def validate_native_action_channel_method(masked_source, method_name, expected_s
     loop_body = extract_braced_body(body, body.find('{', loop.start(), loop.end()))
     if loop_body is None:
         return False
-    calls = re.findall(r'\bSetCurrentActionSpeed\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^,\)]+?)\s*\)', body)
-    return len(calls) == 1 and calls[0][0] == loop.group('channel') and calls[0][1].strip() == expected_speed
+    call_pattern = r'\bSetCurrentActionSpeed\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^,\)]+?)\s*\)'
+    method_calls = re.findall(call_pattern, body)
+    loop_calls = re.findall(call_pattern, loop_body)
+    return (
+        len(method_calls) == 1
+        and len(loop_calls) == 1
+        and loop_calls[0][0] == loop.group('channel')
+        and loop_calls[0][1].strip() == expected_speed)
 
 
 time_code = mask_csharp_noncode(time_control)
@@ -264,17 +274,25 @@ checks = {
     'wheel coordinator replaces direct activation in mission tick': '_wheel.Tick(dt);' in mission_behavior and '_manager.TryActivate(ability.Value)' not in mission_behavior,
     'direct bindings select rather than cast': '_selection.Select(directAbility.Value, "configured direct selector")' in wheel_coordinator,
     'right mouse confirms selected ability': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in wheel_coordinator and '_selection.Confirm()' in wheel_coordinator,
+    'Q suppression is limited to owned standalone state': 'return !_tor.IsAvailable && (_standalone.IsOpen || _selection.HasSelection);' in wheel_coordinator,
+    'selection validates player before mutation': selection.find('var player = _mission.MainAgent;') < selection.find('if (_manager.IsBusy)') and selection.find('var player = _mission.MainAgent;') >= 0,
+    'Blink cancellation fails closed': '_cancelCurrent == null' in selection and 'Blink targeting could not be cancelled safely.' in selection and 'return false;' in selection,
+    'preview creation retries are bounded': 'MaximumPreviewCreationFailures = 3' in selection and '_previewCreationDisabled = true;' in selection,
     'selection is independent from persistent effects': 'AbilityId? _selected' in selection and '_manager.TryActivate(ability)' in selection and 'ClearSelectionVisuals' in selection,
     'all selected abilities receive area previews': all(token in selection for token in ('BuildCleavePreview', 'BuildWindblastPreview', 'BuildDominoPreview', 'BuildRadiusPreview')) and 'AbilityId.Blink' in selection,
-    'standalone wheel uses Q and six radial segments': 'InputKey.Q' in standalone_wheel and 'Math.PI / 3.0' in standalone_wheel and 'VoidstepInputBindings.Abilities[selected]' in standalone_wheel,
+    'standalone wheel derives radial sectors from registry': 'var count = VoidstepInputBindings.Abilities.Length;' in standalone_wheel and 'var sector = Math.PI * 2.0 / count;' in standalone_wheel and 'VoidstepInputBindings.Abilities[selected]' in standalone_wheel,
+    'standalone wheel retains failed layer cleanup': 'ownership was retained for a later cleanup retry' in standalone_wheel and 'private bool _layerAdded;' in standalone_wheel,
+    'standalone wheel uses semantic input restriction mask': 'Enum.GetNames(type)' in standalone_wheel and 'string.Equals(name, "All", StringComparison.Ordinal)' in standalone_wheel and 'Enum.ToObject(type, -1)' not in standalone_wheel,
     'standalone wheel has Gauntlet prefab': wheel_prefab_path.exists() and '<Prefab>' in wheel_prefab and all(name in wheel_prefab for name in ('@CleaveText', '@BlinkText', '@WindblastText', '@BendTimeText', '@DominoText', '@DarkVisionText')),
-    'standalone wheel view model exposes all entries': all(name in wheel_vm for name in ('CleaveText', 'BlinkText', 'WindblastText', 'BendTimeText', 'DominoText', 'DarkVisionText')),
+    'standalone wheel view model rejects invalid entries': 'internal bool SetSelected(int index)' in wheel_vm and 'return false;' in wheel_vm,
     'TOR integration is reflection isolated': 'TOR_Core' in tor_wheel and 'Assembly' in tor_wheel and 'GetType(' in tor_wheel and 'using TOR_Core' not in tor_wheel,
     'TOR wheel receives six proxy abilities': 'InjectProxies' in tor_wheel and 'VoidstepInputBindings.Abilities.Length' in tor_wheel and '_knownAbilities.Add(proxy)' in tor_wheel,
+    'TOR proxy enums use semantic names': 'ParseEnumValue("TOR_Core.AbilitySystem.AbilityType", "Spell")' in tor_wheel and 'Enum.ToObject' not in tor_wheel,
+    'TOR deactivation removes proxies before clearing references': 'DeactivateLiveAttachment' in tor_wheel and tor_wheel.find('RemoveInjectedProxies();', tor_wheel.find('private void DeactivateLiveAttachment')) < tor_wheel.find('_knownAbilities = null;', tor_wheel.find('private void DeactivateLiveAttachment')),
     'TOR proxy targeting is disabled only by ownership': 'IsDisabledPrefix' in tor_wheel and 'runtime.IsTorProxy(__instance)' in tor_wheel,
     'TOR targeting closes after Mouse2 cast': '_tor.CloseTargetingMode();' in wheel_coordinator and 'DisableAbilityMode' in tor_wheel,
-    'wheel input suppression is bypass safe': 'InputConflictSuppression.IsBypassed' in wheel_suppression and 'VoidstepWheelRuntime.ShouldSuppress(__0)' in wheel_suppression,
-    'wheel runtime is mission scoped and detached': 'VoidstepWheelRuntime.Attach(this);' in wheel_coordinator and 'VoidstepWheelRuntime.Detach(this);' in wheel_coordinator,
+    'wheel input suppression is bypass safe': 'InputConflictSuppression.IsBypassed' in wheel_suppression and 'VoidstepWheelRuntime.ShouldSuppress(__0)' in wheel_suppression and 'if (method != null)' in wheel_suppression,
+    'wheel runtime is mission scoped and diagnosed': 'VoidstepWheelRuntime.Attach(this, logger);' in wheel_coordinator and 'VoidstepWheelRuntime.Detach(this);' in wheel_coordinator and 'Replacing a stale Voidstep ability-wheel coordinator' in wheel_runtime,
     'no campaign behavior': 'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
     'no static agent collection': not re.search(r'\bstatic\s+readonly\s+.*(?:\bAgent\b|\bList<Agent>\b|\bHashSet<Agent>\b)', all_text),
     'no full mission-agent scan': 'AllAgents' not in mission_behavior and 'Agents)' not in mission_behavior,
