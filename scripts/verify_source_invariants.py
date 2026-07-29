@@ -13,7 +13,9 @@ ability_manager = files.get('AbilityManager.cs', '')
 cleave = files.get('CleaveSweepController.cs', '')
 submodule = files.get('VoidstepSubModule.cs', '')
 input_router = files.get('InputRouter.cs', '')
-input_suppression = files.get('MissionOrderInputSuppression.cs', '')
+input_bindings = files.get('VoidstepInputBindings.cs', '')
+hotkey_context = files.get('VoidstepHotKeyContext.cs', '')
+settings = files.get('VoidstepSettings.cs', '')
 weapon_validation = files.get('WeaponValidation.cs', '')
 dark_vision = files.get('DarkVisionService.cs', '')
 blow_factory = files.get('BlowFactory.cs', '')
@@ -45,11 +47,17 @@ uncapped_cleave_schedule = re.search(
 checks = {
     'mission scoped behavior': 'VoidstepMissionBehavior : MissionLogic' in all_text,
     'late-added behavior initializes in EarlyStart': 'public override void EarlyStart()' in files.get('VoidstepMissionBehavior.cs','') and 'EnsureInitialized("EarlyStart")' in files.get('VoidstepMissionBehavior.cs',''),
-    'ctrl number defaults': all(f'new Dropdown<string>(KeyOptions, {i})' in files.get('VoidstepSettings.cs','') for i in range(6)) and 'RequireControlModifier { get; set; } = true;' in files.get('VoidstepSettings.cs',''),
-    'formation input suppressed only through game keys': 'SelectOrder1' in input_suppression and 'InputContext' in input_suppression and 'IsControlDown()' in input_suppression and 'object[] __args' not in input_suppression,
-    'ability input fails closed with suppression ownership': 'InputSuppressionReady { get; private set; }' in submodule and 'if (!InputSuppressionReady || _harmony == null)' in submodule and 'if (!VoidstepSubModule.InputSuppressionReady)' in input_router and '!VoidstepSubModule.InputSuppressionReady' in input_suppression,
+    'native serialized hotkeys shown in options': 'AuxiliarySerializedAndShownInOptions' in hotkey_context and hotkey_context.count('RegisterHotKey(new HotKey(') == 6 and 'HotKeyManager.RegisterContext(context, false, true)' in hotkey_context,
+    'native hotkey localization registered': 'str_hotkey_category_name' in hotkey_context and 'str_hotkey_name' in hotkey_context and 'str_hotkey_description' in hotkey_context,
+    'arbitrary primary keys replace hardcoded key list': 'KeyOptions' not in settings and 'VoidstepKey' not in settings and 'RequireControlModifier' not in settings and 'ModifierOptions' in settings,
+    'per ability modifiers configurable': all(name in settings for name in ('VoidstepModifier', 'BlinkModifier', 'WindblastModifier', 'BendTimeModifier', 'DominoModifier', 'DarkVisionModifier')),
+    'input router polls live native bindings': 'VoidstepInputBindings.TryGetPressedKey' in input_router and 'InputConflictSuppression.Latch' in input_router and 'Enum.TryParse' not in input_router,
+    'generic raw input boolean suppression': all(name in input_bindings for name in ('nameof(Input.IsKeyPressed)', 'nameof(Input.IsKeyDown)', 'nameof(Input.IsKeyDownImmediate)', 'nameof(Input.IsKeyReleased)')),
+    'generic raw input axis suppression': 'nameof(Input.GetKeyState)' in input_bindings and '__result = Vec2.Zero;' in input_bindings,
+    'suppression preserves own polling through bypass': '[ThreadStatic]' in input_bindings and 'EnterBypass()' in input_bindings and 'IsBypassed' in input_bindings,
+    'suppression latches complete chord lifecycle': 'HashSet<InputKey> LatchedKeys' in input_bindings and 'RefreshLatches()' in input_bindings and 'LatchedKeys.Contains(inputKey)' in input_bindings,
+    'ability input fails closed with both ownership gates': 'InputSuppressionReady { get; private set; }' in submodule and 'NativeHotkeysReady { get; private set; }' in submodule and 'if (!InputSuppressionReady || _harmony == null || !NativeHotkeysReady)' in submodule and '!VoidstepSubModule.NativeHotkeysReady' in input_router,
     'harmony cleanup retains ownership on failure': 'for (var attempt = 1; attempt <= 2; attempt++)' in submodule and 'submodule unload was aborted' in submodule and re.search(r'if \(_harmony != null && !TryUnpatchOwnedPatches\(\)\)\s*\{.*?return;\s*\}', submodule, re.DOTALL) is not None,
-    'legacy numpad defaults migrate': 'MigrateLegacyDefaultControls' in files.get('VoidstepSettings.cs','') and '"Numpad1"' in files.get('VoidstepSettings.cs',''),
     'camera aligned targeting': 'GetCameraFrame()' in files.get('TargetingService.cs','') and 'GetAimDirection' in files.get('TargetingService.cs',''),
     'visible marker mesh': 'Mesh.GetFromResource' in files.get('EffectController.cs','') and 'entity.AddMesh' in files.get('EffectController.cs',''),
     'cleave preserves weapon snapshot': 'MissionWeapon _cleaveWeapon' in ability_manager and 'MissionWeapon _weapon' in cleave and 'attacker.WieldedWeapon' not in blow_factory,
