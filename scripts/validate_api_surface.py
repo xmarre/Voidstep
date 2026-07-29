@@ -143,6 +143,9 @@ REQUIRED = {
             "get_MousePositionPixel": [[]],
         },
     },
+}
+
+OPTIONAL = {
     "TOR_Core.dll": {
         "TOR_Core.AbilitySystem.Ability": {
             "get_StringID": [[]],
@@ -208,40 +211,58 @@ def signatures(methods, name):
     return [[p["type"] for p in m["params"]] for m in methods if m["name"] == name]
 
 
+def validate_assembly(path, assembly_name, types, failures):
+    checks = 0
+    clr = CLR(path)
+    for type_name, method_map in types.items():
+        dumped = clr.dump_type(type_name)
+        if not dumped:
+            failures.append(f"{assembly_name}: missing type {type_name}")
+            continue
+        methods = dumped[0]["methods"]
+        fields = {field["name"] for field in dumped[0]["fields"]}
+        for method_name, accepted in method_map.items():
+            if method_name == "__fields__":
+                for field_name in accepted:
+                    checks += 1
+                    if field_name not in fields:
+                        failures.append(f"{assembly_name}: {type_name}.{field_name} field missing")
+                continue
+            actual = signatures(methods, method_name)
+            checks += 1
+            if not actual:
+                failures.append(f"{assembly_name}: {type_name}.{method_name} missing")
+            elif accepted is not None and not any(sig in accepted for sig in actual):
+                failures.append(f"{assembly_name}: {type_name}.{method_name} signature mismatch: {actual}")
+    return checks
+
+
 def validate(root: Path):
     failures = []
     checks = 0
     for assembly_name, types in REQUIRED.items():
         path = root / assembly_name
         if not path.is_file():
-            failures.append(f"missing assembly: {path}")
+            failures.append(f"missing required assembly: {path}")
             continue
-        clr = CLR(path)
-        for type_name, method_map in types.items():
-            dumped = clr.dump_type(type_name)
-            if not dumped:
-                failures.append(f"{assembly_name}: missing type {type_name}")
-                continue
-            methods = dumped[0]["methods"]
-            fields = {field["name"] for field in dumped[0]["fields"]}
-            for method_name, accepted in method_map.items():
-                if method_name == "__fields__":
-                    for field_name in accepted:
-                        checks += 1
-                        if field_name not in fields:
-                            failures.append(f"{assembly_name}: {type_name}.{field_name} field missing")
-                    continue
-                actual = signatures(methods, method_name)
-                checks += 1
-                if not actual:
-                    failures.append(f"{assembly_name}: {type_name}.{method_name} missing")
-                elif accepted is not None and not any(sig in accepted for sig in actual):
-                    failures.append(f"{assembly_name}: {type_name}.{method_name} signature mismatch: {actual}")
+        checks += validate_assembly(path, assembly_name, types, failures)
+
+    optional_status = []
+    for assembly_name, types in OPTIONAL.items():
+        path = root / assembly_name
+        if not path.is_file():
+            optional_status.append(f"{assembly_name} absent; optional TOR integration checks skipped")
+            continue
+        checks += validate_assembly(path, assembly_name, types, failures)
+        optional_status.append(f"{assembly_name} present; TOR integration API checked")
+
     if failures:
         for failure in failures:
             print("FAIL:", failure)
         raise SystemExit(1)
-    print(f"Validated {checks} Bannerlord 1.3.15 / TOR 1.16 API surface checks.")
+    for status in optional_status:
+        print("NOTE:", status)
+    print(f"Validated {checks} required Bannerlord 1.3.15 and available optional integration API surface checks.")
 
 
 if __name__ == "__main__":
