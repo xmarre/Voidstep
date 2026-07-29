@@ -21,9 +21,17 @@ namespace Voidstep
         private static readonly string[] TorArrival = { "vfx_vortex_purple", "psys_magic_shadow_impact", "vfx_teleport" };
         private static readonly string[] TorImpact = { "psys_magic_hit", "vfx_dark_magic_hit", "psys_shadow_hit" };
         private static readonly string[] TorWind = { "psys_magic_wind", "vfx_wind_blast", "psys_gust" };
-        private static readonly string[] NativeMarker = { "psys_game_blood_sword_enter", "psys_game_missile_hit_human" };
+        private static readonly string[] NativeMarker = { "psys_game_missile_hit_ground", "psys_game_broken_shield" };
         private static readonly string[] TorMarker = { "psys_magic_shadow", "vfx_vortex_purple", "psys_shadow_hit" };
-        private static readonly string[] MarkerMeshes = { "arrow_bl_a", "arrow_bodkin_a", "arrow_barbed_a" };
+        private static readonly string[] MarkerMeshes = { "debug_sphere", "unit_sphere", "editor_sphere", "sphere" };
+        private static readonly Vec3[] MarkerOffsets =
+        {
+            Vec3.Zero,
+            new Vec3(0.32f, 0f, 0f, 1f),
+            new Vec3(-0.32f, 0f, 0f, 1f),
+            new Vec3(0f, 0.32f, 0f, 1f),
+            new Vec3(0f, -0.32f, 0f, 1f)
+        };
 
         public EffectController(Mission mission, VoidstepLogger logger)
         {
@@ -34,9 +42,9 @@ namespace Voidstep
         public void Departure(Vec3 position) => Burst(UseTorPreset() ? TorDeparture : NativeDeparture, position);
         public void Arrival(Vec3 position) => Burst(UseTorPreset() ? TorArrival : NativeArrival, position);
         public void Impact(Vec3 position) => Burst(UseTorPreset() ? TorImpact : NativeImpact, position);
-        public void Windblast(Vec3 position) => Burst(UseTorPreset() ? TorWind : NativeWind, position);
+        public void Windblast(Vec3 position) => RadialBurst(UseTorPreset() ? TorWind : NativeWind, position, 0.75f, 6);
         public void WeaponTrail(Vec3 position) => Burst(UseTorPreset() ? TorImpact : NativeImpact, position);
-        public void BendTime(Vec3 position) => Burst(UseTorPreset() ? TorDeparture : NativeDeparture, position);
+        public void BendTime(Vec3 position) => RadialBurst(UseTorPreset() ? TorDeparture : NativeDeparture, position, 1.15f, 8);
 
         public GameEntity CreateWorldMarker(Vec3 position, uint color) => CreateMarker(position, color, true);
 
@@ -56,14 +64,20 @@ namespace Voidstep
                 entity.SetReadyToRender(true);
 
                 var particleId = ResolveFirst(UseTorPreset() ? TorMarker : NativeMarker);
+                var attachedParticles = 0;
                 if (particleId >= 0)
                 {
-                    var localFrame = MatrixFrame.Identity;
-                    ParticleSystem.CreateParticleSystemAttachedToEntity(particleId, entity, ref localFrame);
+                    for (var i = 0; i < MarkerOffsets.Length; i++)
+                    {
+                        var localFrame = MatrixFrame.Identity;
+                        localFrame.origin = MarkerOffsets[i];
+                        ParticleSystem.CreateParticleSystemAttachedToEntity(particleId, entity, ref localFrame);
+                        attachedParticles++;
+                    }
                 }
 
                 _ownedEntities.Add(entity);
-                _logger.Debug($"Created visible target marker at {Format(position)}; mesh={meshAdded}, particle={particleId}.");
+                _logger.Debug($"Created cast indicator at {Format(position)}; mesh={meshAdded}, particles={attachedParticles}, particleId={particleId}.");
                 return entity;
             }
             catch (Exception ex)
@@ -73,7 +87,7 @@ namespace Voidstep
                     try { entity.Remove(0); } catch { }
                     _ownedEntities.Remove(entity);
                 }
-                _logger.Debug("Marker creation failed: " + ex.Message);
+                _logger.Debug("Cast indicator creation failed: " + ex.Message);
                 return null;
             }
         }
@@ -89,7 +103,7 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                _logger.Debug("Marker move failed: " + ex.Message);
+                _logger.Debug("Cast indicator move failed: " + ex.Message);
             }
         }
 
@@ -97,7 +111,7 @@ namespace Voidstep
         {
             if (marker == null) return;
             try { marker.SetContourColor(color, true); }
-            catch (Exception ex) { _logger.Debug("Marker colour update failed: " + ex.Message); }
+            catch (Exception ex) { _logger.Debug("Cast indicator colour update failed: " + ex.Message); }
         }
 
         public void RemoveMarker(GameEntity marker)
@@ -143,19 +157,33 @@ namespace Voidstep
                     var mesh = source.CreateCopy();
                     if (mesh == null) continue;
                     var local = MatrixFrame.Identity;
-                    local.origin = Vec3.Up * 0.35f;
-                    local.rotation.RotateAboutSide((float)Math.PI * 0.5f);
-                    local.rotation.ApplyScaleLocal(0.75f);
+                    local.origin = Vec3.Up * 0.12f;
+                    local.rotation.ApplyScaleLocal(0.18f);
                     mesh.SetLocalFrame(local);
                     entity.AddMesh(mesh, false);
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    _logger.Debug($"Marker mesh '{MarkerMeshes[i]}' unavailable: {ex.Message}");
+                    _logger.Debug($"Cast indicator mesh '{MarkerMeshes[i]}' unavailable: {ex.Message}");
                 }
             }
             return false;
+        }
+
+        private void RadialBurst(string[] candidates, Vec3 center, float radius, int count)
+        {
+            Burst(candidates, center);
+            for (var i = 0; i < count; i++)
+            {
+                var angle = i * Math.PI * 2.0 / count;
+                var position = new Vec3(
+                    center.x + (float)Math.Cos(angle) * radius,
+                    center.y + (float)Math.Sin(angle) * radius,
+                    center.z + 0.05f,
+                    1f);
+                Burst(candidates, position);
+            }
         }
 
         private void Burst(string[] candidates, Vec3 position)
