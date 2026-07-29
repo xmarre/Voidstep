@@ -8,6 +8,7 @@ namespace Voidstep
     internal sealed class BlinkController
     {
         private const int AimTimeRequestId = 0x5653424C;
+        private const int PreviewFallbackCandidateBudget = 24;
         private readonly Mission _mission;
         private readonly TargetingService _targeting;
         private readonly TeleportValidator _validator;
@@ -162,7 +163,12 @@ namespace Voidstep
             if (_actor == null) return;
             var settings = VoidstepSettings.Current;
             var requested = ResolveRequestedPosition(_actor, settings.BlinkRange);
-            _validation = _validator.Validate(_actor, requested, settings.BlinkRange, settings.BlinkThroughWalls);
+            _validation = _validator.Validate(
+                _actor,
+                requested,
+                settings.BlinkRange,
+                settings.BlinkThroughWalls,
+                PreviewFallbackCandidateBudget);
             var position = _validation.Success ? _validation.Position : requested;
             var color = _validation.Success ? 0x60E080FFu : 0xE05050FFu;
             if (_preview == null)
