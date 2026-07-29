@@ -11,6 +11,7 @@ namespace Voidstep
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
         private readonly List<GameEntity> _ownedEntities = new List<GameEntity>();
+        private readonly Dictionary<GameEntity, Mesh> _markerMeshes = new Dictionary<GameEntity, Mesh>();
         private readonly Dictionary<string, int> _particleIds = new Dictionary<string, int>(StringComparer.Ordinal);
 
         private static readonly string[] NativeDeparture = { "psys_game_missile_hit_wood", "psys_game_blood_sword_enter" };
@@ -58,7 +59,7 @@ namespace Voidstep
                 frame.origin = position;
                 entity.SetFrame(ref frame, true);
 
-                var meshAdded = AddCastingSigilMesh(entity, color);
+                var sigil = CreateCastingSigilMesh(entity, color);
                 entity.SetContourColor(color, alwaysVisible);
                 entity.SetDoNotCheckVisibility(true);
                 entity.SetReadyToRender(true);
@@ -77,7 +78,8 @@ namespace Voidstep
                 }
 
                 _ownedEntities.Add(entity);
-                _logger.Debug($"Created cast indicator at {Format(position)}; sigil={meshAdded}, particles={attachedParticles}, particleId={particleId}.");
+                if (sigil != null) _markerMeshes[entity] = sigil;
+                _logger.Debug($"Created cast indicator at {Format(position)}; sigil={sigil != null}, particles={attachedParticles}, particleId={particleId}.");
                 return entity;
             }
             catch (Exception ex)
@@ -86,6 +88,7 @@ namespace Voidstep
                 {
                     try { entity.Remove(0); } catch { }
                     _ownedEntities.Remove(entity);
+                    _markerMeshes.Remove(entity);
                 }
                 _logger.Debug("Cast indicator creation failed: " + ex.Message);
                 return null;
@@ -110,13 +113,22 @@ namespace Voidstep
         public void SetMarkerColor(GameEntity marker, uint color)
         {
             if (marker == null) return;
-            try { marker.SetContourColor(color, true); }
+            try
+            {
+                marker.SetContourColor(color, true);
+                if (_markerMeshes.TryGetValue(marker, out var mesh))
+                {
+                    mesh.Color = color;
+                    mesh.Color2 = color;
+                }
+            }
             catch (Exception ex) { _logger.Debug("Cast indicator colour update failed: " + ex.Message); }
         }
 
         public void RemoveMarker(GameEntity marker)
         {
             if (marker == null) return;
+            _markerMeshes.Remove(marker);
             try { marker.Remove(0); } catch { }
             _ownedEntities.Remove(marker);
         }
@@ -143,10 +155,11 @@ namespace Voidstep
                 try { _ownedEntities[i]?.Remove(0); } catch { }
             }
             _ownedEntities.Clear();
+            _markerMeshes.Clear();
             _particleIds.Clear();
         }
 
-        private bool AddCastingSigilMesh(GameEntity entity, uint color)
+        private Mesh CreateCastingSigilMesh(GameEntity entity, uint color)
         {
             for (var i = 0; i < MarkerMaterialDonors.Length; i++)
             {
@@ -175,14 +188,14 @@ namespace Voidstep
                     mesh.RecomputeBoundingBox();
                     mesh.PreloadForRendering();
                     entity.AddMesh(mesh, false);
-                    return true;
+                    return mesh;
                 }
                 catch (Exception ex)
                 {
                     _logger.Debug($"Cast sigil material donor '{MarkerMaterialDonors[i]}' unavailable: {ex.Message}");
                 }
             }
-            return false;
+            return null;
         }
 
         private static void AddRing(Mesh mesh, UIntPtr handle, uint color, bool vertical)
