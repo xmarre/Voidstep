@@ -3,7 +3,6 @@ from pathlib import Path
 import sys
 
 root = Path(__file__).resolve().parents[1]
-runtime = root / 'src' / 'Voidstep'
 
 
 def read(relative):
@@ -15,6 +14,7 @@ tor = read('src/Voidstep/TorAbilityWheelAdapter.cs')
 selection = read('src/Voidstep/AbilitySelectionController.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
 suppression = read('src/Voidstep/AbilityWheelInputSuppressionPatch.cs')
+mission_input = read('src/Voidstep/MissionOrderInputSuppression.cs')
 cast_animation = read('src/Voidstep/AbilityCastAnimationPatch.cs')
 standalone = read('src/Voidstep/StandaloneAbilityWheel.cs')
 runtime_bridge = read('src/Voidstep/VoidstepWheelRuntime.cs')
@@ -66,6 +66,13 @@ checks = {
         '_suppressRightMouseUntilRelease = true;',
         '_selection.HasSelection || _suppressRightMouseUntilRelease',
         'Input.IsKeyReleased(InputKey.RightMouseButton)')),
+    'native attack and defend are suppressed only during Mouse2 ownership': all(token in mission_input for token in (
+        'private const int Attack = 9;',
+        'private const int Defend = 10;',
+        'gameKeyId == Attack || gameKeyId == Defend',
+        'VoidstepWheelRuntime.ShouldSuppress(InputKey.RightMouseButton)',
+        'nameof(InputContext.IsGameKeyPressed)',
+        'nameof(InputContext.GetGameKeyState)')),
     'wheel suppression does not suppress Voidstep own polling': 'InputConflictSuppression.IsBypassed' in suppression and 'VoidstepWheelRuntime.ShouldSuppress(__0)' in suppression,
     'selection casts only after confirmation': '_manager.TryActivate(ability);' in selection and 'internal bool Confirm()' in selection and '_manager.TryActivate(ability.Value)' not in mission,
     'Blink targeting begins on selection but animation waits for confirmation': '_manager.TryActivate(AbilityId.Blink)' in selection and 'enteringBlinkTargeting' in cast_animation and 'confirmingBlink' in cast_animation,
