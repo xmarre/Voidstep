@@ -11,7 +11,7 @@ namespace Voidstep
         {
             base.OnSubModuleLoad();
             _logger = new VoidstepLogger();
-            _logger.Info("Voidstep v1.0.2 submodule loaded.");
+            _logger.Info("Voidstep v1.0.3 submodule loaded.");
         }
 
         public override void OnMissionBehaviorInitialize(Mission mission)

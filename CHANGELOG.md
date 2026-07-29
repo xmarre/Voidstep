@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3
+
+- Fixed Blink aim slowdown and Bend Time failing with `ArgumentOutOfRangeException` when Bannerlord could not find a time-speed request ID.
+- Removed unsafe pre-emptive `RemoveTimeSpeedRequest` calls before a request had been registered.
+- Added ownership-safe existence checks before adding or removing mission time-speed requests.
+- Prevented Voidstep from replacing a time-speed request it did not create when a reserved ID is already present.
+
 ## 1.0.2
 
 - Fixed the actual mission-runtime lifecycle bug: Bannerlord 1.3.15 invokes `OnMissionBehaviorInitialize` after the normal `OnBehaviorInitialize` pass, so late-added Voidstep behavior now initializes idempotently during `EarlyStart` with a first-tick fallback.

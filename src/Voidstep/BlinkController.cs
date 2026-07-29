@@ -20,6 +20,7 @@ namespace Voidstep
         private float _elapsed;
         private float _refresh;
         private bool _ownsTimeRequest;
+        private bool _timeCleanupPending;
 
         public BlinkController(Mission mission, TargetingService targeting, TeleportValidator validator, EffectController effects, HudService hud, VoidstepLogger logger)
         {
@@ -44,13 +45,34 @@ namespace Voidstep
             _refresh = 0f;
             if (VoidstepSettings.Current.BlinkAimSlowdown)
             {
-                try
+                if (_ownsTimeRequest)
                 {
-                    _mission.RemoveTimeSpeedRequest(AimTimeRequestId);
-                    _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0.35f, AimTimeRequestId));
-                    _ownsTimeRequest = true;
+                    _logger.Debug("Blink aim slowdown skipped while a previous time request is pending cleanup.");
                 }
-                catch (Exception ex) { _logger.Debug("Blink aim slowdown unavailable: " + ex.Message); }
+                else
+                {
+                    try
+                    {
+                        float existingFactor;
+                        if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out existingFactor))
+                        {
+                            _logger.Debug("Blink aim slowdown skipped because its reserved mission speed request ID is already active.");
+                        }
+                        else
+                        {
+                            // Mark ownership before adding so a partially completed
+                            // native call is still cleaned through the verified release path.
+                            _ownsTimeRequest = true;
+                            _timeCleanupPending = false;
+                            _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0.35f, AimTimeRequestId));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ReleaseAimTimeRequest();
+                        _logger.Debug("Blink aim slowdown unavailable: " + ex.Message);
+                    }
+                }
             }
             RefreshPreview();
             _hud.Show("Blink aiming — press the Blink key again to confirm.");
@@ -59,6 +81,8 @@ namespace Voidstep
 
         public void Tick(float dt)
         {
+            if (_timeCleanupPending)
+                ReleaseAimTimeRequest();
             if (!IsAiming) return;
             if (_actor == null || !_actor.IsActive() || _actor.Health <= 0f)
             {
@@ -151,9 +175,40 @@ namespace Voidstep
             }
             if (_ownsTimeRequest)
             {
-                try { _mission.RemoveTimeSpeedRequest(AimTimeRequestId); }
-                catch (Exception ex) { _logger.Debug("Blink aim time cleanup failed: " + ex.Message); }
+                _timeCleanupPending = true;
+                ReleaseAimTimeRequest();
+            }
+        }
+
+        private bool ReleaseAimTimeRequest()
+        {
+            if (!_ownsTimeRequest)
+            {
+                _timeCleanupPending = false;
+                return true;
+            }
+
+            _timeCleanupPending = true;
+            try
+            {
+                // RemoveTimeSpeedRequest throws when its ID is absent, so always
+                // confirm removal and retain ownership if native cleanup fails.
+                float requestedFactor;
+                if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out requestedFactor))
+                {
+                    _mission.RemoveTimeSpeedRequest(AimTimeRequestId);
+                    if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out requestedFactor))
+                        return false;
+                }
+
                 _ownsTimeRequest = false;
+                _timeCleanupPending = false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Blink aim time cleanup failed; ownership retained for retry: " + ex.Message);
+                return false;
             }
         }
     }

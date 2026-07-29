@@ -15,6 +15,7 @@ namespace Voidstep
         private float _factor = 1f;
         private Agent _player;
         private bool _playerCompensationApplied;
+        private bool _cleanupPending;
 
         public TimeControlService(Mission mission, VoidstepLogger logger)
         {
@@ -22,12 +23,17 @@ namespace Voidstep
             _logger = logger;
         }
 
-        public bool Active => _token != 0 && _ownership.Owns(_token);
+        public bool Active => !_cleanupPending && _token != 0 && _ownership.Owns(_token);
         public float Remaining => _remaining;
 
         public bool Begin(Agent player, float requestedFactor, float duration, bool allowCompleteSuspension)
         {
             Release();
+            if (_token != 0)
+            {
+                _logger.Info("Bend Time is waiting for a previous mission speed request to finish cleanup.");
+                return false;
+            }
             if (player == null || !player.IsActive() || duration <= 0f)
                 return false;
 
@@ -38,9 +44,20 @@ namespace Voidstep
 
             try
             {
-                _mission.RemoveTimeSpeedRequest(RequestId);
-                _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(_factor, RequestId));
+                float existingFactor;
+                if (_mission.GetRequestedTimeSpeed(RequestId, out existingFactor))
+                {
+                    _logger.Info("Bend Time found an existing mission speed request with its reserved ID; refusing to replace a request it does not own.");
+                    CompleteLocalState();
+                    return false;
+                }
+
+                // Bannerlord 1.3.15 removes by request ID but calls RemoveAt(-1)
+                // when the ID is absent. Acquire ownership before adding so the
+                // catch path can safely verify and remove any partially added request.
                 _token = _ownership.Acquire(RequestId);
+                _cleanupPending = false;
+                _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(_factor, RequestId));
                 return true;
             }
             catch (Exception ex)
@@ -53,6 +70,11 @@ namespace Voidstep
 
         public void Tick(float dt)
         {
+            if (_cleanupPending)
+            {
+                TryCompleteRelease();
+                return;
+            }
             if (!Active)
                 return;
             if (_player == null || !_player.IsActive() || _player.Health <= 0f)
@@ -76,15 +98,65 @@ namespace Voidstep
 
         public void Release()
         {
-            var token = _token;
-            _token = 0;
             _remaining = 0f;
-            if (token != 0 && _ownership.Release(token, out var requestId))
+            if (_token == 0)
             {
-                try { _mission.RemoveTimeSpeedRequest(requestId); }
-                catch (Exception ex) { _logger.Debug("Owned time request cleanup failed: " + ex.Message); }
+                _cleanupPending = false;
+                CompleteLocalState();
+                return;
             }
 
+            _cleanupPending = true;
+            TryCompleteRelease();
+        }
+
+        private bool TryCompleteRelease()
+        {
+            if (_token == 0)
+            {
+                _cleanupPending = false;
+                CompleteLocalState();
+                return true;
+            }
+
+            int requestId;
+            if (!_ownership.TryGet(_token, out requestId))
+            {
+                _token = 0;
+                _cleanupPending = false;
+                CompleteLocalState();
+                return true;
+            }
+
+            try
+            {
+                float requestedFactor;
+                if (_mission.GetRequestedTimeSpeed(requestId, out requestedFactor))
+                {
+                    _mission.RemoveTimeSpeedRequest(requestId);
+                    if (_mission.GetRequestedTimeSpeed(requestId, out requestedFactor))
+                        return false;
+                }
+
+                var token = _token;
+                int releasedRequestId;
+                if (!_ownership.Release(token, out releasedRequestId))
+                    return false;
+
+                _token = 0;
+                _cleanupPending = false;
+                CompleteLocalState();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Owned time request cleanup failed; ownership retained for retry: " + ex.Message);
+                return false;
+            }
+        }
+
+        private void CompleteLocalState()
+        {
             if (_playerCompensationApplied && _player != null && _player.IsActive())
             {
                 try
@@ -97,12 +169,14 @@ namespace Voidstep
             _playerCompensationApplied = false;
             _player = null;
             _factor = 1f;
+            _remaining = 0f;
         }
 
         public void Cleanup()
         {
             Release();
-            _ownership.Clear();
+            if (_token == 0)
+                _ownership.Clear();
         }
     }
 }
