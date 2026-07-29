@@ -12,6 +12,7 @@ namespace Voidstep
     internal sealed class TorAbilityWheelAdapter
     {
         private const string HarmonyId = "xmarre.voidstep.torwheel";
+        private const float AttachRetryInterval = 0.5f;
         private readonly Mission _mission;
         private readonly AbilitySelectionController _selection;
         private readonly VoidstepLogger _logger;
@@ -43,6 +44,7 @@ namespace Voidstep
         private bool _available;
         private bool _targetingOwned;
         private int _lastState = -1;
+        private float _attachRetryRemaining;
 
         internal TorAbilityWheelAdapter(Mission mission, AbilitySelectionController selection, VoidstepLogger logger)
         {
@@ -55,7 +57,7 @@ namespace Voidstep
         internal bool IsAvailable => _available;
         internal bool OwnsTargeting => _targetingOwned;
 
-        internal void Tick()
+        internal void Tick(float dt)
         {
             if (!_apiReady)
                 return;
@@ -68,21 +70,27 @@ namespace Voidstep
                 _targetingOwned = false;
                 _available = false;
                 _lastState = -1;
+                _attachRetryRemaining = 0f;
                 return;
             }
 
-            if (!ReferenceEquals(currentAgent, _agent) || _component == null || _knownAbilities == null)
-                AttachToAgent(currentAgent);
-            if (!_available || _component == null)
-                return;
+            if (!ReferenceEquals(currentAgent, _agent))
+                _attachRetryRemaining = 0f;
 
-            if (_logic == null)
-                _logic = GetMissionBehavior(_abilityManagerLogicType);
-            if (_logic == null)
+            var needsAttachment = !ReferenceEquals(currentAgent, _agent) ||
+                                  _component == null || _knownAbilities == null ||
+                                  _logic == null || !_available;
+            if (needsAttachment)
             {
-                _available = false;
-                return;
+                _attachRetryRemaining -= Math.Max(0f, dt);
+                if (_attachRetryRemaining <= 0f)
+                {
+                    _attachRetryRemaining = AttachRetryInterval;
+                    AttachToAgent(currentAgent);
+                }
             }
+            if (!_available || _component == null || _logic == null)
+                return;
 
             object currentAbility = null;
             var state = -1;
@@ -95,6 +103,7 @@ namespace Voidstep
             {
                 _logger.Debug("TOR wheel state read failed safely: " + Unwrap(ex).Message);
                 _available = false;
+                _attachRetryRemaining = AttachRetryInterval;
                 return;
             }
 
@@ -161,6 +170,7 @@ namespace Voidstep
             _knownAbilities = null;
             _agent = null;
             _lastState = -1;
+            _attachRetryRemaining = 0f;
             _donorSprites.Clear();
             _proxies.Clear();
         }
@@ -208,6 +218,7 @@ namespace Voidstep
 
                 _apiReady = true;
                 _available = false;
+                _attachRetryRemaining = 0f;
                 _logger.Info("TOR 1.16 ability-wheel API detected; Voidstep injection will activate after the main agent's TOR ability component is available.");
             }
             catch (Exception ex)
@@ -235,7 +246,7 @@ namespace Voidstep
                 _component = getComponent.Invoke(agent, null);
                 if (_component == null)
                 {
-                    _logger.Debug("TOR main agent has no AbilityComponent yet; using the standalone Voidstep wheel and retrying TOR attachment.");
+                    _logger.Debug("TOR main agent has no AbilityComponent yet; standalone wheel remains active until the next throttled retry.");
                     return;
                 }
                 _knownAbilities = _knownAbilitiesProperty.GetValue(_component, null) as IList;
@@ -244,11 +255,12 @@ namespace Voidstep
                 _logic = GetMissionBehavior(_abilityManagerLogicType);
                 if (_logic == null)
                 {
-                    _logger.Debug("TOR ability-manager mission logic is not ready; using the standalone Voidstep wheel and retrying.");
+                    _logger.Debug("TOR ability-manager mission logic is not ready; standalone wheel remains active until the next throttled retry.");
                     return;
                 }
                 InjectProxies(agent);
                 _available = true;
+                _attachRetryRemaining = 0f;
             }
             catch (Exception ex)
             {
@@ -341,8 +353,9 @@ namespace Voidstep
             }
             if (_donorSprites.Count == 0)
                 _donorSprites.Add("default_spell");
+            var uniqueCount = _donorSprites.Count;
             while (_donorSprites.Count < VoidstepInputBindings.Abilities.Length)
-                _donorSprites.Add(_donorSprites[_donorSprites.Count % Math.Max(1, _donorSprites.Count)]);
+                _donorSprites.Add(_donorSprites[_donorSprites.Count % uniqueCount]);
         }
 
         private void RemoveInjectedProxies()
