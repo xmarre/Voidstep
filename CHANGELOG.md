@@ -3,11 +3,12 @@
 ## 1.0.4
 
 - Restored `Ctrl+1` through `Ctrl+6` as the default ability controls.
-- Suppressed only the matching Bannerlord formation command while Ctrl is held, while preserving normal formation selection with plain `1` through `6`.
+- Suppressed only the matching Bannerlord formation command while Ctrl is held, while preserving normal formation selection with plain `1` through `6`, including custom cross-remapped Ctrl+number ability bindings.
 - Fixed Voidstep Cleave disrupting the player's weapon state by removing the invalid victim-reaction action and capturing the wielded melee weapon before teleport and delayed hit processing.
 - Fixed Cleave registering ineffective hits by preserving the original weapon and guaranteeing a calculated native blow damage value when Bannerlord returns zero during synthetic collision construction.
 - Replaced invisible empty targeting entities with visible mesh-backed world markers for Blink, Voidstep Cleave and Domino.
 - Aligned Blink, Voidstep Cleave and Windblast targeting with the mission camera instead of relying only on actor facing.
+- Fixed delayed Domino hit callbacks being able to propagate already-propagated damage again after the synchronous recursion guard had been released.
 - Added immediate Dark Vision highlighting on activation and expanded cleanup diagnostics.
 - Added end-to-end diagnostics for every ability, including targeting, validation, teleport completion, candidate counts, registered hits, time control and linked targets.
 
