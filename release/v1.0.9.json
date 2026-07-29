@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.9",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Restricts Bend Time compensation to Bannerlord's two verified native action channels and removes the protected-memory crash path."
+}
