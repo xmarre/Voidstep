@@ -57,10 +57,20 @@ namespace Voidstep
                 Close(true);
         }
 
-        internal void Cleanup() => Close(false);
+        internal void Cleanup()
+        {
+            Close(false);
+            _view.Hide();
+        }
 
         private void Open()
         {
+            if (VoidstepInputBindings.Abilities.Length == 0)
+            {
+                _logger.Info("Standalone ability wheel could not open because no abilities are registered.");
+                return;
+            }
+
             _open = true;
             _selectedIndex = 0;
             _viewModel = new VoidstepAbilityWheelVM();
@@ -82,6 +92,10 @@ namespace Voidstep
 
         private void UpdateSelection()
         {
+            var count = VoidstepInputBindings.Abilities.Length;
+            if (count <= 0)
+                return;
+
             var centre = new Vec2(
                 Screen.RealScreenResolutionWidth * 0.5f,
                 Screen.RealScreenResolutionHeight * 0.5f);
@@ -95,11 +109,16 @@ namespace Voidstep
             var angle = Math.Atan2(delta.x, -delta.y);
             if (angle < 0.0)
                 angle += Math.PI * 2.0;
-            var index = (int)Math.Floor((angle + Math.PI / 6.0) / (Math.PI / 3.0)) % 6;
+            var sector = Math.PI * 2.0 / count;
+            var index = (int)Math.Floor((angle + sector * 0.5) / sector) % count;
             if (index == _selectedIndex)
                 return;
+            if (_viewModel != null && !_viewModel.SetSelected(index))
+            {
+                _logger.Debug("Standalone wheel rejected out-of-range selection index=" + index + ".");
+                return;
+            }
             _selectedIndex = index;
-            _viewModel?.SetSelected(index);
         }
 
         private void Close(bool select)
@@ -131,6 +150,7 @@ namespace Voidstep
         private object _layer;
         private object _movie;
         private object _screen;
+        private bool _layerAdded;
 
         internal StandaloneAbilityWheelView(VoidstepLogger logger)
         {
@@ -139,7 +159,12 @@ namespace Voidstep
 
         internal bool Show(VoidstepAbilityWheelVM viewModel)
         {
-            Hide();
+            if (!Hide())
+            {
+                _logger.Info("Standalone ability wheel retained an earlier Gauntlet layer for cleanup retry; a second layer was not created.");
+                return false;
+            }
+
             try
             {
                 var gauntletLayerType = FindType("TaleWorlds.Engine.GauntletUI.GauntletLayer");
@@ -177,6 +202,7 @@ namespace Voidstep
                 if (addLayer == null)
                     throw new MissingMethodException("ScreenBase.AddLayer was not found.");
                 addLayer.Invoke(_screen, new[] { _layer });
+                _layerAdded = true;
 
                 InvokeStaticLayerMethod(screenManagerType, "TrySetFocus", _layer);
                 return true;
@@ -189,69 +215,100 @@ namespace Voidstep
             }
         }
 
-        internal void Hide()
+        internal bool Hide()
         {
             if (_layer == null)
             {
                 _movie = null;
                 _screen = null;
-                return;
+                _layerAdded = false;
+                return true;
             }
 
-            try
+            if (_layerAdded)
             {
-                var screenManagerType = FindType("TaleWorlds.ScreenSystem.ScreenManager");
-                if (screenManagerType != null)
-                    InvokeStaticLayerMethod(screenManagerType, "TryLoseFocus", _layer);
+                try
+                {
+                    var screenManagerType = FindType("TaleWorlds.ScreenSystem.ScreenManager");
+                    if (screenManagerType != null)
+                        InvokeStaticLayerMethod(screenManagerType, "TryLoseFocus", _layer);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Standalone wheel focus release failed safely: " + Unwrap(ex).Message);
+                }
             }
-            catch { }
 
-            try
+            if (_movie != null)
             {
-                if (_movie != null)
+                try
                 {
                     var release = _layer.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
                         .FirstOrDefault(method => method.Name == "ReleaseMovie" && method.GetParameters().Length == 1 &&
                                                   method.GetParameters()[0].ParameterType.IsInstanceOfType(_movie));
                     release?.Invoke(_layer, new[] { _movie });
+                    _movie = null;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug("Standalone wheel movie release failed safely: " + Unwrap(ex).Message);
                 }
             }
-            catch { }
 
-            try
+            if (_layerAdded)
             {
-                if (_screen != null)
+                try
                 {
+                    if (_screen == null)
+                        throw new InvalidOperationException("The owning screen reference is unavailable.");
                     var remove = _screen.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                         .FirstOrDefault(method => method.Name == "RemoveLayer" && method.GetParameters().Length == 1 &&
                                                   method.GetParameters()[0].ParameterType.IsInstanceOfType(_layer));
-                    remove?.Invoke(_screen, new[] { _layer });
+                    if (remove == null)
+                        throw new MissingMethodException("ScreenBase.RemoveLayer was not found.");
+                    remove.Invoke(_screen, new[] { _layer });
+                    _layerAdded = false;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Info("Standalone ability-wheel layer removal failed; ownership was retained for a later cleanup retry. " + Unwrap(ex).Message);
+                    return false;
                 }
             }
-            catch { }
 
             _movie = null;
             _layer = null;
             _screen = null;
+            return true;
         }
 
         private static object CreateLayer(Type layerType)
         {
-            foreach (var constructor in layerType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            var signatures = new[]
             {
-                var parameters = constructor.GetParameters();
-                var arguments = new object[parameters.Length];
-                var supported = true;
-                for (var i = 0; i < parameters.Length; i++)
-                {
-                    var type = parameters[i].ParameterType;
-                    if (type == typeof(int)) arguments[i] = LayerOrder;
-                    else if (type == typeof(string)) arguments[i] = "VoidstepAbilityWheel";
-                    else if (type == typeof(bool)) arguments[i] = true;
-                    else { supported = false; break; }
-                }
-                if (!supported) continue;
-                try { return constructor.Invoke(arguments); }
+                new[] { typeof(int) },
+                new[] { typeof(int), typeof(string) },
+                new[] { typeof(int), typeof(string), typeof(bool) },
+                new[] { typeof(string), typeof(int), typeof(bool) }
+            };
+            var arguments = new[]
+            {
+                new object[] { LayerOrder },
+                new object[] { LayerOrder, "VoidstepAbilityWheel" },
+                new object[] { LayerOrder, "VoidstepAbilityWheel", false },
+                new object[] { "VoidstepAbilityWheel", LayerOrder, false }
+            };
+
+            for (var i = 0; i < signatures.Length; i++)
+            {
+                var constructor = layerType.GetConstructor(
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null,
+                    signatures[i],
+                    null);
+                if (constructor == null)
+                    continue;
+                try { return constructor.Invoke(arguments[i]); }
                 catch { }
             }
             return null;
@@ -271,10 +328,25 @@ namespace Voidstep
                 for (var i = 0; i < parameters.Length; i++)
                 {
                     var type = parameters[i].ParameterType;
-                    if (type == typeof(bool)) arguments[i] = true;
-                    else if (type.IsEnum) arguments[i] = Enum.ToObject(type, -1);
-                    else if (parameters[i].HasDefaultValue) arguments[i] = parameters[i].DefaultValue;
-                    else return;
+                    if (type == typeof(bool))
+                    {
+                        arguments[i] = true;
+                    }
+                    else if (type.IsEnum)
+                    {
+                        var allName = Enum.GetNames(type).FirstOrDefault(name => string.Equals(name, "All", StringComparison.Ordinal));
+                        if (allName == null)
+                            return;
+                        arguments[i] = Enum.Parse(type, allName, false);
+                    }
+                    else if (parameters[i].HasDefaultValue)
+                    {
+                        arguments[i] = parameters[i].DefaultValue;
+                    }
+                    else
+                    {
+                        return;
+                    }
                 }
                 method.Invoke(restrictions, arguments);
             }
