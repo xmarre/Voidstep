@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.0.4
+VOIDSTEP — ARCANE MELEE ABILITIES v1.0.5
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional compatibility preset: The Old Realms 1.16
 
@@ -22,6 +22,12 @@ Ctrl+4: Bend Time
 Ctrl+5: Domino
 Ctrl+6: Dark Vision
 
-Voidstep suppresses only the matching Bannerlord formation command while Ctrl is held. Plain 1 through 6 still select formations normally. Controls remain editable in MCM.
+PRIMARY KEY CONFIGURATION
+Options > Keybindings > Voidstep
+
+MODIFIER CONFIGURATION
+MCM > Voidstep > Controls
+
+Primary keys use Bannerlord's native serialized keybinding system and can be changed to any accepted keyboard or mouse button. Each ability has its own optional modifier selection in MCM. While a completed ability chord is active, the same raw key is blocked from Bannerlord's other actions. Pressing the primary key without its configured modifier remains native.
 
 Enable Debug logging in MCM when reporting an ability problem. The log is written to Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log.
