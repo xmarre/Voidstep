@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.7
+
+- Replaced arrow-shaped Blink, Cleave and Domino markers with procedural double-ring casting sigils and persistent particle clusters.
+- Added stronger cast pulses for Windblast and Bend Time while preserving Dark Vision contour feedback.
+- Fixed Voidstep Cleave repeatedly rejecting crowded enemy-relative destinations by searching the complete bounded fallback field instead of only the first sixteen candidates.
+- Expanded Cleave fallback coverage with additional rings and angular samples while retaining mission-boundary, wall, terrain, cliff, occupancy and configured-range checks.
+- Changed Blink destination selection from partial slowdown to an owned zero-speed mission request that freezes the outside world until confirmation, cancellation or expiry.
+- Made Blink preview refresh and timeout use application time so targeting remains responsive while mission time is frozen.
+- Expanded Bend Time player compensation from two animation channels to locomotion, combat movement, swing, ready, reload, ranged ready/reload and all four action channels.
+- Added equivalent speed and maneuver compensation for the controlled mount.
+- Added ownership-checked Bend Time restoration so cleanup does not overwrite values changed by another system during the effect.
+- Added source invariants for casting sigils, Blink freeze behavior, complete Cleave fallback search and Bend Time player/mount compensation.
+
 ## 1.0.6
 
 - Fixed every configured ability chord being rejected because modifier state could remain frozen at the first mission snapshot.
@@ -36,7 +49,7 @@
 - Aligned Blink, Voidstep Cleave and Windblast targeting with the mission camera instead of relying only on actor facing.
 - Fixed delayed Domino hit callbacks being able to propagate already-propagated damage again after the synchronous recursion guard had been released.
 - Added immediate Dark Vision highlighting on activation and counted only successful contour operations in diagnostics.
-- Added end-to-end diagnostics for every ability, including targeting, validation, teleport completion, candidate counts, registered hits, time control and linked targets.
+- Added end-to-end diagnostics for every ability, including targeting, validation, teleport completion, candidate counts, registered Cleave hits, Windblast hits, Bend Time request acquisition, Domino links and Dark Vision highlight counts.
 
 ## 1.0.3
 
