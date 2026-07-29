@@ -38,9 +38,19 @@ namespace Voidstep
 
             try
             {
-                _mission.RemoveTimeSpeedRequest(RequestId);
-                _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(_factor, RequestId));
+                float existingFactor = 0f;
+                if (_mission.GetRequestedTimeSpeed(RequestId, ref existingFactor))
+                {
+                    _logger.Error("Bend Time found an existing mission speed request with its reserved ID; refusing to replace a request it does not own.");
+                    ReleaseLocalState();
+                    return false;
+                }
+
+                // Bannerlord 1.3.15 removes by request ID but calls RemoveAt(-1)
+                // when the ID is absent. Acquire ownership before adding so the
+                // catch path can safely verify and remove any partially added request.
                 _token = _ownership.Acquire(RequestId);
+                _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(_factor, RequestId));
                 return true;
             }
             catch (Exception ex)
@@ -81,7 +91,12 @@ namespace Voidstep
             _remaining = 0f;
             if (token != 0 && _ownership.Release(token, out var requestId))
             {
-                try { _mission.RemoveTimeSpeedRequest(requestId); }
+                try
+                {
+                    float requestedFactor = 0f;
+                    if (_mission.GetRequestedTimeSpeed(requestId, ref requestedFactor))
+                        _mission.RemoveTimeSpeedRequest(requestId);
+                }
                 catch (Exception ex) { _logger.Debug("Owned time request cleanup failed: " + ex.Message); }
             }
 
@@ -94,9 +109,15 @@ namespace Voidstep
                 }
                 catch (Exception ex) { _logger.Debug("Player action-speed cleanup failed: " + ex.Message); }
             }
+            ReleaseLocalState();
+        }
+
+        private void ReleaseLocalState()
+        {
             _playerCompensationApplied = false;
             _player = null;
             _factor = 1f;
+            _remaining = 0f;
         }
 
         public void Cleanup()
