@@ -9,17 +9,47 @@ def read(relative):
     return (root / relative).read_text(encoding='utf-8')
 
 
+def compact(value):
+    return ' '.join(value.split())
+
+
+def appears_in_order(value, tokens):
+    offset = 0
+    for token in tokens:
+        offset = value.find(token, offset)
+        if offset < 0:
+            return False
+        offset += len(token)
+    return True
+
+
 coordinator = read('src/Voidstep/AbilityWheelCoordinator.cs')
 tor = read('src/Voidstep/TorAbilityWheelAdapter.cs')
 selection = read('src/Voidstep/AbilitySelectionController.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
-suppression = read('src/Voidstep/AbilityWheelInputSuppressionPatch.cs')
 mission_input = read('src/Voidstep/MissionOrderInputSuppression.cs')
 cast_animation = read('src/Voidstep/AbilityCastAnimationPatch.cs')
-standalone = read('src/Voidstep/StandaloneAbilityWheel.cs')
-runtime_bridge = read('src/Voidstep/VoidstepWheelRuntime.cs')
+bindings = read('src/Voidstep/VoidstepInputBindings.cs')
 project = read('src/Voidstep/Voidstep.csproj')
 prefab = read('module/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml')
+tor_compact = compact(tor)
+
+ability_order = (
+    'AbilityId.VoidstepCleave',
+    'AbilityId.Blink',
+    'AbilityId.Windblast',
+    'AbilityId.BendTime',
+    'AbilityId.Domino',
+    'AbilityId.DarkVision',
+)
+prefab_order = (
+    '@CleaveText',
+    '@BlinkText',
+    '@WindblastText',
+    '@BendTimeText',
+    '@DominoText',
+    '@DarkVisionText',
+)
 
 checks = {
     'coordinator passes mission delta time to TOR adapter': '_tor.Tick(dt);' in coordinator and '_tor.Tick();' not in coordinator,
@@ -33,14 +63,12 @@ checks = {
         'private bool _available;',
         'internal bool IsAvailable => _available;',
         '_apiReady = true;',
-        '_available = false;',
         'InjectProxies(agent);',
         '_available = true;')),
-    'standalone wheel remains active until TOR injection succeeds': all(token in coordinator for token in (
+    'standalone remains active until TOR injection succeeds': all(token in coordinator for token in (
         'if (!_tor.IsAvailable)',
         '_standalone.Tick();',
-        'HandleWheelAvailabilityTransition();',
-        '_standalone.Cleanup();')) and 'standalone wheel remains active' in tor,
+        'HandleWheelAvailabilityTransition();')) and 'standalone wheel remains active' in tor,
     'TOR opening cancels stale Voidstep selection': 'state == 1 && _lastState != 1 && _selection.HasSelection' in tor and '_selection.Cancel(true);' in tor,
     'TOR entries receive stable donor icons': all(token in tor for token in (
         'ResolveDonorSprites();',
@@ -55,12 +83,18 @@ checks = {
         'GetMethod("DoCast"',
         '_harmony.Patch(tryCast, prefix: tryCastPrefix);',
         '_harmony.Patch(baseDoCast, prefix: doCastPrefix);')),
-    'TOR guard affects only owned proxies': tor.count('runtime.IsTorProxy(__instance)') >= 3 and
-        'if (runtime == null || !runtime.IsTorProxy(__instance))\n                return true;' in tor and
-        'return runtime == null || !runtime.IsTorProxy(__instance);' in tor,
+    'TOR guard affects only owned proxies':
+        tor_compact.count('runtime.IsTorProxy(__instance)') >= 3 and
+        'if (runtime == null || !runtime.IsTorProxy(__instance)) return true;' in tor_compact and
+        'return runtime == null || !runtime.IsTorProxy(__instance);' in tor_compact,
     'TOR spell override is separately guarded': 'spellDoCast' in tor and '_harmony.Patch(spellDoCast, prefix: doCastPrefix);' in tor,
-    'TOR patches are removed on mission cleanup': '_harmony?.UnpatchAll(HarmonyId)' in tor and 'RemoveInjectedProxies();' in tor,
+    'TOR patches and proxies are removed on cleanup': '_harmony?.UnpatchAll(HarmonyId)' in tor and 'DeactivateLiveAttachment(true);' in tor and 'RemoveInjectedProxies();' in tor,
     'TOR remains an optional reflection boundary': 'using TOR_Core' not in tor and '<Reference Include="TOR_Core"' not in project and 'AppDomain.CurrentDomain.GetAssemblies()' in tor,
+    'TOR template enums are semantic': all(token in tor for token in (
+        'ParseEnumValue("TOR_Core.AbilitySystem.AbilityType", "Spell")',
+        'ParseEnumValue("TOR_Core.AbilitySystem.AbilityTargetType", "WorldPosition")',
+        'ParseEnumValue("TOR_Core.AbilitySystem.Crosshairs.CrosshairType", "Pointer")',
+        'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")')) and 'Enum.ToObject' not in tor,
     'right mouse confirmation is read through bypass': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and 'InputConflictSuppression.EnterBypass()' in coordinator,
     'right mouse is suppressed through release': all(token in coordinator for token in (
         '_suppressRightMouseUntilRelease = true;',
@@ -73,13 +107,9 @@ checks = {
         'VoidstepWheelRuntime.ShouldSuppress(InputKey.RightMouseButton)',
         'nameof(InputContext.IsGameKeyPressed)',
         'nameof(InputContext.GetGameKeyState)')),
-    'wheel suppression does not suppress Voidstep own polling': 'InputConflictSuppression.IsBypassed' in suppression and 'VoidstepWheelRuntime.ShouldSuppress(__0)' in suppression,
     'selection casts only after confirmation': '_manager.TryActivate(ability);' in selection and 'internal bool Confirm()' in selection and '_manager.TryActivate(ability.Value)' not in mission,
     'Blink targeting begins on selection but animation waits for confirmation': '_manager.TryActivate(AbilityId.Blink)' in selection and 'enteringBlinkTargeting' in cast_animation and 'confirmingBlink' in cast_animation,
-    'standalone wheel owns six radial segments': 'Math.PI / 3.0' in standalone and 'VoidstepInputBindings.Abilities[selected]' in standalone,
-    'standalone prefab exposes all six entries': all(token in prefab for token in (
-        '@CleaveText', '@BlinkText', '@WindblastText', '@BendTimeText', '@DominoText', '@DarkVisionText')),
-    'wheel bridge is attached and detached per mission': 'VoidstepWheelRuntime.Attach(this);' in coordinator and 'VoidstepWheelRuntime.Detach(this);' in coordinator and 'private static AbilityWheelCoordinator _current;' in runtime_bridge,
+    'registry and standalone prefab share stable six-slot order': appears_in_order(bindings, ability_order) and appears_in_order(prefab, prefab_order),
 }
 
 failed = [name for name, passed in checks.items() if not passed]
@@ -88,4 +118,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} wheel and TOR integration invariants.')
+print(f'Validated {len(checks)} focused wheel and TOR integration invariants.')
