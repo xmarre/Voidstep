@@ -22,6 +22,7 @@ weapon_validation = files.get('WeaponValidation.cs', '')
 dark_vision = files.get('DarkVisionService.cs', '')
 blow_factory = files.get('BlowFactory.cs', '')
 effects = files.get('EffectController.cs', '')
+targeting = files.get('TargetingService.cs', '')
 teleport_validator = files.get('TeleportValidator.cs', '')
 windblast = files.get('WindblastController.cs', '')
 domino = files.get('DominoLinkService.cs', '')
@@ -93,13 +94,18 @@ checks = {
     'ability input fails closed with both ownership gates': 'InputSuppressionReady { get; private set; }' in submodule and 'NativeHotkeysReady { get; private set; }' in submodule and 'if (!InputSuppressionReady || _harmony == null || !NativeHotkeysReady)' in submodule and '!VoidstepSubModule.NativeHotkeysReady' in input_router,
     'hotkey event and context teardown are explicit': 'DetachKeybindEvents();' in submodule and 'VoidstepHotKeyContext.Clear();' in submodule and 'InputConflictSuppression.Reset();' in submodule,
     'harmony cleanup retains ownership on failure': 'for (var attempt = 1; attempt <= 2; attempt++)' in submodule and 'submodule unload was aborted' in submodule and re.search(r'if \(_harmony != null && !TryUnpatchOwnedPatches\(\)\)\s*\{.*?return;\s*\}', submodule, re.DOTALL) is not None,
-    'camera aligned targeting': 'GetCameraFrame()' in files.get('TargetingService.cs','') and 'GetAimDirection' in files.get('TargetingService.cs',''),
+    'camera aligned targeting': 'GetCameraFrame()' in targeting and 'GetCameraRayDirection' in targeting,
+    'projectile entities are skipped during Blink ray targeting': 'IsTransientProjectileEntity' in targeting and 'BodyFlags.MissileOnly' in targeting and 'BodyFlags.DroppedItem' in targeting and 'MaximumIgnoredRayHits' in targeting,
     'procedural cast sigil replaces arrow geometry': 'Mesh.CreateMeshWithMaterial' in effects and 'private static void AddRing' in effects and 'entity.AddMesh(mesh, false)' in effects and 'entity.AddMesh(donor' not in effects and 'entity.AddMesh(source' not in effects,
+    'cast sigil color updates own mesh and contour': '_markerMeshes.TryGetValue(marker, out var mesh)' in effects and 'mesh.Color = color;' in effects and 'marker.SetContourColor(color, true)' in effects,
     'all six abilities expose cast feedback': 'CreateWorldMarker' in ability_manager and 'CreateWorldMarker' in blink and 'CreateWorldMarker' in domino and '_effects.Windblast' in windblast and '_effects.BendTime' in ability_manager and 'SetContourColor' in dark_vision,
     'blink targeting freezes mission time': 'new Mission.TimeSpeedRequest(0f, AimTimeRequestId)' in blink and 'MBCommon.GetApplicationTime()' in blink and 'realDt' in blink,
     'cleave fallback exhausts bounded candidate field': 'for (var i = 0; i < _fallback.Count; i++)' in teleport_validator and 'Math.Min(16' not in teleport_validator and 'candidateDelta.Length > maximumRange + 0.05f' in teleport_validator and '3.2f' in teleport_validator,
+    'bend time duration uses application time': 'MBCommon.GetApplicationTime()' in time_control and '_remaining -= realDt;' in time_control,
     'bend time compensates player and mount systems': all(name in time_control for name in ('MaxSpeedMultiplier', 'CombatMaxSpeedMultiplier', 'SwingSpeedMultiplier', 'ReloadSpeed', 'BipedalRangedReadySpeedMultiplier', 'BipedalRangedReloadSpeedMultiplier', 'MountSpeed', 'MountManeuver', 'MountDashAccelerationMultiplier')) and 'for (var channel = 0; channel < 4; channel++)' in time_control,
-    'bend time compensation restores only owned values': 'Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier)' in time_control and 'RestorePlayerCompensation();' in time_control,
+    'bend time separates mutation ownership': all(name in time_control for name in ('_playerPropertiesApplied', '_mountPropertiesApplied', '_actionSpeedsApplied')) and 'RestoreCompensation();' in time_control,
+    'bend time restores only owned values': 'Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier)' in time_control and 'Approximately(driven.MountSpeed, _appliedMountSpeed)' in time_control,
+    'bend time handles mount replacement': 'RefreshControlledMount();' in time_control and 'ReferenceEquals(current, _mount)' in time_control,
     'cleave preserves weapon snapshot': 'MissionWeapon _cleaveWeapon' in ability_manager and 'MissionWeapon _weapon' in cleave and 'attacker.WieldedWeapon' not in blow_factory,
     'cleave rejects non-melee weapons twice': ability_manager.count('WeaponValidation.IsUsableMeleeWeapon') >= 1 and cleave.count('WeaponValidation.IsUsableMeleeWeapon') >= 1 and 'CurrentUsageItem' in weapon_validation and 'IsMeleeWeapon' in weapon_validation,
     'cleave refunds paid pre-effect failures': ability_manager.count('RollbackPayment(AbilityId.VoidstepCleave)') >= 2,
