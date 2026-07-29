@@ -16,7 +16,6 @@ namespace Voidstep
         private bool _cleaned;
         private bool _wasEnabled;
         private bool _readyNoticeShown;
-        private bool _controlConflictWarningShown;
 
         public VoidstepMissionBehavior(VoidstepLogger logger)
         {
@@ -42,16 +41,16 @@ namespace Voidstep
             _logger.Info($"Mission behavior initialization started during {lifecycleStage}.");
             try
             {
-                var settings = VoidstepSettings.Current;
-                if (settings.MigrateLegacyDefaultControls())
-                    _logger.Info("Migrated the v1.0.2/v1.0.3 Numpad defaults to Ctrl+1 through Ctrl+6. Plain number-row formation controls remain active.");
+                if (!VoidstepSubModule.NativeHotkeysReady || VoidstepHotKeyContext.Current == null)
+                    throw new InvalidOperationException("Native Voidstep hotkeys are not registered.");
 
+                var settings = VoidstepSettings.Current;
                 var context = new AbilityContext(Mission, _logger);
                 _manager = new AbilityManager(context);
                 _input = new InputRouter(Mission, _logger);
                 _lastPlayer = Mission.MainAgent;
                 _wasEnabled = settings.Enabled;
-                _logger.Info($"Mission behavior initialized. Controls: {settings.GetControlSummary()}. Log: {_logger.PrimaryPath ?? "engine log only"}.");
+                _logger.Info($"Mission behavior initialized. Controls: {VoidstepInputBindings.GetSummary()}. Primary keys: Options > Keybindings > Voidstep. Modifiers: MCM > Controls. Log: {_logger.PrimaryPath ?? "engine log only"}.");
             }
             catch (Exception ex)
             {
@@ -76,6 +75,7 @@ namespace Voidstep
                 {
                     if (_wasEnabled) _manager.Cleanup(CancelReason.UserCancelled);
                     _wasEnabled = false;
+                    InputConflictSuppression.Reset();
                     return;
                 }
                 _wasEnabled = true;
@@ -89,16 +89,9 @@ namespace Voidstep
                 if (!_readyNoticeShown && current != null && current.IsActive())
                 {
                     _readyNoticeShown = true;
-                    var controls = settings.GetControlSummary();
+                    var controls = VoidstepInputBindings.GetSummary();
                     _logger.Info($"Runtime ready. Controls: {controls}.");
-                    TryDisplayNotice($"Voidstep v1.0.4 active — {controls}.");
-                }
-                if (!_controlConflictWarningShown && settings.HasNumberRowConflict())
-                {
-                    _controlConflictWarningShown = true;
-                    const string warning = "Number-row bindings without Ctrl also trigger Bannerlord formation selection. Enable the Ctrl modifier or choose another key.";
-                    _logger.Info("Control warning: " + warning);
-                    TryDisplayNotice("Voidstep: " + warning);
+                    TryDisplayNotice($"Voidstep v1.0.5 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
@@ -181,6 +174,8 @@ namespace Voidstep
             _cleaned = true;
             try { _manager?.Cleanup(reason); }
             catch (Exception ex) { _logger?.Error("Mission cleanup encountered an error.", ex); }
+            try { _input?.Cleanup(); }
+            catch (Exception ex) { _logger?.Error("Input cleanup encountered an error.", ex); }
             _logger?.Info("Mission behavior cleaned up.");
             _manager = null;
             _input = null;
