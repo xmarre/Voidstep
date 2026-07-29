@@ -5,22 +5,16 @@ namespace Voidstep
 {
     internal sealed class AnimationController
     {
-        // This action is present as a concrete ActionIndexCache field in the supplied
-        // Bannerlord 1.3.15 assembly. Sweep direction is driven by actor rotation;
-        // the verified action has no independently verified mirrored counterpart.
-        private static ActionIndexCache VerifiedStrike => ActionIndexCache.act_strike_bent_over;
-
+        // Cleave presentation deliberately does not force an engine action. The former
+        // victim-stagger action could replace the player's combat state and wielded
+        // weapon. Rotation, weapon trails and timed native blows provide presentation
+        // without taking ownership of Bannerlord's weapon-action channels.
         public void BeginCleave(Agent actor)
         {
-            if (actor == null || !actor.IsActive()) return;
-            var action = VerifiedStrike;
-            actor.SetActionChannel(1, in action, true, (AnimFlags)0, 0f, 0.9f, 0.08f, 0.15f, 0f, true, 0.1f, 0, true);
         }
 
         public void SetCleaveProgress(Agent actor, float progress)
         {
-            if (actor == null || !actor.IsActive()) return;
-            actor.SetCurrentActionProgress(1, progress < 0f ? 0f : progress > 1f ? 1f : progress);
         }
 
         public void RotateActor(Agent actor, float radians)
@@ -36,8 +30,7 @@ namespace Voidstep
 
         public void ResetActionSpeed(Agent actor)
         {
-            if (actor == null || !actor.IsActive()) return;
-            actor.SetCurrentActionSpeed(1, 1f);
+            // No action channel is owned by this controller.
         }
     }
 }
