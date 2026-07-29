@@ -19,6 +19,7 @@ namespace Voidstep
         private TeleportValidationResult _validation;
         private float _elapsed;
         private float _refresh;
+        private float _lastApplicationTime;
         private bool _ownsTimeRequest;
         private bool _timeCleanupPending;
         private bool? _lastLoggedSuccess;
@@ -47,6 +48,7 @@ namespace Voidstep
             IsAiming = true;
             _elapsed = 0f;
             _refresh = 0f;
+            _lastApplicationTime = MBCommon.GetApplicationTime();
             _lastLoggedSuccess = null;
             _lastLoggedReason = null;
             _lastLoggedPosition = Vec3.Invalid;
@@ -55,7 +57,7 @@ namespace Voidstep
             {
                 if (_ownsTimeRequest)
                 {
-                    _logger.Debug("Blink aim slowdown skipped while a previous time request is pending cleanup.");
+                    _logger.Debug("Blink aim freeze skipped while a previous time request is pending cleanup.");
                 }
                 else
                 {
@@ -64,24 +66,25 @@ namespace Voidstep
                         float existingFactor;
                         if (_mission.GetRequestedTimeSpeed(AimTimeRequestId, out existingFactor))
                         {
-                            _logger.Debug("Blink aim slowdown skipped because its reserved mission speed request ID is already active.");
+                            _logger.Debug("Blink aim freeze skipped because its reserved mission speed request ID is already active.");
                         }
                         else
                         {
                             _ownsTimeRequest = true;
                             _timeCleanupPending = false;
-                            _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0.35f, AimTimeRequestId));
+                            _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(0f, AimTimeRequestId));
+                            _logger.Debug("Blink aim freeze acquired factor=0.00.");
                         }
                     }
                     catch (Exception ex)
                     {
                         ReleaseAimTimeRequest();
-                        _logger.Debug("Blink aim slowdown unavailable: " + ex.Message);
+                        _logger.Debug("Blink aim freeze unavailable: " + ex.Message);
                     }
                 }
             }
             RefreshPreview();
-            _hud.Show("Blink aiming — move the camera; green is valid, red is blocked. Press Blink again to teleport.");
+            _hud.Show("Blink targeting — time frozen. Move the camera; green is valid, red is blocked. Press Blink again to teleport.");
             _logger.Debug("Blink targeting started.");
             return true;
         }
@@ -96,8 +99,12 @@ namespace Voidstep
                 Cancel();
                 return;
             }
-            _elapsed += Math.Max(0f, dt);
-            _refresh -= Math.Max(0f, dt);
+
+            var now = MBCommon.GetApplicationTime();
+            var realDt = _lastApplicationTime > 0f ? Math.Max(0f, now - _lastApplicationTime) : Math.Max(0f, dt);
+            _lastApplicationTime = now;
+            _elapsed += realDt;
+            _refresh -= realDt;
             if (_refresh <= 0f)
             {
                 _refresh = 0.05f;
@@ -105,7 +112,7 @@ namespace Voidstep
             }
             if (_elapsed >= 8f)
             {
-                _hud.Show("Blink aiming expired.");
+                _hud.Show("Blink targeting expired.");
                 _logger.Debug("Blink targeting expired.");
                 Cancel();
             }
@@ -141,6 +148,7 @@ namespace Voidstep
             IsAiming = false;
             _elapsed = 0f;
             _refresh = 0f;
+            _lastApplicationTime = 0f;
             _actor = null;
             _validation = default(TeleportValidationResult);
             _lastLoggedSuccess = null;
