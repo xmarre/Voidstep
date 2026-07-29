@@ -21,7 +21,6 @@ namespace Voidstep
             bool cancelDamage);
 
         private static readonly CreateMeleeBlowDelegate CreateNativeMeleeBlow = ResolveCreateMeleeBlow();
-        private static readonly MethodInfo GetSwingDamage = ResolveNoArgumentMethod(typeof(MissionWeapon), "GetModifiedSwingDamageForCurrentUsage");
 
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
@@ -141,35 +140,15 @@ namespace Voidstep
 
         private static int ResolveMinimumWeaponDamage(MissionWeapon weapon)
         {
-            if (GetSwingDamage != null)
-            {
-                try
-                {
-                    object boxed = weapon;
-                    var value = GetSwingDamage.Invoke(boxed, null);
-                    if (value != null)
-                    {
-                        var damage = Convert.ToInt32(value);
-                        if (damage > 0) return damage;
-                    }
-                }
-                catch
-                {
-                }
-            }
-            return 25;
-        }
-
-        private static MethodInfo ResolveNoArgumentMethod(Type type, string name)
-        {
             try
             {
-                return type.GetMethod(name, BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+                var damage = weapon.GetModifiedSwingDamageForCurrentUsage();
+                if (damage > 0) return damage;
             }
             catch
             {
-                return null;
             }
+            return 25;
         }
 
         private static CreateMeleeBlowDelegate ResolveCreateMeleeBlow()
