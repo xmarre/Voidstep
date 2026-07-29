@@ -16,15 +16,19 @@ namespace Voidstep
         private Agent _cleaveActor;
         private bool _cleaveActionOwned;
 
+        public AnimationController() : this(null)
+        {
+        }
+
         public AnimationController(VoidstepLogger logger) => _logger = logger;
 
-        public void PlayCast(Agent actor, AbilityId ability)
+        public static void PlayAbilityCast(Agent actor, AbilityId ability, VoidstepLogger logger)
         {
             if (actor == null || !actor.IsActive()) return;
             var candidates = actor.MountAgent != null && actor.MountAgent.IsActive()
                 ? MountedCastActions
                 : ResolveCastActions(ability);
-            TryPlay(actor, candidates, false);
+            TryPlay(actor, candidates, false, logger);
         }
 
         public void BeginCleave(Agent actor)
@@ -33,10 +37,10 @@ namespace Voidstep
             _cleaveActionOwned = false;
             if (actor == null || !actor.IsActive()) return;
 
-            // A native heavy-release action gives the rotating sweep a visible full-body
-            // motion while the actual damage remains the separately registered melee blows.
-            // Progress is driven by the sweep so animation and hit timing stay aligned.
-            if (!TryPlay(actor, HeavyCastActions, true)) return;
+            // Use a native heavy-release action as the visible execution motion. The
+            // action's progress is driven by the sweep, while damage remains the
+            // separately registered native melee blows using the captured weapon.
+            if (!TryPlay(actor, HeavyCastActions, true, _logger)) return;
             try
             {
                 actor.SetCurrentActionSpeed(1, 0.01f);
@@ -46,7 +50,7 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                _logger.Debug("Cleave action synchronization unavailable: " + ex.Message);
+                Log(_logger, "Cleave action synchronization unavailable: " + ex.Message);
                 ResetActionSpeed(actor);
             }
         }
@@ -60,7 +64,7 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                _logger.Debug("Cleave action progress update failed: " + ex.Message);
+                Log(_logger, "Cleave action progress update failed: " + ex.Message);
                 ResetActionSpeed(actor);
             }
         }
@@ -89,11 +93,11 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                _logger.Debug("Cleave action cleanup failed: " + ex.Message);
+                Log(_logger, "Cleave action cleanup failed: " + ex.Message);
             }
         }
 
-        private bool TryPlay(Agent actor, string[] candidates, bool cleave)
+        private static bool TryPlay(Agent actor, string[] candidates, bool cleave, VoidstepLogger logger)
         {
             for (var i = 0; i < candidates.Length; i++)
             {
@@ -102,15 +106,15 @@ namespace Voidstep
                     var action = ActionIndexCache.Create(candidates[i]);
                     if (action.Index < 0) continue;
                     if (!actor.SetActionChannel(1, action)) continue;
-                    _logger.Debug($"Started {(cleave ? "Cleave execution" : "ability cast")} action '{candidates[i]}' on actor={actor.Index}.");
+                    Log(logger, $"Started {(cleave ? "Cleave execution" : "ability cast")} action '{candidates[i]}' on actor={actor.Index}.");
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    _logger.Debug($"Optional cast action '{candidates[i]}' unavailable: {ex.Message}");
+                    Log(logger, $"Optional cast action '{candidates[i]}' unavailable: {ex.Message}");
                 }
             }
-            _logger.Debug($"No compatible native {(cleave ? "Cleave execution" : "cast")} action was accepted for actor={actor.Index}.");
+            Log(logger, $"No compatible native {(cleave ? "Cleave execution" : "cast")} action was accepted for actor={actor.Index}.");
             return false;
         }
 
@@ -129,6 +133,11 @@ namespace Voidstep
                 default:
                     return QuickCastActions;
             }
+        }
+
+        private static void Log(VoidstepLogger logger, string message)
+        {
+            if (logger != null) logger.Debug(message);
         }
     }
 }
