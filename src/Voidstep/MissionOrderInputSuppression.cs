@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using TaleWorlds.InputSystem;
-using TaleWorlds.Library;
 
 namespace Voidstep
 {
