@@ -27,12 +27,17 @@ namespace Voidstep
     {
         private readonly Mission _mission;
         private readonly MBList<Agent> _nearby = new MBList<Agent>();
-        private readonly List<CandidateScore<Vec3>> _fallback = new List<CandidateScore<Vec3>>(48);
-        private readonly float[] _ringRadii = { 0.45f, 0.9f, 1.4f, 2.0f };
+        private readonly List<CandidateScore<Vec3>> _fallback = new List<CandidateScore<Vec3>>(128);
+        private readonly float[] _ringRadii = { 0.45f, 0.9f, 1.4f, 2.0f, 2.6f, 3.2f };
 
         public TeleportValidator(Mission mission) => _mission = mission;
 
-        public TeleportValidationResult Validate(Agent actor, Vec3 requested, float maximumRange, bool allowThroughWalls)
+        public TeleportValidationResult Validate(
+            Agent actor,
+            Vec3 requested,
+            float maximumRange,
+            bool allowThroughWalls,
+            int fallbackCandidateBudget = 0)
         {
             if (actor == null || !actor.IsActive())
                 return Fail("No active controlled agent.");
@@ -48,10 +53,17 @@ namespace Voidstep
 
             BuildFallbackCandidates(requested, actor.Position.z);
             _fallback.Sort(CompareCandidate);
-            var fallbackChecks = Math.Min(16, _fallback.Count);
-            for (var i = 0; i < fallbackChecks; i++)
+            var fallbackLimit = fallbackCandidateBudget > 0
+                ? Math.Min(fallbackCandidateBudget, _fallback.Count)
+                : _fallback.Count;
+            for (var i = 0; i < fallbackLimit; i++)
             {
-                if (TryValidateExact(actor, _fallback[i].Value, allowThroughWalls, out var validated, out _))
+                var candidate = _fallback[i].Value;
+                var candidateDelta = candidate - actor.Position;
+                candidateDelta.z = 0f;
+                if (candidateDelta.Length > maximumRange + 0.05f)
+                    continue;
+                if (TryValidateExact(actor, candidate, allowThroughWalls, out var validated, out _))
                     return new TeleportValidationResult(true, validated, null, true);
             }
 
@@ -176,7 +188,6 @@ namespace Voidstep
             return false;
         }
 
-
         private bool IsNearCliff(Vec3 candidate, float centerGround)
         {
             const float probeRadius = 0.55f;
@@ -204,9 +215,9 @@ namespace Voidstep
             for (var ring = 0; ring < _ringRadii.Length; ring++)
             {
                 var radius = _ringRadii[ring];
-                for (var i = 0; i < 12; i++)
+                for (var i = 0; i < 16; i++)
                 {
-                    var angle = i * (Math.PI * 2.0 / 12.0);
+                    var angle = i * (Math.PI * 2.0 / 16.0);
                     var candidate = new Vec3(
                         center.x + (float)Math.Cos(angle) * radius,
                         center.y + (float)Math.Sin(angle) * radius,
@@ -216,7 +227,6 @@ namespace Voidstep
                 }
             }
         }
-
 
         private static int CompareCandidate(CandidateScore<Vec3> left, CandidateScore<Vec3> right)
         {

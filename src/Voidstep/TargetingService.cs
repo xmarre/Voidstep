@@ -7,6 +7,17 @@ namespace Voidstep
 {
     internal sealed class TargetingService
     {
+        private const int MaximumIgnoredRayHits = 6;
+        private static readonly string[] ProjectileNameFragments =
+        {
+            "arrow",
+            "bolt",
+            "missile",
+            "javelin",
+            "throwing_axe",
+            "throwing_knife"
+        };
+
         private readonly Mission _mission;
         private readonly MBList<Agent> _nearby = new MBList<Agent>();
 
@@ -14,23 +25,11 @@ namespace Voidstep
 
         public Vec3 GetAimDirection(Agent player)
         {
-            try
-            {
-                var camera = _mission.GetCameraFrame();
-                var direction = camera.rotation.f;
-                direction.z = 0f;
-                if (direction.Normalize() >= 0.001f)
-                    return direction;
-            }
-            catch
-            {
-            }
-
-            var fallback = player != null ? player.LookDirection : Vec3.Forward;
-            fallback.z = 0f;
-            if (fallback.Normalize() < 0.001f)
-                fallback = Vec3.Forward;
-            return fallback;
+            var direction = GetCameraRayDirection(player);
+            direction.z = 0f;
+            if (direction.Normalize() < 0.001f)
+                direction = Vec3.Forward;
+            return direction;
         }
 
         public Agent FindLockedEnemy(Agent player, float range, float halfAngleDegrees = 28f)
@@ -73,32 +72,51 @@ namespace Voidstep
             if (player == null)
                 return false;
 
-            var direction = GetAimDirection(player);
             Vec3 source;
             try { source = _mission.GetCameraFrame().origin; }
             catch { source = player.GetEyeGlobalPosition(); }
 
+            var direction = GetCameraRayDirection(player);
             var sourceOffset = source - player.Position;
             sourceOffset.z = 0f;
             var rayLength = range + Math.Min(8f, sourceOffset.Length) + 3f;
             var target = source + direction * rayLength;
-            var distance = 1f;
-            var point = target;
-            WeakGameEntity entity = default(WeakGameEntity);
-            if (_mission.Scene.RayCastForClosestEntityOrTerrain(
-                    source,
-                    target,
-                    out distance,
-                    out point,
-                    out entity,
-                    0.05f,
-                    BodyFlags.CommonCollisionExcludeFlagsForAgent))
+            var rayStart = source;
+
+            for (var ignored = 0; ignored <= MaximumIgnoredRayHits; ignored++)
             {
-                position = ClampToRange(player.Position, point, range);
-                return true;
+                var distance = 1f;
+                var point = target;
+                WeakGameEntity entity = default(WeakGameEntity);
+                if (!_mission.Scene.RayCastForClosestEntityOrTerrain(
+                        rayStart,
+                        target,
+                        out distance,
+                        out point,
+                        out entity,
+                        0.05f,
+                        BodyFlags.CommonCollisionExcludeFlagsForAgent))
+                {
+                    break;
+                }
+
+                if (!IsTransientProjectileEntity(entity))
+                {
+                    position = ClampToRange(player.Position, point, range);
+                    return true;
+                }
+
+                var remaining = target - point;
+                if (remaining.Normalize() < 0.001f)
+                    break;
+                rayStart = point + remaining * 0.15f;
             }
 
-            target = player.Position + direction * range;
+            var planar = direction;
+            planar.z = 0f;
+            if (planar.Normalize() < 0.001f)
+                planar = GetAimDirection(player);
+            target = player.Position + planar * range;
             var terrain = _mission.Scene.GetGroundHeightAtPosition(target, BodyFlags.CommonCollisionExcludeFlagsForAgent);
             if (float.IsNaN(terrain) || float.IsInfinity(terrain))
                 return false;
@@ -117,6 +135,64 @@ namespace Voidstep
             if (enemyOnly && (player.Team == null || target.Team == null || !player.Team.IsEnemyOf(target.Team)))
                 return false;
             return target.IsHuman || target.IsMount;
+        }
+
+        private Vec3 GetCameraRayDirection(Agent player)
+        {
+            try
+            {
+                var camera = _mission.GetCameraFrame();
+                var direction = camera.rotation.f;
+                if (direction.Normalize() >= 0.001f)
+                    return direction;
+            }
+            catch
+            {
+            }
+
+            var fallback = player != null ? player.LookDirection : Vec3.Forward;
+            if (fallback.Normalize() < 0.001f)
+                fallback = Vec3.Forward;
+            return fallback;
+        }
+
+        private static bool IsTransientProjectileEntity(WeakGameEntity entity)
+        {
+            if (!entity.IsValid)
+                return false;
+
+            try
+            {
+                var flags = entity.BodyFlag | entity.PhysicsDescBodyFlag;
+                if ((flags & (BodyFlags.MissileOnly | BodyFlags.DroppedItem)) != 0)
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (LooksLikeProjectileName(entity.Name) || LooksLikeProjectileName(entity.Root.Name))
+                    return true;
+                var tags = entity.Tags;
+                if (tags != null)
+                    for (var i = 0; i < tags.Length; i++)
+                        if (LooksLikeProjectileName(tags[i])) return true;
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        private static bool LooksLikeProjectileName(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            for (var i = 0; i < ProjectileNameFragments.Length; i++)
+                if (value.IndexOf(ProjectileNameFragments[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            return false;
         }
 
         private static Vec3 ClampToRange(Vec3 origin, Vec3 requested, float range)
