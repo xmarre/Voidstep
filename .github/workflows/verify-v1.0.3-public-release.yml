@@ -1,0 +1,95 @@
+name: Verify public v1.0.3 release
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voidstep-v1.0.3-public-verification
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: github.event.pull_request.head.ref == 'verify/v1.0.3-public-release' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      TAG: v1.0.3
+      TARGET_SHA: fb9475e877f30a92b4882c81d1ad8386cb7148c8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download and verify public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public-release install source
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+          test "$tag_sha" = "$TARGET_SHA"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,url,assets > public-release/release.json
+          test "$(jq -r '.isDraft' public-release/release.json)" = false
+          test "$(jq -r '.isPrerelease' public-release/release.json)" = false
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir public-release --clobber
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          root = Path('public-release')
+          expected_names = {
+              'Voidstep-v1.0.3-Bannerlord-1.3.15.zip',
+              'Voidstep-v1.0.3-SOURCE.zip',
+              'SHA256SUMS.txt',
+              'SOURCE_SHA256.txt',
+          }
+          missing = [name for name in expected_names if not (root / name).is_file()]
+          if missing:
+              raise SystemExit(f'Missing release assets: {missing}')
+          checks = {}
+          for raw in (root / 'SHA256SUMS.txt').read_text(encoding='utf-8-sig').splitlines():
+              parts = raw.strip().split(None, 1)
+              if len(parts) == 2 and len(parts[0]) == 64:
+                  checks[parts[1].lstrip('*')] = parts[0].lower()
+          for name in ('Voidstep-v1.0.3-Bannerlord-1.3.15.zip', 'Voidstep-v1.0.3-SOURCE.zip'):
+              actual = sha256((root / name).read_bytes()).hexdigest()
+              if checks.get(name) != actual:
+                  raise SystemExit(f'Published checksum mismatch for {name}: {checks.get(name)} != {actual}')
+          identity = (root / 'SOURCE_SHA256.txt').read_text(encoding='utf-8-sig').strip()
+          if 'source-input@fb9475e877f30a92b4882c81d1ad8386cb7148c8' not in identity:
+              raise SystemExit(f'Unexpected source identity: {identity}')
+          PY
+          unzip -q public-release/Voidstep-v1.0.3-Bannerlord-1.3.15.zip -d install
+          unzip -q public-release/Voidstep-v1.0.3-SOURCE.zip -d source
+          mapfile -t install_files < <(find install -type f -printf '%P\n' | sort)
+          expected=(
+            'Modules/Voidstep/README.txt'
+            'Modules/Voidstep/SubModule.xml'
+            'Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.Core.dll'
+            'Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll'
+          )
+          test "${install_files[*]}" = "${expected[*]}"
+          ! find install -type f -iregex '.*/\(TaleWorlds\..*\|TOR_Core\|MCM\..*\|Bannerlord\.MBOptionScreen.*\)\.dll' | grep -q .
+          ! find source -type d -regex '.*/\(bin\|obj\|artifacts\|dist\)' | grep -q .
+          ! find source -type f -iregex '.*\.\(dll\|pdb\)$' | grep -q .
+          ! find source -type f -path '*/.github/workflows/*finaliz*' | grep -q .
+          {
+            echo "tag=$TAG"
+            echo "target_commit=$TARGET_SHA"
+            sha256sum public-release/Voidstep-v1.0.3-Bannerlord-1.3.15.zip
+            sha256sum public-release/Voidstep-v1.0.3-SOURCE.zip
+            sha256sum install/Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll
+            sha256sum install/Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.Core.dll
+            echo 'install_files:'
+            printf '%s\n' "${install_files[@]}"
+            echo "source_file_count=$(find source -type f | wc -l)"
+            cat public-release/SOURCE_SHA256.txt
+          } | tee public-release/verification.txt
+      - name: Upload verification result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Voidstep-v1.0.3-public-release-verification
+          path: public-release/
+          if-no-files-found: error
