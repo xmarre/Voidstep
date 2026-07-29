@@ -23,7 +23,7 @@ namespace Voidstep
         private static readonly string[] TorWind = { "psys_magic_wind", "vfx_wind_blast", "psys_gust" };
         private static readonly string[] NativeMarker = { "psys_game_missile_hit_ground", "psys_game_broken_shield" };
         private static readonly string[] TorMarker = { "psys_magic_shadow", "vfx_vortex_purple", "psys_shadow_hit" };
-        private static readonly string[] MarkerMeshes = { "debug_sphere", "unit_sphere", "editor_sphere", "sphere" };
+        private static readonly string[] MarkerMaterialDonors = { "arrow_bl_a", "arrow_bodkin_a", "arrow_barbed_a" };
         private static readonly Vec3[] MarkerOffsets =
         {
             Vec3.Zero,
@@ -58,7 +58,7 @@ namespace Voidstep
                 frame.origin = position;
                 entity.SetFrame(ref frame, true);
 
-                var meshAdded = AddMarkerMesh(entity);
+                var meshAdded = AddCastingSigilMesh(entity, color);
                 entity.SetContourColor(color, alwaysVisible);
                 entity.SetDoNotCheckVisibility(true);
                 entity.SetReadyToRender(true);
@@ -77,7 +77,7 @@ namespace Voidstep
                 }
 
                 _ownedEntities.Add(entity);
-                _logger.Debug($"Created cast indicator at {Format(position)}; mesh={meshAdded}, particles={attachedParticles}, particleId={particleId}.");
+                _logger.Debug($"Created cast indicator at {Format(position)}; sigil={meshAdded}, particles={attachedParticles}, particleId={particleId}.");
                 return entity;
             }
             catch (Exception ex)
@@ -146,29 +146,71 @@ namespace Voidstep
             _particleIds.Clear();
         }
 
-        private bool AddMarkerMesh(GameEntity entity)
+        private bool AddCastingSigilMesh(GameEntity entity, uint color)
         {
-            for (var i = 0; i < MarkerMeshes.Length; i++)
+            for (var i = 0; i < MarkerMaterialDonors.Length; i++)
             {
                 try
                 {
-                    var source = Mesh.GetFromResource(MarkerMeshes[i]);
-                    if (source == null) continue;
-                    var mesh = source.CreateCopy();
+                    var donor = Mesh.GetFromResource(MarkerMaterialDonors[i]);
+                    var material = donor?.GetMaterial();
+                    if (material == null) continue;
+
+                    var mesh = Mesh.CreateMeshWithMaterial(material);
                     if (mesh == null) continue;
-                    var local = MatrixFrame.Identity;
-                    local.origin = Vec3.Up * 0.12f;
-                    local.rotation.ApplyScaleLocal(0.18f);
-                    mesh.SetLocalFrame(local);
+                    mesh.Color = color;
+                    mesh.Color2 = color;
+                    var handle = mesh.LockEditDataWrite();
+                    try
+                    {
+                        AddRing(mesh, handle, color, false);
+                        AddRing(mesh, handle, color, true);
+                    }
+                    finally
+                    {
+                        mesh.UnlockEditDataWrite(handle);
+                    }
+                    mesh.ComputeNormals();
+                    mesh.ComputeTangents();
+                    mesh.RecomputeBoundingBox();
+                    mesh.PreloadForRendering();
                     entity.AddMesh(mesh, false);
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    _logger.Debug($"Cast indicator mesh '{MarkerMeshes[i]}' unavailable: {ex.Message}");
+                    _logger.Debug($"Cast sigil material donor '{MarkerMaterialDonors[i]}' unavailable: {ex.Message}");
                 }
             }
             return false;
+        }
+
+        private static void AddRing(Mesh mesh, UIntPtr handle, uint color, bool vertical)
+        {
+            const int segments = 24;
+            const float outerRadius = 0.42f;
+            const float innerRadius = 0.29f;
+            var uv = Vec2.Zero;
+            for (var i = 0; i < segments; i++)
+            {
+                var angle0 = i * Math.PI * 2.0 / segments;
+                var angle1 = (i + 1) * Math.PI * 2.0 / segments;
+                var outer0 = RingPoint(angle0, outerRadius, vertical);
+                var outer1 = RingPoint(angle1, outerRadius, vertical);
+                var inner1 = RingPoint(angle1, innerRadius, vertical);
+                var inner0 = RingPoint(angle0, innerRadius, vertical);
+                mesh.AddTriangle(outer0, outer1, inner1, uv, uv, uv, color, handle);
+                mesh.AddTriangle(outer0, inner1, inner0, uv, uv, uv, color, handle);
+            }
+        }
+
+        private static Vec3 RingPoint(double angle, float radius, bool vertical)
+        {
+            var first = (float)Math.Cos(angle) * radius;
+            var second = (float)Math.Sin(angle) * radius;
+            return vertical
+                ? new Vec3(first, 0f, second, 1f)
+                : new Vec3(first, second, 0f, 1f);
         }
 
         private void RadialBurst(string[] candidates, Vec3 center, float radius, int count)
