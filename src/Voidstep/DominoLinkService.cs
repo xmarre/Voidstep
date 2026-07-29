@@ -24,6 +24,7 @@ namespace Voidstep
         private readonly List<GameEntity> _markerBuffer = new List<GameEntity>(32);
         private readonly List<PendingPropagation> _pending = new List<PendingPropagation>(32);
         private readonly List<PendingPropagation> _dispatchBuffer = new List<PendingPropagation>(32);
+        private readonly Dictionary<int, int> _propagatedHitSuppression = new Dictionary<int, int>();
         private readonly Dictionary<int, int> _propagatedDeathSuppression = new Dictionary<int, int>();
         private readonly List<int> _suppressionRemoveBuffer = new List<int>(16);
         private Agent _player;
@@ -98,22 +99,32 @@ namespace Voidstep
 
         public void OnAgentHit(Agent affectedAgent, Agent affectorAgent, ref Blow blow)
         {
+            if (affectedAgent == null || !MatchesLinkedAgent(affectedAgent))
+                return;
+
+            // Ownership is explicit. BlowFlags.NoSound is also used by legitimate synthetic
+            // Voidstep attacks, so it cannot identify a Domino-generated callback.
+            if (ConsumePropagatedHitSuppression(affectedAgent.Index))
+            {
+                _logger.Debug($"Consumed Domino-owned propagated hit callback target={affectedAgent.Index}.");
+                return;
+            }
+
             var settings = VoidstepSettings.Current;
-            if (!settings.DominoPropagateDamage || affectedAgent == null || affectorAgent != _player || !MatchesLinkedAgent(affectedAgent))
+            if (!settings.DominoPropagateDamage || !IsPlayerSource(affectorAgent))
                 return;
 
-            // Never register a new blow while Bannerlord is still inside Agent.HandleBlow.
-            // Re-entering the native melee callback corrupts its by-ref collision state and
-            // can surface as an AccessViolationException from MonoMod.Utils.
-            if ((blow.BlowFlag & BlowFlags.NoSound) != 0)
-                return;
-
-            var damage = Math.Max(0, (int)Math.Round(blow.InflictedDamage * settings.DominoDamageFactor));
+            var scaled = (int)Math.Round(Math.Max(0, blow.InflictedDamage) * settings.DominoDamageFactor);
+            var damage = blow.InflictedDamage > 0 ? Math.Max(1, scaled) : 0;
             var flags = BlowFlags.NoSound;
             if (settings.DominoPropagateKnockdown && (blow.BlowFlag & BlowFlags.KnockDown) != 0)
                 flags |= BlowFlags.KnockDown;
+            if (damage <= 0 && (flags & BlowFlags.KnockDown) == 0)
+                return;
             var magnitude = Math.Max(1f, blow.BaseMagnitude * settings.DominoDamageFactor);
 
+            // Never register a new blow while Bannerlord is still inside Agent.HandleBlow.
+            // Re-entering the native melee callback corrupts its by-ref collision state.
             CopyLinkedIds();
             var queued = 0;
             for (var i = 0; i < _snapshotBuffer.Count; i++)
@@ -127,7 +138,7 @@ namespace Voidstep
                 queued++;
             }
             if (queued > 0)
-                _logger.Debug($"Queued Domino damage propagation source={affectedAgent.Index}, targets={queued}, damage={damage}.");
+                _logger.Debug($"Queued Domino damage propagation source={affectedAgent.Index}, targets={queued}, damage={damage}, sourceFlags={blow.BlowFlag}.");
         }
 
         public void OnAgentRemoved(Agent affectedAgent, Agent affectorAgent, AgentState state)
@@ -136,7 +147,7 @@ namespace Voidstep
                 return;
 
             var propagatedRemoval = ConsumePropagatedDeathSuppression(affectedAgent.Index);
-            var shouldPropagateDeath = !propagatedRemoval && VoidstepSettings.Current.DominoPropagateDeath && affectorAgent == _player;
+            var shouldPropagateDeath = !propagatedRemoval && VoidstepSettings.Current.DominoPropagateDeath && IsPlayerSource(affectorAgent);
             Remove(affectedAgent.Index);
             if (!shouldPropagateDeath || _player == null || !_player.IsActive())
                 return;
@@ -160,6 +171,7 @@ namespace Voidstep
         public void OnAgentDeleted(Agent agent)
         {
             if (agent == null) return;
+            _propagatedHitSuppression.Remove(agent.Index);
             _propagatedDeathSuppression.Remove(agent.Index);
             if (MatchesLinkedAgent(agent)) Remove(agent.Index);
         }
@@ -176,6 +188,7 @@ namespace Voidstep
             _sorted.Clear();
             _pending.Clear();
             _dispatchBuffer.Clear();
+            _propagatedHitSuppression.Clear();
             _propagatedDeathSuppression.Clear();
             _suppressionRemoveBuffer.Clear();
             _dispatching = false;
@@ -207,7 +220,27 @@ namespace Voidstep
                     var mayKill = entry.Lethal || entry.Damage >= Math.Ceiling(target.Health);
                     if (mayKill)
                         _propagatedDeathSuppression[entry.TargetId] = _tickSerial + PropagatedDeathSuppressionTicks;
-                    if (_blows.ApplyDirectBlow(_player, target, entry.Damage, entry.DamageType, entry.Flags, entry.Magnitude))
+
+                    AddPropagatedHitSuppression(entry.TargetId);
+                    var registered = false;
+                    try
+                    {
+                        registered = _blows.ApplyDirectBlow(
+                            _player,
+                            target,
+                            entry.Damage,
+                            entry.DamageType,
+                            entry.Flags,
+                            entry.Magnitude);
+                    }
+                    finally
+                    {
+                        // The native hit callback is synchronous. If it did not consume the
+                        // marker, remove it now so a later real player hit cannot be discarded.
+                        RemoveUnconsumedPropagatedHitSuppression(entry.TargetId);
+                    }
+
+                    if (registered)
                     {
                         applied++;
                     }
@@ -227,6 +260,31 @@ namespace Voidstep
                 _logger.Debug($"Dispatched {applied} deferred Domino propagation blow{(applied == 1 ? string.Empty : "s")} after the native hit callback completed.");
         }
 
+        private void AddPropagatedHitSuppression(int agentId)
+        {
+            if (_propagatedHitSuppression.TryGetValue(agentId, out var count))
+                _propagatedHitSuppression[agentId] = count + 1;
+            else
+                _propagatedHitSuppression.Add(agentId, 1);
+        }
+
+        private bool ConsumePropagatedHitSuppression(int agentId)
+        {
+            if (!_propagatedHitSuppression.TryGetValue(agentId, out var count) || count <= 0)
+                return false;
+            if (count == 1) _propagatedHitSuppression.Remove(agentId);
+            else _propagatedHitSuppression[agentId] = count - 1;
+            return true;
+        }
+
+        private void RemoveUnconsumedPropagatedHitSuppression(int agentId)
+        {
+            if (!_propagatedHitSuppression.TryGetValue(agentId, out var count) || count <= 0)
+                return;
+            if (count == 1) _propagatedHitSuppression.Remove(agentId);
+            else _propagatedHitSuppression[agentId] = count - 1;
+        }
+
         private void ExpirePropagationSuppressions()
         {
             if (_propagatedDeathSuppression.Count == 0) return;
@@ -244,6 +302,16 @@ namespace Voidstep
                 return false;
             _propagatedDeathSuppression.Remove(agentId);
             return expiry >= _tickSerial;
+        }
+
+        private bool IsPlayerSource(Agent affectorAgent)
+        {
+            if (_player == null || affectorAgent == null)
+                return false;
+            if (ReferenceEquals(affectorAgent, _player))
+                return true;
+            var mount = _player.MountAgent;
+            return mount != null && ReferenceEquals(affectorAgent, mount);
         }
 
         private void CopyLinkedIds()
@@ -269,6 +337,7 @@ namespace Voidstep
         private void Remove(int id)
         {
             _linked.Remove(id);
+            _propagatedHitSuppression.Remove(id);
             if (_markers.TryGetValue(id, out var marker))
             {
                 _effects.RemoveMarker(marker);
