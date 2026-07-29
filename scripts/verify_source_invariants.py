@@ -21,6 +21,10 @@ settings = files.get('VoidstepSettings.cs', '')
 weapon_validation = files.get('WeaponValidation.cs', '')
 dark_vision = files.get('DarkVisionService.cs', '')
 blow_factory = files.get('BlowFactory.cs', '')
+effects = files.get('EffectController.cs', '')
+teleport_validator = files.get('TeleportValidator.cs', '')
+windblast = files.get('WindblastController.cs', '')
+domino = files.get('DominoLinkService.cs', '')
 mirror_tests = (root / 'scripts' / 'run_logic_mirror_tests.py').read_text(encoding='utf-8')
 
 time_release_guard = re.search(
@@ -90,7 +94,12 @@ checks = {
     'hotkey event and context teardown are explicit': 'DetachKeybindEvents();' in submodule and 'VoidstepHotKeyContext.Clear();' in submodule and 'InputConflictSuppression.Reset();' in submodule,
     'harmony cleanup retains ownership on failure': 'for (var attempt = 1; attempt <= 2; attempt++)' in submodule and 'submodule unload was aborted' in submodule and re.search(r'if \(_harmony != null && !TryUnpatchOwnedPatches\(\)\)\s*\{.*?return;\s*\}', submodule, re.DOTALL) is not None,
     'camera aligned targeting': 'GetCameraFrame()' in files.get('TargetingService.cs','') and 'GetAimDirection' in files.get('TargetingService.cs',''),
-    'visible marker mesh': 'Mesh.GetFromResource' in files.get('EffectController.cs','') and 'entity.AddMesh' in files.get('EffectController.cs',''),
+    'procedural cast sigil replaces arrow geometry': 'Mesh.CreateMeshWithMaterial' in effects and 'private static void AddRing' in effects and 'entity.AddMesh(mesh, false)' in effects and 'entity.AddMesh(donor' not in effects and 'entity.AddMesh(source' not in effects,
+    'all six abilities expose cast feedback': 'CreateWorldMarker' in ability_manager and 'CreateWorldMarker' in blink and 'CreateWorldMarker' in domino and '_effects.Windblast' in windblast and '_effects.BendTime' in ability_manager and 'SetContourColor' in dark_vision,
+    'blink targeting freezes mission time': 'new Mission.TimeSpeedRequest(0f, AimTimeRequestId)' in blink and 'MBCommon.GetApplicationTime()' in blink and 'realDt' in blink,
+    'cleave fallback exhausts bounded candidate field': 'for (var i = 0; i < _fallback.Count; i++)' in teleport_validator and 'Math.Min(16' not in teleport_validator and 'candidateDelta.Length > maximumRange + 0.05f' in teleport_validator and '3.2f' in teleport_validator,
+    'bend time compensates player and mount systems': all(name in time_control for name in ('MaxSpeedMultiplier', 'CombatMaxSpeedMultiplier', 'SwingSpeedMultiplier', 'ReloadSpeed', 'BipedalRangedReadySpeedMultiplier', 'BipedalRangedReloadSpeedMultiplier', 'MountSpeed', 'MountManeuver', 'MountDashAccelerationMultiplier')) and 'for (var channel = 0; channel < 4; channel++)' in time_control,
+    'bend time compensation restores only owned values': 'Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier)' in time_control and 'RestorePlayerCompensation();' in time_control,
     'cleave preserves weapon snapshot': 'MissionWeapon _cleaveWeapon' in ability_manager and 'MissionWeapon _weapon' in cleave and 'attacker.WieldedWeapon' not in blow_factory,
     'cleave rejects non-melee weapons twice': ability_manager.count('WeaponValidation.IsUsableMeleeWeapon') >= 1 and cleave.count('WeaponValidation.IsUsableMeleeWeapon') >= 1 and 'CurrentUsageItem' in weapon_validation and 'IsMeleeWeapon' in weapon_validation,
     'cleave refunds paid pre-effect failures': ability_manager.count('RollbackPayment(AbilityId.VoidstepCleave)') >= 2,
@@ -101,18 +110,18 @@ checks = {
     'cleave deterministic cleanup': '_hits.Clear();' in cleave and '_snapshotSchedule.Clear();' in cleave,
     'time request ownership retained through cleanup': '_cleanupPending' in time_control and '_ownership.TryGet(_token, out requestId)' in time_control and time_release_guard is not None and time_control.count('RemoveTimeSpeedRequest(') == 1,
     'blink request ownership retained through cleanup': '_timeCleanupPending' in blink and blink_release_guard is not None and blink.count('RemoveTimeSpeedRequest(') == 1,
-    'domino index storage': 'Dictionary<int, Agent> _linked' in files.get('DominoLinkService.cs','') and 'FindAgentWithIndex' in files.get('DominoLinkService.cs',''),
-    'domino recursion guard': 'RecursionGuard<int>' in files.get('DominoLinkService.cs','') and '(blow.BlowFlag & BlowFlags.NoSound) != 0' in files.get('DominoLinkService.cs',''),
+    'domino index storage': 'Dictionary<int, Agent> _linked' in domino and 'FindAgentWithIndex' in domino,
+    'domino recursion guard': 'RecursionGuard<int>' in domino and '(blow.BlowFlag & BlowFlags.NoSound) != 0' in domino,
     'dark vision immediate and throttled': 'Refresh();' in dark_vision and 'DarkVisionRefreshInterval' in dark_vision,
     'dark vision counts successful contours only': 'if (TrySetContour(agent, color))' in dark_vision and 'private static bool ClearContour' in dark_vision and 'if (ClearContour(' in dark_vision,
     'no campaign behavior': 'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
     'no global agent collection': not re.search(r'\bstatic\s+readonly\s+.*(?:\bAgent\b|\bList<Agent>\b|\bHashSet<Agent>\b)', all_text),
     'no full all-agent scan': 'AllAgents' not in mission_behavior and 'Agents)' not in mission_behavior,
     'mission end cleanup': 'Cleanup(CancelReason.MissionEnded)' in mission_behavior,
-    'missing effects are nonfatal': 'Optional particle failed' in files.get('EffectController.cs','') and 'return -1;' in files.get('EffectController.cs',''),
+    'missing effects are nonfatal': 'Optional particle failed' in effects and 'return -1;' in effects,
     'whole-cast target cap': '_successfulHits >= _maximumTargets' in cleave,
     'dark vision reuses stale buffer': 'List<int> _staleBuffer' in dark_vision and 'new List<int>' not in dark_vision.split('private void Refresh()',1)[-1],
-    'domino reuses snapshot buffer': 'List<int> _snapshotBuffer' in files.get('DominoLinkService.cs','') and 'new List<int>' not in files.get('DominoLinkService.cs','').split('public void Tick()',1)[-1],
+    'domino reuses snapshot buffer': 'List<int> _snapshotBuffer' in domino and 'new List<int>' not in domino.split('public void Tick()',1)[-1],
 }
 failed = [name for name, ok in checks.items() if not ok]
 for name, ok in checks.items():
