@@ -20,6 +20,7 @@ namespace Voidstep
         private float _refreshRemaining;
         private Agent _player;
         private bool _visibilityFailureLogged;
+        private int _lastLoggedCount = -1;
 
         public DarkVisionService(Mission mission, VoidstepLogger logger)
         {
@@ -42,6 +43,9 @@ namespace Voidstep
             Active = true;
             _refreshRemaining = 0f;
             _visibilityFailureLogged = false;
+            _lastLoggedCount = -1;
+            Refresh();
+            _logger.Debug($"Dark Vision started; initial highlights={_highlighted.Count}.");
             return true;
         }
 
@@ -67,10 +71,14 @@ namespace Voidstep
 
         public void Disable()
         {
+            var cleared = 0;
             _staleBuffer.Clear();
             foreach (var id in _highlighted) _staleBuffer.Add(id);
             for (var i = 0; i < _staleBuffer.Count; i++)
-                ClearContour(_mission.FindAgentWithIndex(_staleBuffer[i]));
+            {
+                if (ClearContour(_mission.FindAgentWithIndex(_staleBuffer[i])))
+                    cleared++;
+            }
             _staleBuffer.Clear();
             _highlighted.Clear();
             _seen.Clear();
@@ -78,7 +86,9 @@ namespace Voidstep
             _refreshRemaining = 0f;
             _player = null;
             _visibilityFailureLogged = false;
+            _lastLoggedCount = -1;
             Active = false;
+            if (cleared > 0) _logger.Debug($"Dark Vision disabled; cleared={cleared}.");
         }
 
         private void Refresh()
@@ -92,12 +102,8 @@ namespace Voidstep
                 if (!TargetingService.IsUsableTarget(_player, agent, true)) continue;
                 _seen.Add(agent.Index);
                 var color = ClassifyColor(agent);
-                try
-                {
-                    agent.AgentVisuals?.SetContourColor(color, true);
+                if (TrySetContour(agent, color))
                     _highlighted.Add(agent.Index);
-                }
-                catch (Exception ex) { _logger.Debug("Dark Vision contour update failed: " + ex.Message); }
             }
 
             _staleBuffer.Clear();
@@ -109,6 +115,12 @@ namespace Voidstep
                 _highlighted.Remove(_staleBuffer[i]);
             }
             _staleBuffer.Clear();
+
+            if (_lastLoggedCount != _highlighted.Count)
+            {
+                _logger.Debug($"Dark Vision refresh nearby={_nearby.Count}, highlighted={_highlighted.Count}.");
+                _lastLoggedCount = _highlighted.Count;
+            }
         }
 
         private uint ClassifyColor(Agent agent)
@@ -130,11 +142,35 @@ namespace Voidstep
             return UnawareColor;
         }
 
-        private static void ClearContour(Agent agent)
+        private bool TrySetContour(Agent agent, uint color)
         {
-            if (agent == null) return;
-            try { agent.AgentVisuals?.SetContourColor(null, false); }
-            catch { }
+            if (agent?.AgentVisuals == null)
+                return false;
+            try
+            {
+                agent.AgentVisuals.SetContourColor(color, true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug("Dark Vision contour update failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool ClearContour(Agent agent)
+        {
+            if (agent?.AgentVisuals == null)
+                return false;
+            try
+            {
+                agent.AgentVisuals.SetContourColor(null, false);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

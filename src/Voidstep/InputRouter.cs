@@ -25,6 +25,9 @@ namespace Voidstep
 
         public AbilityId? PollAbility()
         {
+            if (!VoidstepSubModule.InputSuppressionReady)
+                return null;
+
             var settings = VoidstepSettings.Current;
             if (Input.IsOnScreenKeyboardActive || !_mission.IsLoadingFinished || _mission.MissionEnded || _mission.MissionIsEnding)
                 return null;

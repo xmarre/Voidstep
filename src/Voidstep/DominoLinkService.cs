@@ -91,6 +91,13 @@ namespace Voidstep
             var settings = VoidstepSettings.Current;
             if (!settings.DominoPropagateDamage || affectedAgent == null || affectorAgent != _player || !MatchesLinkedAgent(affectedAgent))
                 return;
+
+            // Propagated Domino blows are tagged NoSound. The engine can deliver
+            // OnAgentHit after RegisterBlow returns, so the synchronous guard alone
+            // is insufficient to identify a delayed propagated callback.
+            if ((blow.BlowFlag & BlowFlags.NoSound) != 0)
+                return;
+
             using (var lease = _guard.Enter(1))
             {
                 if (lease == null) return;

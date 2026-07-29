@@ -23,6 +23,7 @@ namespace Voidstep
         private static readonly string[] TorWind = { "psys_magic_wind", "vfx_wind_blast", "psys_gust" };
         private static readonly string[] NativeMarker = { "psys_game_blood_sword_enter", "psys_game_missile_hit_human" };
         private static readonly string[] TorMarker = { "psys_magic_shadow", "vfx_vortex_purple", "psys_shadow_hit" };
+        private static readonly string[] MarkerMeshes = { "arrow_bl_a", "arrow_bodkin_a", "arrow_barbed_a" };
 
         public EffectController(Mission mission, VoidstepLogger logger)
         {
@@ -48,14 +49,21 @@ namespace Voidstep
                 var frame = MatrixFrame.Identity;
                 frame.origin = position;
                 entity.SetFrame(ref frame, true);
+
+                var meshAdded = AddMarkerMesh(entity);
                 entity.SetContourColor(color, alwaysVisible);
+                entity.SetDoNotCheckVisibility(true);
+                entity.SetReadyToRender(true);
+
                 var particleId = ResolveFirst(UseTorPreset() ? TorMarker : NativeMarker);
                 if (particleId >= 0)
                 {
                     var localFrame = MatrixFrame.Identity;
                     ParticleSystem.CreateParticleSystemAttachedToEntity(particleId, entity, ref localFrame);
                 }
+
                 _ownedEntities.Add(entity);
+                _logger.Debug($"Created visible target marker at {Format(position)}; mesh={meshAdded}, particle={particleId}.");
                 return entity;
             }
             catch (Exception ex)
@@ -83,6 +91,13 @@ namespace Voidstep
             {
                 _logger.Debug("Marker move failed: " + ex.Message);
             }
+        }
+
+        public void SetMarkerColor(GameEntity marker, uint color)
+        {
+            if (marker == null) return;
+            try { marker.SetContourColor(color, true); }
+            catch (Exception ex) { _logger.Debug("Marker colour update failed: " + ex.Message); }
         }
 
         public void RemoveMarker(GameEntity marker)
@@ -115,6 +130,32 @@ namespace Voidstep
             }
             _ownedEntities.Clear();
             _particleIds.Clear();
+        }
+
+        private bool AddMarkerMesh(GameEntity entity)
+        {
+            for (var i = 0; i < MarkerMeshes.Length; i++)
+            {
+                try
+                {
+                    var source = Mesh.GetFromResource(MarkerMeshes[i]);
+                    if (source == null) continue;
+                    var mesh = source.CreateCopy();
+                    if (mesh == null) continue;
+                    var local = MatrixFrame.Identity;
+                    local.origin = Vec3.Up * 0.35f;
+                    local.rotation.RotateAboutSide((float)Math.PI * 0.5f);
+                    local.rotation.ApplyScaleLocal(0.75f);
+                    mesh.SetLocalFrame(local);
+                    entity.AddMesh(mesh, false);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug($"Marker mesh '{MarkerMeshes[i]}' unavailable: {ex.Message}");
+                }
+            }
+            return false;
         }
 
         private void Burst(string[] candidates, Vec3 position)
@@ -150,6 +191,8 @@ namespace Voidstep
             }
             return -1;
         }
+
+        private static string Format(Vec3 value) => $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
 
         private static readonly bool TorPresetAvailable = Type.GetType("TOR_Core.TOR_CoreSubModule, TOR_Core", false) != null;
         private static bool UseTorPreset() => TorPresetAvailable;

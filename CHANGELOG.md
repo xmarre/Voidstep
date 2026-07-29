@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.4
+
+- Restored `Ctrl+1` through `Ctrl+6` as the default ability controls.
+- Suppressed only the matching Bannerlord formation command while Ctrl is held, while preserving normal formation selection with plain `1` through `6`, including custom cross-remapped Ctrl+number ability bindings.
+- Disabled ability input entirely when the owned formation-suppression patches cannot be confirmed, preventing Ctrl+number abilities from running alongside native formation commands.
+- Fixed Voidstep Cleave disrupting the player's weapon state by removing the invalid victim-reaction action and capturing the wielded melee weapon before teleport and delayed hit processing.
+- Rejected bows, crossbows, shields, throwing weapons and other non-melee equipment before a Cleave cast starts.
+- Fixed Cleave registering ineffective hits by preserving the original weapon and guaranteeing a calculated native blow damage value when Bannerlord returns zero during synthetic collision construction.
+- Applied the Cleave target cap only to successfully registered hits, so an earlier failed blow no longer prevents later valid targets from being attempted.
+- Refunded Cleave energy and cooldown when the destination becomes invalid or the active sweep cannot begin after payment.
+- Replaced invisible empty targeting entities with visible mesh-backed world markers for Blink, Voidstep Cleave and Domino.
+- Aligned Blink, Voidstep Cleave and Windblast targeting with the mission camera instead of relying only on actor facing.
+- Fixed delayed Domino hit callbacks being able to propagate already-propagated damage again after the synchronous recursion guard had been released.
+- Added immediate Dark Vision highlighting on activation and counted only successful contour operations in diagnostics.
+- Added end-to-end diagnostics for every ability, including targeting, validation, teleport completion, candidate counts, registered hits, time control and linked targets.
+
 ## 1.0.3
 
 - Fixed Blink aim slowdown and Bend Time failing with `ArgumentOutOfRangeException` when Bannerlord could not find a time-speed request ID.

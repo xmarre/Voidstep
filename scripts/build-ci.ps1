@@ -1,7 +1,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.3"
+    [string]$Version = "1.0.4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +31,6 @@ try {
     Remove-Item $Dist -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $Artifacts, $Dist, $StageRoot | Out-Null
 
-    # Hash the exact tracked source snapshot before restore or compilation.
     & git archive --format=zip --output=$SourceArchive HEAD
     if ($LASTEXITCODE -ne 0) { throw "git archive failed." }
     $sourceHash = (Get-FileHash $SourceArchive -Algorithm SHA256).Hash.ToLowerInvariant()

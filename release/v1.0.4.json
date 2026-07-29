@@ -1,0 +1,6 @@
+{
+  "version": "v1.0.4",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Full ability execution, targeting visibility and Ctrl+number input correction."
+}

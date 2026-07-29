@@ -11,15 +11,17 @@ namespace Voidstep
         private readonly Mission _mission;
         private readonly BlowFactory _blows;
         private readonly EffectController _effects;
+        private readonly TargetingService _targeting;
         private readonly VoidstepLogger _logger;
         private readonly MBList<Agent> _nearby = new MBList<Agent>();
         private readonly HitRegistry<int> _hits = new HitRegistry<int>();
 
-        public WindblastController(Mission mission, BlowFactory blows, EffectController effects, VoidstepLogger logger)
+        public WindblastController(Mission mission, BlowFactory blows, EffectController effects, TargetingService targeting, VoidstepLogger logger)
         {
             _mission = mission;
             _blows = blows;
             _effects = effects;
+            _targeting = targeting;
             _logger = logger;
         }
 
@@ -32,11 +34,10 @@ namespace Voidstep
             var settings = VoidstepSettings.Current;
             _nearby.Clear();
             _mission.GetNearbyEnemyAgents(player.Position.AsVec2, settings.WindblastRange, player.Team, _nearby);
-            var forward = player.LookDirection;
-            forward.z = 0f;
-            if (forward.Normalize() < 0.001f) forward = Vec3.Forward;
+            var forward = _targeting.GetAimDirection(player);
             var minDot = (float)Math.Cos(settings.WindblastAngle * 0.5f * Math.PI / 180.0);
             var count = 0;
+            var candidates = _nearby.Count;
 
             try
             {
@@ -47,16 +48,16 @@ namespace Voidstep
                         continue;
                     if (!settings.WindblastMounts && target.IsMount)
                         continue;
-                    if ((!target.IsHuman && !target.IsMount) || !_hits.TryRegister(target.Index))
+                    if (!target.IsHuman && !target.IsMount)
                         continue;
 
-                    var delta = target.Position - player.Position;
+                    var delta = target.GetChestGlobalPosition() - player.GetChestGlobalPosition();
                     delta.z = 0f;
                     var distance = delta.Normalize();
                     if (distance <= 0.001f || distance > settings.WindblastRange)
                         continue;
                     var centre = Vec3.DotProduct(forward, delta);
-                    if (centre < minDot)
+                    if (centre < minDot || !_hits.TryRegister(target.Index))
                         continue;
 
                     var distanceFactor = 1f - Math.Min(1f, distance / settings.WindblastRange);
@@ -68,13 +69,17 @@ namespace Voidstep
                     if (forceFactor >= 0.6f)
                         flags |= BlowFlags.KnockDown;
                     if (_blows.ApplyDirectBlow(player, target, damage, DamageTypes.Blunt, flags, force))
+                    {
                         count++;
+                        _effects.Impact(target.GetChestGlobalPosition());
+                    }
                 }
 
                 if (count > 0)
                     _effects.Windblast(player.GetChestGlobalPosition() + forward * 1.2f);
                 if (settings.WindblastProjectiles)
-                    _logger.Debug("Projectile deflection was requested but remains disabled because Bannerlord 1.3.15 exposes no safe public missile-velocity mutation path.");
+                    _logger.Debug("Projectile deflection remains disabled because Bannerlord 1.3.15 exposes no safe public missile-velocity mutation path.");
+                _logger.Debug($"Windblast resolved candidates={candidates}, hits={count}, aim=({forward.x:0.00}, {forward.y:0.00}).");
             }
             finally
             {
