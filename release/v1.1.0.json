@@ -1,6 +1,6 @@
 {
   "version": "v1.1.0",
-  "channel": "stable",
+  "channel": "beta",
   "target": "merged-main",
-  "description": "Adds the unified Q selection wheel, Mouse2-confirmed casting, TOR wheel integration and explicit Domino propagation ownership."
+  "description": "Runtime-test prerelease for the unified Q selection wheel, Mouse2-confirmed casting, TOR wheel integration and explicit Domino propagation ownership. Promote only after the documented Bannerlord runtime matrix passes."
 }
