@@ -10,7 +10,7 @@ namespace Voidstep
     {
         internal static bool ShouldSuppress(GameKey gameKey)
         {
-            if (gameKey == null || !IsControlDown())
+            if (!VoidstepSubModule.InputSuppressionReady || gameKey == null || !IsControlDown())
                 return false;
 
             var settings = VoidstepSettings.Current;
