@@ -21,6 +21,7 @@ namespace Voidstep
             bool cancelDamage);
 
         private static readonly CreateMeleeBlowDelegate CreateNativeMeleeBlow = ResolveCreateMeleeBlow();
+        private static readonly MethodInfo GetSwingDamage = ResolveNoArgumentMethod(typeof(MissionWeapon), "GetModifiedSwingDamageForCurrentUsage");
 
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
@@ -34,21 +35,18 @@ namespace Voidstep
         public bool ApplyMeleeBlow(
             Agent attacker,
             Agent victim,
+            MissionWeapon weapon,
             float damageMultiplier,
             float knockback,
             float knockdownThreshold,
             float attackProgress,
             bool propagated = false)
         {
-            if (!IsValid(attacker, victim))
+            if (!IsValid(attacker, victim) || weapon.IsEmpty)
                 return false;
 
             try
             {
-                var weapon = attacker.WieldedWeapon;
-                if (weapon.IsEmpty)
-                    weapon = default(MissionWeapon);
-
                 var direction = victim.GetChestGlobalPosition() - attacker.GetChestGlobalPosition();
                 direction.z *= 0.25f;
                 if (direction.Normalize() < 0.001f)
@@ -78,11 +76,12 @@ namespace Voidstep
                     swing,
                     false);
 
-                if (damageMultiplier != 1f)
-                {
-                    blow.InflictedDamage = Math.Max(0, (int)Math.Round(blow.InflictedDamage * damageMultiplier));
-                    blow.BaseMagnitude *= damageMultiplier;
-                }
+                var nativeDamage = blow.InflictedDamage;
+                if (nativeDamage <= 0)
+                    nativeDamage = ResolveMinimumWeaponDamage(weapon);
+                blow.InflictedDamage = Math.Max(1, (int)Math.Round(nativeDamage * Math.Max(0.05f, damageMultiplier)));
+                blow.BaseMagnitude = Math.Max(blow.BaseMagnitude * Math.Max(0.05f, damageMultiplier), blow.InflictedDamage);
+                blow.DamageCalculated = true;
 
                 if (knockback > 0f)
                 {
@@ -95,6 +94,7 @@ namespace Voidstep
                     blow.BlowFlag |= BlowFlags.NoSound;
 
                 victim.RegisterBlow(blow, in collision);
+                _logger.Debug($"Registered cleave blow attacker={attacker.Index}, victim={victim.Index}, damage={blow.InflictedDamage}, magnitude={blow.BaseMagnitude:0.00}.");
                 return true;
             }
             catch (Exception ex)
@@ -139,6 +139,38 @@ namespace Voidstep
             }
         }
 
+        private static int ResolveMinimumWeaponDamage(MissionWeapon weapon)
+        {
+            if (GetSwingDamage != null)
+            {
+                try
+                {
+                    object boxed = weapon;
+                    var value = GetSwingDamage.Invoke(boxed, null);
+                    if (value != null)
+                    {
+                        var damage = Convert.ToInt32(value);
+                        if (damage > 0) return damage;
+                    }
+                }
+                catch
+                {
+                }
+            }
+            return 25;
+        }
+
+        private static MethodInfo ResolveNoArgumentMethod(Type type, string name)
+        {
+            try
+            {
+                return type.GetMethod(name, BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
 
         private static CreateMeleeBlowDelegate ResolveCreateMeleeBlow()
         {
