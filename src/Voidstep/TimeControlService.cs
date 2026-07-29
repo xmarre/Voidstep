@@ -223,14 +223,20 @@ namespace Voidstep
 
         private void CaptureCurrentMountSnapshot()
         {
-            _mount = _player?.MountAgent;
-            if (_mount != null && !_mount.IsActive()) _mount = null;
+            var mount = _player?.MountAgent;
+            if (mount != null && !mount.IsActive()) mount = null;
+            _mount = mount;
+            TryCaptureMountSnapshot(mount, "mount-speed");
+        }
+
+        private void TryCaptureMountSnapshot(Agent mount, string label)
+        {
             _mountDrivenSnapshotCaptured = false;
-            if (_mount == null) return;
+            if (mount == null) return;
 
             try
             {
-                var driven = _mount.AgentDrivenProperties;
+                var driven = mount.AgentDrivenProperties;
                 if (driven == null) return;
                 _originalMountSpeed = driven.MountSpeed;
                 _originalMountManeuver = driven.MountManeuver;
@@ -239,7 +245,7 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                _logger.Debug("Bend Time mount-speed snapshot unavailable: " + ex.Message);
+                _logger.Debug($"Bend Time {label} snapshot unavailable: {ex.Message}");
             }
         }
 
@@ -250,23 +256,8 @@ namespace Voidstep
             if (ReferenceEquals(current, _mount)) return;
 
             RestoreMountProperties();
-            _mount = null;
-            _mountDrivenSnapshotCaptured = false;
-            if (current == null) return;
             _mount = current;
-            try
-            {
-                var driven = current.AgentDrivenProperties;
-                if (driven == null) return;
-                _originalMountSpeed = driven.MountSpeed;
-                _originalMountManeuver = driven.MountManeuver;
-                _originalMountDashAcceleration = driven.MountDashAccelerationMultiplier;
-                _mountDrivenSnapshotCaptured = true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug("Bend Time replacement-mount snapshot unavailable: " + ex.Message);
-            }
+            TryCaptureMountSnapshot(current, "replacement-mount");
         }
 
         private void ApplyPlayerCompensation(float compensation)
@@ -276,6 +267,7 @@ namespace Voidstep
                 try
                 {
                     var driven = _player.AgentDrivenProperties;
+                    RefreshPlayerBaselinesAfterExternalUpdate(driven);
                     _appliedMaxSpeedMultiplier = _originalMaxSpeedMultiplier * compensation;
                     _appliedCombatMaxSpeedMultiplier = _originalCombatMaxSpeedMultiplier * compensation;
                     _appliedTopSpeedReachDuration = Math.Max(0.01f, _originalTopSpeedReachDuration / compensation);
@@ -305,6 +297,7 @@ namespace Voidstep
                 try
                 {
                     var driven = _mount.AgentDrivenProperties;
+                    RefreshMountBaselinesAfterExternalUpdate(driven);
                     _appliedMountSpeed = _originalMountSpeed * compensation;
                     _appliedMountManeuver = _originalMountManeuver * compensation;
                     _appliedMountDashAcceleration = _originalMountDashAcceleration * compensation;
@@ -320,6 +313,38 @@ namespace Voidstep
             }
 
             SetActionSpeeds(compensation);
+        }
+
+        private void RefreshPlayerBaselinesAfterExternalUpdate(AgentDrivenProperties driven)
+        {
+            if (!_playerPropertiesApplied) return;
+            if (!Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier))
+                _originalMaxSpeedMultiplier = driven.MaxSpeedMultiplier;
+            if (!Approximately(driven.CombatMaxSpeedMultiplier, _appliedCombatMaxSpeedMultiplier))
+                _originalCombatMaxSpeedMultiplier = driven.CombatMaxSpeedMultiplier;
+            if (!Approximately(driven.TopSpeedReachDuration, _appliedTopSpeedReachDuration))
+                _originalTopSpeedReachDuration = driven.TopSpeedReachDuration;
+            if (!Approximately(driven.SwingSpeedMultiplier, _appliedSwingSpeedMultiplier))
+                _originalSwingSpeedMultiplier = driven.SwingSpeedMultiplier;
+            if (!Approximately(driven.ThrustOrRangedReadySpeedMultiplier, _appliedReadySpeedMultiplier))
+                _originalReadySpeedMultiplier = driven.ThrustOrRangedReadySpeedMultiplier;
+            if (!Approximately(driven.ReloadSpeed, _appliedReloadSpeed))
+                _originalReloadSpeed = driven.ReloadSpeed;
+            if (!Approximately(driven.BipedalRangedReadySpeedMultiplier, _appliedRangedReadySpeedMultiplier))
+                _originalRangedReadySpeedMultiplier = driven.BipedalRangedReadySpeedMultiplier;
+            if (!Approximately(driven.BipedalRangedReloadSpeedMultiplier, _appliedRangedReloadSpeedMultiplier))
+                _originalRangedReloadSpeedMultiplier = driven.BipedalRangedReloadSpeedMultiplier;
+        }
+
+        private void RefreshMountBaselinesAfterExternalUpdate(AgentDrivenProperties driven)
+        {
+            if (!_mountPropertiesApplied) return;
+            if (!Approximately(driven.MountSpeed, _appliedMountSpeed))
+                _originalMountSpeed = driven.MountSpeed;
+            if (!Approximately(driven.MountManeuver, _appliedMountManeuver))
+                _originalMountManeuver = driven.MountManeuver;
+            if (!Approximately(driven.MountDashAccelerationMultiplier, _appliedMountDashAcceleration))
+                _originalMountDashAcceleration = driven.MountDashAccelerationMultiplier;
         }
 
         private void RestoreCompensation()
@@ -383,12 +408,12 @@ namespace Voidstep
         private void SetActionSpeeds(float speed)
         {
             if (_player == null || !_player.IsActive()) return;
-            _actionSpeedsApplied = true;
             for (var channel = 0; channel < 4; channel++)
             {
                 try
                 {
                     _player.SetCurrentActionSpeed(channel, speed);
+                    _actionSpeedsApplied = true;
                 }
                 catch (Exception ex)
                 {
