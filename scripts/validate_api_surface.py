@@ -132,17 +132,81 @@ REQUIRED = {
     },
     "TaleWorlds.InputSystem.dll": {
         "TaleWorlds.InputSystem.InputKey": {
-            "__fields__": ["Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6"],
+            "__fields__": ["Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Q", "RightMouseButton", "Escape"],
         },
         "TaleWorlds.InputSystem.IInputContext": {
             "IsKeyPressed": [["TaleWorlds.InputSystem.InputKey"]],
             "IsKeyDown": [["TaleWorlds.InputSystem.InputKey"]],
         },
+        "TaleWorlds.InputSystem.Input": {
+            "SetMousePosition": [["int", "int"]],
+            "get_MousePositionPixel": [[]],
+        },
+    },
+    "TOR_Core.dll": {
+        "TOR_Core.AbilitySystem.Ability": {
+            "get_StringID": [[]],
+            "get_Template": [[]],
+            "IsDisabled": [["TaleWorlds.MountAndBlade.Agent", "ref TaleWorlds.Localization.TextObject"]],
+            "TryCast": [["TaleWorlds.MountAndBlade.Agent", "ref TaleWorlds.Localization.TextObject"]],
+            "DoCast": [["TaleWorlds.MountAndBlade.Agent"]],
+            "SetCrosshair": [["TOR_Core.AbilitySystem.Crosshairs.AbilityCrosshair"]],
+        },
+        "TOR_Core.AbilitySystem.Spells.Spell": {
+            "IsDisabled": [["TaleWorlds.MountAndBlade.Agent", "ref TaleWorlds.Localization.TextObject"]],
+            "DoCast": [["TaleWorlds.MountAndBlade.Agent"]],
+        },
+        "TOR_Core.AbilitySystem.AbilityComponent": {
+            "get_KnownAbilitySystem": None,
+            "get_CurrentAbility": [[]],
+        },
+        "TOR_Core.AbilitySystem.AbilityFactory": {
+            "InitializeAbility": [["TOR_Core.AbilitySystem.AbilityTemplate", "TaleWorlds.MountAndBlade.Agent"]],
+            "InitializeCrosshair": [["TOR_Core.AbilitySystem.AbilityTemplate"]],
+        },
+        "TOR_Core.AbilitySystem.AbilityManagerMissionLogic": {
+            "get_CurrentState": [[]],
+            "DisableAbilityMode": [["bool", "TaleWorlds.Localization.TextObject"]],
+        },
+        "TOR_Core.AbilitySystem.AbilityTemplate": {
+            "set_StringID": [["string"]],
+            "set_Name": [["string"]],
+            "set_SpriteName": [["string"]],
+            "set_TooltipDescription": [["string"]],
+            "set_AbilityType": [["TOR_Core.AbilitySystem.AbilityType"]],
+            "set_AbilityTargetType": [["TOR_Core.AbilitySystem.AbilityTargetType"]],
+            "set_CrosshairType": [["TOR_Core.AbilitySystem.Crosshairs.CrosshairType"]],
+            "set_CastType": [["TOR_Core.AbilitySystem.CastType"]],
+            "set_CoolDown": [["int"]],
+            "set_WindsOfMagicCost": [["int"]],
+            "set_CastTime": [["float"]],
+            "set_Duration": [["float"]],
+            "set_Radius": [["float"]],
+            "set_MinDistance": [["float"]],
+            "set_MaxDistance": [["float"]],
+            "set_MaxDistanceSpecified": [["bool"]],
+            "set_TargetCapturingRadius": [["float"]],
+            "set_BelongsToLoreID": [["string"]],
+        },
+        "TOR_Core.AbilitySystem.AbilityType": {
+            "__fields__": ["Spell"],
+        },
+        "TOR_Core.AbilitySystem.AbilityTargetType": {
+            "__fields__": ["WorldPosition"],
+        },
+        "TOR_Core.AbilitySystem.Crosshairs.CrosshairType": {
+            "__fields__": ["Pointer"],
+        },
+        "TOR_Core.AbilitySystem.CastType": {
+            "__fields__": ["Instant"],
+        },
     },
 }
 
+
 def signatures(methods, name):
     return [[p["type"] for p in m["params"]] for m in methods if m["name"] == name]
+
 
 def validate(root: Path):
     failures = []
@@ -177,7 +241,8 @@ def validate(root: Path):
         for failure in failures:
             print("FAIL:", failure)
         raise SystemExit(1)
-    print(f"Validated {checks} Bannerlord 1.3.15 API surface checks.")
+    print(f"Validated {checks} Bannerlord 1.3.15 / TOR 1.16 API surface checks.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
