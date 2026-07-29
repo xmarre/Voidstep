@@ -101,7 +101,7 @@ namespace Voidstep
                     _readyNoticeShown = true;
                     var controls = VoidstepInputBindings.GetSummary();
                     _logger.Info($"Runtime ready. Controls: {controls}.");
-                    TryDisplayNotice($"Voidstep v1.0.7 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
+                    TryDisplayNotice($"Voidstep v1.0.8 active — {controls}. Rebind primary keys in Options > Keybindings > Voidstep.");
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
