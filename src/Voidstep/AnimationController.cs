@@ -44,9 +44,9 @@ namespace Voidstep
             try
             {
                 actor.SetCurrentActionSpeed(1, 0.01f);
-                actor.SetCurrentActionProgress(1, 0f);
                 _cleaveActor = actor;
                 _cleaveActionOwned = true;
+                actor.SetCurrentActionProgress(1, 0f);
             }
             catch (Exception ex)
             {
