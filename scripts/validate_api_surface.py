@@ -88,8 +88,11 @@ REQUIRED = {
             "Remove": [["int"]],
         },
         "TaleWorlds.Engine.Mesh": {
+            "GetFromResource": None,
             "CreateMeshWithMaterial": None,
             "GetMaterial": None,
+            "set_Color": None,
+            "set_Color2": None,
             "LockEditDataWrite": None,
             "AddTriangle": None,
             "UnlockEditDataWrite": None,
@@ -97,6 +100,9 @@ REQUIRED = {
             "ComputeTangents": None,
             "RecomputeBoundingBox": None,
             "PreloadForRendering": None,
+        },
+        "TaleWorlds.Engine.ParticleSystem": {
+            "CreateParticleSystemAttachedToEntity": None,
         },
     },
     "TaleWorlds.InputSystem.dll": {
