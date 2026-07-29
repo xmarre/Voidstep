@@ -7,12 +7,19 @@ namespace Voidstep
 {
     internal static class MissionOrderInputSuppression
     {
+        // Bannerlord 1.3.15 CombatHotKeyCategory registers Attack and Defend as GameKey IDs 9 and 10.
+        private const int Attack = 9;
+        private const int Defend = 10;
+
         // Bannerlord's MissionOrderHotkeyCategory registers SelectOrder1..6 as GameKey IDs 69..74.
         private const int SelectOrder1 = 69;
         private const int SelectOrder6 = 74;
 
         internal static bool ShouldSuppress(int gameKeyId)
         {
+            if (gameKeyId == Attack || gameKeyId == Defend)
+                return VoidstepWheelRuntime.ShouldSuppress(InputKey.RightMouseButton);
+
             if (!TryGetNumberRowKey(gameKeyId, out var inputKey))
                 return false;
 
