@@ -220,28 +220,36 @@ namespace Voidstep
             if (!_selected.HasValue || _previewCreationDisabled)
                 return;
 
-            _positions.Clear();
-            var ability = _selected.Value;
-            var color = AbilityPresentation.MarkerColor(ability);
-            switch (ability)
+            VoidstepProgressionRuntimeScope.Enter();
+            try
             {
-                case AbilityId.VoidstepCleave:
-                    BuildCleavePreview(player, ref color);
-                    break;
-                case AbilityId.Windblast:
-                    BuildWindblastPreview(player);
-                    break;
-                case AbilityId.BendTime:
-                    BuildRadiusPreview(player.Position, 2.4f, 8);
-                    break;
-                case AbilityId.Domino:
-                    BuildDominoPreview(player);
-                    break;
-                case AbilityId.DarkVision:
-                    BuildRadiusPreview(player.Position, Math.Min(8f, Math.Max(3f, VoidstepSettings.Current.DarkVisionRange * 0.22f)), 10);
-                    break;
+                _positions.Clear();
+                var ability = _selected.Value;
+                var color = AbilityPresentation.MarkerColor(ability);
+                switch (ability)
+                {
+                    case AbilityId.VoidstepCleave:
+                        BuildCleavePreview(player, ref color);
+                        break;
+                    case AbilityId.Windblast:
+                        BuildWindblastPreview(player);
+                        break;
+                    case AbilityId.BendTime:
+                        BuildRadiusPreview(player.Position, 2.4f, 8);
+                        break;
+                    case AbilityId.Domino:
+                        BuildDominoPreview(player);
+                        break;
+                    case AbilityId.DarkVision:
+                        BuildRadiusPreview(player.Position, Math.Min(8f, Math.Max(3f, VoidstepSettings.Current.DarkVisionRange * 0.22f)), 10);
+                        break;
+                }
+                ApplyPreview(_positions, color);
             }
-            ApplyPreview(_positions, color);
+            finally
+            {
+                VoidstepProgressionRuntimeScope.Exit();
+            }
         }
 
         private void BuildCleavePreview(Agent player, ref uint color)
