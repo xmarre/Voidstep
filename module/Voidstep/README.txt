@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.1.1
+VOIDSTEP — ARCANE MELEE ABILITIES v1.2.0
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional integration: The Old Realms 1.16
 
@@ -6,6 +6,8 @@ INSTALLATION
 Delete any older Modules/Voidstep folder first, then extract this archive into the Bannerlord game directory. The result must include:
 Modules/Voidstep/SubModule.xml
 Modules/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml
+Modules/Voidstep/GUI/Prefabs/VoidstepCharacterButton.xml
+Modules/Voidstep/GUI/Prefabs/VoidstepMastery.xml
 Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll
 Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.Core.dll
 
@@ -25,6 +27,18 @@ TOR INTEGRATION
 When TOR 1.16 is loaded, the six entries appear in TOR's existing Q ability wheel with [Voidstep] names and distinct icons. TOR exposes a flat known-ability list, so the entries are grouped by their shared prefix rather than a nested sub-wheel.
 Voidstep releases TOR's temporary targeting stance after selection and restores wielded items and weapon bindings without taking ownership of native mouse-wheel weapon cycling.
 Without TOR, Voidstep loads its own display-only six-segment Q wheel using the same selection and Mouse2 confirmation pipeline.
+
+VOIDSTEP MASTERY
+Mastery progression is optional and disabled by default.
+Enable it under MCM > Voidstep — Mastery Progression > Progression.
+The system provides 99 mastery ranks and 19 skills across Core, Mobility, Force, Dominion, Reservoir and Convergence branches.
+Successful ability use awards bounded mastery XP. Each mastery rank grants one skill point.
+Foundation skills unlock the six abilities. Later skills reduce energy costs and cooldowns, raise progression energy and regeneration caps, and unlock advanced configured options.
+The final Avatar of the Void capstone is fully reachable within the rank-99 point budget.
+Disabling progression immediately restores unrestricted use of the normal Voidstep MCM configuration.
+
+Open the mastery tree using the Voidstep Mastery button on the native Character screen or Ctrl+Shift+V on the campaign map.
+The Character-screen button uses a deferred state transition and does not push the mastery UI until Bannerlord has returned to a settled campaign map.
 
 DIRECT SELECTORS
 Ctrl+1: select Voidstep Cleave
@@ -49,5 +63,10 @@ Domino links are persistent effects, not an active cast lock. Other abilities re
 TIME CONTROL
 Blink freezes mission time during destination selection while camera and confirmation input remain responsive through application-time updates.
 Bend Time slows the outside world while compensating locomotion, combat movement, swing, ready, reload, the two verified native action channels, the native maximum-speed multiplier and the controlled mount. Cleanup restores normal driven properties, action speed and native speed limits together when the effect ends.
+
+PERFORMANCE
+The combat runtime remains mission-scoped.
+Progression stores only hero-keyed integer data and registers no campaign-map, hourly or daily tick.
+Mission reads use one immutable cached mastery profile with no per-tick progression allocation or agent scan.
 
 Enable Debug logging in MCM when reporting a problem. The log is written to Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log.
