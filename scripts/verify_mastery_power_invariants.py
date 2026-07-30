@@ -43,6 +43,13 @@ getter_methods = {
     "DarkVisionRefreshInterval": "EffectiveDarkVisionRefreshInterval",
 }
 
+wall_traversal_method = """internal bool AllowWallTraversal(bool configured)
+        {
+            return Enabled
+                ? configured && Level(VoidstepSkillId.MomentumWeave) >= 10
+                : configured;
+        }"""
+
 checks = {
     "all combat parameter getters are progression patched": all(
         f'"get_{getter}"' in patches and method in patches
@@ -71,9 +78,7 @@ checks = {
         and "range, radius, force, damage and duration" in catalog
     ),
     "sealed wall traversal has exactly the documented late mastery gate": (
-        "AllowWallTraversal" in profile
-        and "configured && Level(VoidstepSkillId.MomentumWeave) >= 10" in profile
-        and "|| Level(VoidstepSkillId.AvatarOfTheVoid)" not in profile
+        wall_traversal_method in profile
         and '"get_BlinkThroughWalls"' in patches
     ),
     "unlimited cleave targets require the final capstone": (
