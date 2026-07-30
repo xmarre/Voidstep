@@ -105,7 +105,7 @@ namespace Voidstep
                     _readyNoticeShown = true;
                     var wheelName = _wheel.UsesTorWheel ? "TOR Q cast wheel" : "Voidstep Q cast wheel";
                     _logger.Info($"Runtime ready. Selection: {wheelName}; confirm=RightMouseButton. Direct selectors: {VoidstepInputBindings.GetSummary()}.");
-                    TryDisplayNotice($"Voidstep v1.1.0 active — Q selects an ability; Right Mouse Button casts. Using {wheelName}.");
+                    TryDisplayNotice($"Voidstep v1.2.2 active — Q selects an ability; Right Mouse Button casts. Using {wheelName}.");
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {

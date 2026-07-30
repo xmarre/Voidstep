@@ -43,7 +43,7 @@ namespace Voidstep
         {
             base.OnSubModuleLoad();
             _logger = new VoidstepLogger();
-            _logger.Info("Voidstep v1.2.0 submodule loaded.");
+            _logger.Info("Voidstep v1.2.2 submodule loaded.");
             InputSuppressionReady = false;
             NativeHotkeysReady = false;
             try
