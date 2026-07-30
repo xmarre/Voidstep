@@ -162,6 +162,12 @@ checks = {
         and "IsCampaignMapScreen" in submodule
         and "ScreenManager.PushScreen(new VoidstepMasteryScreen())" in submodule
     ),
+    "mastery screen is closed before progression teardown": (
+        submodule.count("CloseMasteryScreen();") == 2
+        and "private static void CloseMasteryScreen()" in submodule
+        and "if (ScreenManager.TopScreen is VoidstepMasteryScreen)" in submodule
+        and "ScreenManager.PopScreen();" in submodule
+    ),
     "shortcut avoids Guided Arrow control-U": (
         "InputKey.V" in submodule
         and "InputKey.LeftShift" in submodule
