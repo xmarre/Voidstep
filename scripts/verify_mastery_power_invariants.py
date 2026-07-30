@@ -98,10 +98,14 @@ checks = {
         "DominoMaximumLinks(", "DominoDamageFactor(", "DominoRange(",
         "DarkVisionRange(", "DarkVisionRefreshInterval(",
     )),
-    "efficiency is secondary rather than the whole tree": (
-        "return Math.Max(0.65f, multiplier);" in catalog
-        and "supports ability growth rather than replacing it" in catalog
-        and "range, radius, force, damage and duration" in catalog
+    "efficiency remains capped while mechanical growth spans every branch": (
+        catalog.count("return Math.Max(0.65f, multiplier);") == 2
+        and all(token in catalog for token in (
+            "VoidstepRange(", "BlinkRange(", "CleaveRadius(",
+            "WindblastForce(", "BendTimeDuration(", "BendTimeFactor(",
+            "DominoRange(", "DominoDamageFactor(",
+            "DarkVisionRange(", "DarkVisionRefreshInterval(",
+        ))
     ),
     "sealed wall traversal has exactly the documented late mastery gate": (
         wall_traversal_method in profile
