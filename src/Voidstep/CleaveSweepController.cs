@@ -6,6 +6,76 @@ using Voidstep.Core;
 
 namespace Voidstep
 {
+    internal readonly struct CleaveExecutionSnapshot
+    {
+        private CleaveExecutionSnapshot(
+            Vec3 initialFacing,
+            float teleportRange,
+            float sweepDegrees,
+            bool clockwise,
+            float radius,
+            float damageMultiplier,
+            float knockback,
+            float knockdownThreshold,
+            int maximumTargets,
+            bool friendlyFire,
+            bool targetMounts,
+            bool snapshotTargets)
+        {
+            InitialFacing = initialFacing;
+            TeleportRange = teleportRange;
+            SweepDegrees = sweepDegrees;
+            Clockwise = clockwise;
+            Radius = radius;
+            DamageMultiplier = damageMultiplier;
+            Knockback = knockback;
+            KnockdownThreshold = knockdownThreshold;
+            MaximumTargets = maximumTargets;
+            FriendlyFire = friendlyFire;
+            TargetMounts = targetMounts;
+            SnapshotTargets = snapshotTargets;
+        }
+
+        internal Vec3 InitialFacing { get; }
+        internal float TeleportRange { get; }
+        internal float SweepDegrees { get; }
+        internal bool Clockwise { get; }
+        internal float Radius { get; }
+        internal float DamageMultiplier { get; }
+        internal float Knockback { get; }
+        internal float KnockdownThreshold { get; }
+        internal int MaximumTargets { get; }
+        internal bool FriendlyFire { get; }
+        internal bool TargetMounts { get; }
+        internal bool SnapshotTargets { get; }
+        internal double SweepRadians => SweepDegrees * Math.PI / 180.0;
+        internal double SignedSweepRadians => (Clockwise ? -1.0 : 1.0) * SweepRadians;
+        internal SweepDirection Direction => Clockwise ? SweepDirection.Clockwise : SweepDirection.CounterClockwise;
+        internal double StartAngle => AngleMath.NormalizeRadians(Math.Atan2(InitialFacing.y, InitialFacing.x));
+
+        internal static CleaveExecutionSnapshot Capture(Agent actor, VoidstepSettings settings)
+        {
+            var facing = actor != null ? actor.LookDirection : Vec3.Forward;
+            facing.z = 0f;
+            if (facing.Normalize() < 0.001f)
+                facing = Vec3.Forward;
+
+            return new CleaveExecutionSnapshot(
+                facing,
+                settings.VoidstepRange,
+                settings.CleaveSweepDegrees,
+                settings.CleaveClockwise,
+                settings.CleaveRadius,
+                settings.CleaveDamageMultiplier,
+                settings.CleaveKnockback,
+                settings.CleaveKnockdownThreshold,
+                settings.MaximumCleaveTargets,
+                settings.CleaveFriendlyFire,
+                settings.CleaveMounts,
+                settings.CleaveSnapshotTargets);
+        }
+    }
+
     internal sealed class CleaveSweepController
     {
         private readonly Mission _mission;
@@ -54,7 +124,7 @@ namespace Voidstep
         public float Progress => _duration <= 0f ? 1f : Math.Min(1f, _elapsed / _duration);
         public int SuccessfulHits => _successfulHits;
 
-        public bool Begin(Agent actor, MissionWeapon weapon, out string failure)
+        public bool Begin(Agent actor, MissionWeapon weapon, CleaveExecutionSnapshot snapshot, out string failure)
         {
             Cleanup();
             failure = null;
@@ -71,36 +141,32 @@ namespace Voidstep
 
             _actor = actor;
             _weapon = weapon;
-            var settings = VoidstepSettings.Current;
             _duration = 0.72f;
-            _sweepRadians = settings.CleaveSweepDegrees * Math.PI / 180.0;
-            _direction = settings.CleaveClockwise ? SweepDirection.Clockwise : SweepDirection.CounterClockwise;
-            _radius = settings.CleaveRadius;
-            _damageMultiplier = settings.CleaveDamageMultiplier;
-            _knockback = settings.CleaveKnockback;
-            _knockdownThreshold = settings.CleaveKnockdownThreshold;
-            _maximumTargets = settings.MaximumCleaveTargets;
-            _friendlyFire = settings.CleaveFriendlyFire;
-            _targetMounts = settings.CleaveMounts;
-            _snapshotTargets = settings.CleaveSnapshotTargets;
+            _sweepRadians = snapshot.SweepRadians;
+            _direction = snapshot.Direction;
+            _radius = snapshot.Radius;
+            _damageMultiplier = snapshot.DamageMultiplier;
+            _knockback = snapshot.Knockback;
+            _knockdownThreshold = snapshot.KnockdownThreshold;
+            _maximumTargets = snapshot.MaximumTargets;
+            _friendlyFire = snapshot.FriendlyFire;
+            _targetMounts = snapshot.TargetMounts;
+            _snapshotTargets = snapshot.SnapshotTargets;
             _trailAccumulator = 0f;
             _trailBursts = 0;
             _successfulHits = 0;
             _largestCandidateSet = 0;
-            var look = actor.LookDirection;
-            look.z = 0f;
-            if (look.Normalize() < 0.001f) look = Vec3.Forward;
-            var facing = Math.Atan2(look.y, look.x);
-            _startAngle = AngleMath.NormalizeRadians(facing);
+            _startAngle = snapshot.StartAngle;
             _active = true;
             _elapsed = 0f;
             _lastProgress = 0f;
             _animation.BeginCleave(actor);
+            _animation.SetActorFacing(actor, _startAngle);
 
             if (_snapshotTargets)
                 CaptureSnapshot();
 
-            _logger.Debug($"Cleave started actor={actor.Index}, radius={_radius:0.00}, sweep={settings.CleaveSweepDegrees:0}, snapshot={_snapshotTargets}.");
+            _logger.Debug($"Cleave started actor={actor.Index}, radius={_radius:0.00}, sweep={snapshot.SweepDegrees:0}, snapshot={_snapshotTargets}, facing={_startAngle:0.000}.");
             return true;
         }
 
@@ -115,9 +181,8 @@ namespace Voidstep
 
             _elapsed += Math.Max(0f, dt);
             var progress = Progress;
-            var deltaProgress = Math.Max(0f, progress - _lastProgress);
-            var rotation = (float)((int)_direction * _sweepRadians * deltaProgress);
-            _animation.RotateActor(_actor, rotation);
+            var absoluteFacing = _startAngle + (int)_direction * _sweepRadians * progress;
+            _animation.SetActorFacing(_actor, absoluteFacing);
             _animation.SetCleaveProgress(_actor, progress);
             _trailAccumulator += Math.Max(0f, dt);
             if (_trailAccumulator >= 0.06f && _trailBursts < 12)
