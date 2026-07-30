@@ -1,0 +1,6 @@
+{
+  "version": "v1.2.3",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable release restoring runtime patch installation, confirming mastery unlocks in battle, and expanding spell effects across all Voidstep abilities."
+}
