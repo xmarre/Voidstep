@@ -96,6 +96,7 @@ cleave = read('src/Voidstep/CleaveSweepController.cs')
 animation = read('src/Voidstep/AnimationController.cs')
 cast_animation = read('src/Voidstep/AbilityCastAnimationPatch.cs')
 blink = read('src/Voidstep/BlinkController.cs')
+facing_guard = read('src/Voidstep/CleaveFacingGuardPatches.cs')
 
 bend_time_code = mask_csharp_noncode(bend_time)
 max_speed_code = mask_csharp_noncode(max_speed)
@@ -103,6 +104,7 @@ domino_repair_code = mask_csharp_noncode(domino_repair)
 tor_weapon_code = mask_csharp_noncode(tor_weapon)
 ability_manager_code = mask_csharp_noncode(ability_manager)
 cleave_code = mask_csharp_noncode(cleave)
+facing_guard_code = mask_csharp_noncode(facing_guard)
 
 teleport_capture = ability_manager.find('var actorFacing = CaptureHorizontalFacing(actor);')
 teleport_actor = ability_manager.find('actor.TeleportToPosition(position)')
@@ -194,14 +196,30 @@ checks = {
         'public bool Begin(Agent actor, MissionWeapon weapon, CleaveExecutionSnapshot snapshot, out string failure)' in cleave and
         'settings.CleaveSweepDegrees' in cleave and
         'VoidstepSettings.Current' not in cleave_code.split('public bool Begin(', 1)[1].split('public bool Tick(', 1)[0],
-    'Cleave visual yaw is absolute from the immutable scheduled start angle':
+    'Cleave virtual sweep yaw is absolute from the immutable scheduled start angle':
         'var absoluteFacing = _startAngle + (int)_direction * _sweepRadians * progress;' in cleave and
         '_animation.SetActorFacing(_actor, absoluteFacing);' in cleave and
         '_animation.RotateActor(_actor, rotation);' not in cleave_code,
-    'Cleave recovery is absolute and finishes on the original facing':
+    'Cleave recovery calculation is absolute and finishes on the stored facing':
         'facing.RotateAboutZ((float)(_cleaveSnapshot.SignedSweepRadians + _castRecoveryRadians * progress));' in ability_manager and
         ability_manager.count('_animation.SetActorFacing(player, _castOriginalLook);') >= 4 and
         '_recoveryRotationProgress' not in ability_manager_code,
+    'Cleave restores the live facing after every tick including exceptions':
+        '[HarmonyPatch(typeof(AbilityManager), "TickVoidstep")]' in facing_guard and
+        '__state = CleaveFacingState.Capture(player);' in facing_guard and
+        'private static Exception Finalizer(' in facing_guard and
+        '__state.Restore(__instance?.Logger, "Cleave tick");' in facing_guard,
+    'Cleave cancellation cannot restore the stale pre-wind-up facing':
+        '[HarmonyPatch(typeof(AbilityManager), "CancelCurrent")]' in facing_guard and
+        '__instance.ActiveAbility != AbilityId.VoidstepCleave' in facing_guard and
+        'actor.Index != ____castActorIndex' in facing_guard and
+        '__state.Restore(__instance?.Logger, "Cleave cancellation");' in facing_guard,
+    'Cleave facing guard covers rider and mount without static mission ownership':
+        'Mount.LookDirection = MountFacing;' in facing_guard and
+        'Actor.LookDirection = ActorFacing;' in facing_guard and
+        'static Agent' not in facing_guard_code and
+        'List<Agent>' not in facing_guard_code and
+        'Dictionary<int, Agent>' not in facing_guard_code,
     'Blink reports frozen targeting only while it owns the zero-speed request':
         '_hud.Show(_ownsTimeRequest' in blink and
         'timeFrozen={_ownsTimeRequest}' in blink,
