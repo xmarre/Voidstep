@@ -1,4 +1,3 @@
-using HarmonyLib;
 using Voidstep.Core;
 
 namespace Voidstep
@@ -50,26 +49,6 @@ namespace Voidstep
             var required = VoidstepSkillCatalog.RequiredSkill(ability);
             if (profile.Level(required) != behavior.GetSkillLevel(required))
                 VoidstepProgressionService.NotifyChanged();
-        }
-    }
-
-    [HarmonyPatch(typeof(AbilityContext), MethodType.Constructor)]
-    internal static class ProgressionMissionBoundarySynchronizationPatch
-    {
-        [HarmonyPriority(Priority.First)]
-        private static void Prefix()
-        {
-            VoidstepProgressionBoundarySynchronizer.SynchronizeAll();
-        }
-    }
-
-    [HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.TryActivate))]
-    internal static class ProgressionActivationBoundarySynchronizationPatch
-    {
-        [HarmonyPriority(Priority.First)]
-        private static void Prefix(AbilityId ability)
-        {
-            VoidstepProgressionBoundarySynchronizer.SynchronizeUnlock(ability);
         }
     }
 }
