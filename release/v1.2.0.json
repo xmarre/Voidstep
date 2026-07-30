@@ -1,0 +1,6 @@
+{
+  "version": "v1.2.0",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable release adding the optional level-99 Voidstep Mastery system, campaign-persisted progression, native Character-screen integration, ability unlocks, skill-driven energy and cooldown scaling, and verified release packaging."
+}
