@@ -27,22 +27,6 @@ namespace Voidstep
         }
     }
 
-    [HarmonyPatch(typeof(AbilityContext), MethodType.Constructor)]
-    internal static class ProgressionAbilityContextScopePatch
-    {
-        private static void Prefix()
-        {
-            VoidstepProgressionBoundarySynchronizer.SynchronizeAll();
-            VoidstepProgressionRuntimeScope.Enter();
-        }
-
-        private static Exception Finalizer(Exception __exception)
-        {
-            VoidstepProgressionRuntimeScope.Exit();
-            return __exception;
-        }
-    }
-
     [HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.Tick))]
     internal static class ProgressionAbilityTickScopePatch
     {
