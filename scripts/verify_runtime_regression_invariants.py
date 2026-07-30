@@ -196,30 +196,42 @@ checks = {
         'public bool Begin(Agent actor, MissionWeapon weapon, CleaveExecutionSnapshot snapshot, out string failure)' in cleave and
         'settings.CleaveSweepDegrees' in cleave and
         'VoidstepSettings.Current' not in cleave_code.split('public bool Begin(', 1)[1].split('public bool Tick(', 1)[0],
-    'Cleave virtual sweep yaw is absolute from the immutable scheduled start angle':
+    'legacy Cleave yaw remains virtual and is suppressed before native facing writes':
         'var absoluteFacing = _startAngle + (int)_direction * _sweepRadians * progress;' in cleave and
         '_animation.SetActorFacing(_actor, absoluteFacing);' in cleave and
-        '_animation.RotateActor(_actor, rotation);' not in cleave_code,
-    'Cleave recovery calculation is absolute and finishes on the stored facing':
-        'facing.RotateAboutZ((float)(_cleaveSnapshot.SignedSweepRadians + _castRecoveryRadians * progress));' in ability_manager and
-        ability_manager.count('_animation.SetActorFacing(player, _castOriginalLook);') >= 4 and
-        '_recoveryRotationProgress' not in ability_manager_code,
-    'Cleave restores the live facing after every tick including exceptions':
-        '[HarmonyPatch(typeof(AbilityManager), "TickVoidstep")]' in facing_guard and
-        '__state = CleaveFacingState.Capture(player);' in facing_guard and
-        'private static Exception Finalizer(' in facing_guard and
-        '__state.Restore(__instance?.Logger, "Cleave tick");' in facing_guard,
-    'Cleave cancellation cannot restore the stale pre-wind-up facing':
-        '[HarmonyPatch(typeof(AbilityManager), "CancelCurrent")]' in facing_guard and
-        '__instance.ActiveAbility != AbilityId.VoidstepCleave' in facing_guard and
-        'actor.Index != ____castActorIndex' in facing_guard and
-        '__state.Restore(__instance?.Logger, "Cleave cancellation");' in facing_guard,
-    'Cleave facing guard covers rider and mount without static mission ownership':
-        'Mount.LookDirection = MountFacing;' in facing_guard and
-        'Actor.LookDirection = ActorFacing;' in facing_guard and
-        'static Agent' not in facing_guard_code and
-        'List<Agent>' not in facing_guard_code and
-        'Dictionary<int, Agent>' not in facing_guard_code,
+        '[HarmonyPatch(typeof(CleaveSweepController), nameof(CleaveSweepController.Tick))]' in facing_guard and
+        'FluidCleaveRuntime.EnterFacingSuppression();' in facing_guard,
+    'fluid Cleave uses one live facing for locking placement arc and hit schedule':
+        'state.Facing = NormalizeFacing(player.LookDirection);' in facing_guard and
+        'target.Position - state.Facing * TargetStandOff' in facing_guard and
+        'state.StartAngle = AngleMath.NormalizeRadians(' in facing_guard and
+        'facingAngle - (int)snapshot.Direction * snapshot.SweepRadians * 0.5' in facing_guard and
+        'var angle = ____startAngle + (int)____direction * ____sweepRadians * eased;' in facing_guard,
+    'fluid Cleave fallback cannot cross the target or move behind the player':
+        'Vec3.DotProduct(fromActor, facing) < -0.05f' in facing_guard and
+        'Vec3.DotProduct(targetAhead, facing) < MinimumTargetAhead' in facing_guard and
+        'validator.Validate(actor, candidate, maximumRange, allowThroughWalls, 1)' in facing_guard and
+        'BackOffsets' in facing_guard and 'SideOffsets' in facing_guard,
+    'fluid Cleave has short contiguous phases and no recovery rotation':
+        'private const float WindUpSeconds = 0.10f;' in facing_guard and
+        'private const float RecoverySeconds = 0.06f;' in facing_guard and
+        '____duration = 0.46f;' in facing_guard and
+        'FluidCleaveRuntime.TeleportPositionOnly(player, ____destination);' in facing_guard and
+        'facing.RotateAboutZ' not in facing_guard_code,
+    'fluid Cleave uses native attack controls without forced action progress':
+        'SetEventControlFlags' in facing_guard and
+        'AttackRelease' in facing_guard and
+        'NativeCleavePresentation.Begin(actor, snapshot.Clockwise, ____logger);' in facing_guard and
+        'SetCurrentActionProgress' not in facing_guard_code,
+    'fluid Cleave cancellation cannot restore stale activation facing':
+        '____castOriginalLook = Vec3.Zero;' in facing_guard and
+        'NativeCleavePresentation.End(____context?.Player);' in facing_guard and
+        'FluidCleaveRuntime.Clear(__instance);' in facing_guard,
+    'fluid Cleave state is weakly scoped and stores no static Agent collection':
+        'ConditionalWeakTable<AbilityManager, FluidCleaveCastState>' in facing_guard and
+        'static readonly List<Agent>' not in facing_guard_code and
+        'static readonly HashSet<Agent>' not in facing_guard_code and
+        'static readonly Dictionary<int, Agent>' not in facing_guard_code,
     'Blink reports frozen targeting only while it owns the zero-speed request':
         '_hud.Show(_ownsTimeRequest' in blink and
         'timeFrozen={_ownsTimeRequest}' in blink,
