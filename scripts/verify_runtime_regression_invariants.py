@@ -91,11 +91,23 @@ domino = read('src/Voidstep/DominoLinkService.cs')
 tor_weapon = read('src/Voidstep/TorCleaveWeaponStateRepair.cs')
 tor_presentation = read('src/Voidstep/TorVoidstepPresentation.cs')
 tor_radial = read('src/Voidstep/TorRadialMenuRefreshPatch.cs')
+ability_manager = read('src/Voidstep/AbilityManager.cs')
+cleave = read('src/Voidstep/CleaveSweepController.cs')
+animation = read('src/Voidstep/AnimationController.cs')
+cast_animation = read('src/Voidstep/AbilityCastAnimationPatch.cs')
+blink = read('src/Voidstep/BlinkController.cs')
 
 bend_time_code = mask_csharp_noncode(bend_time)
 max_speed_code = mask_csharp_noncode(max_speed)
 domino_repair_code = mask_csharp_noncode(domino_repair)
 tor_weapon_code = mask_csharp_noncode(tor_weapon)
+ability_manager_code = mask_csharp_noncode(ability_manager)
+cleave_code = mask_csharp_noncode(cleave)
+
+teleport_capture = ability_manager.find('var actorFacing = CaptureHorizontalFacing(actor);')
+teleport_actor = ability_manager.find('actor.TeleportToPosition(position)')
+teleport_restore = ability_manager.find('_animation.SetActorFacing(actor, actorFacing);')
+mount_restore = ability_manager.find('_animation.SetActorFacing(mount, mountFacing);')
 
 checks = {
     'every TOR Voidstep proxy releases native targeting ownership':
@@ -168,6 +180,31 @@ checks = {
         'coordinator is not live yet' in tor_radial and
         'adapter is not live yet' in tor_radial and
         'return false;' in tor_radial,
+    'Cleave does not play a second generic cast action before its owned execution':
+        'var cleaveOwnsExecutionAction = ability == AbilityId.VoidstepCleave;' in cast_animation and
+        '__state = disablingDarkVision || enteringBlinkTargeting || cleaveOwnsExecutionAction;' in cast_animation,
+    'teleport preserves actor and mount facing after native position and movement mutation':
+        teleport_capture >= 0 and teleport_actor > teleport_capture and
+        mount_restore > teleport_actor and teleport_restore > mount_restore and
+        'var mountFacing = mount != null && mount.IsActive() ? CaptureHorizontalFacing(mount) : Vec3.Zero;' in ability_manager and
+        '_animation.SetActorFacing(actor, actorFacing);' in ability_manager,
+    'Cleave snapshots orientation and mechanical settings before wind-up':
+        'var snapshot = CleaveExecutionSnapshot.Capture(player, settings);' in ability_manager and
+        '_cleaveSnapshot = snapshot;' in ability_manager and
+        'public bool Begin(Agent actor, MissionWeapon weapon, CleaveExecutionSnapshot snapshot, out string failure)' in cleave and
+        'settings.CleaveSweepDegrees' in cleave and
+        'VoidstepSettings.Current' not in cleave_code.split('public bool Begin(', 1)[1].split('public bool Tick(', 1)[0],
+    'Cleave visual yaw is absolute from the immutable scheduled start angle':
+        'var absoluteFacing = _startAngle + (int)_direction * _sweepRadians * progress;' in cleave and
+        '_animation.SetActorFacing(_actor, absoluteFacing);' in cleave and
+        '_animation.RotateActor(_actor, rotation);' not in cleave_code,
+    'Cleave recovery is absolute and finishes on the original facing':
+        'facing.RotateAboutZ((float)(_cleaveSnapshot.SignedSweepRadians + _castRecoveryRadians * progress));' in ability_manager and
+        ability_manager.count('_animation.SetActorFacing(player, _castOriginalLook);') >= 4 and
+        '_recoveryRotationProgress' not in ability_manager_code,
+    'Blink reports frozen targeting only while it owns the zero-speed request':
+        '_hud.Show(_ownsTimeRequest' in blink and
+        'timeFrozen={_ownsTimeRequest}' in blink,
 }
 
 failed = [name for name, passed in checks.items() if not passed]
@@ -176,4 +213,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} Blink, Bend Time, Domino and TOR regression invariants.')
+print(f'Validated {len(checks)} Cleave, Blink, Bend Time, Domino and TOR regression invariants.')
