@@ -1,0 +1,6 @@
+{
+  "version": "v1.2.2",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable hotfix synchronizing invested mastery unlocks before battle profile consumption and replacing all mastery UI text with direct gameplay descriptions."
+}
