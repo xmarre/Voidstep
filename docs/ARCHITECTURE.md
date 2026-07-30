@@ -69,6 +69,8 @@ Targeting -> Validating -> WindUp -> Departing -> Teleporting -> Arriving -> Act
 
 Immediate abilities traverse a reduced legal path. `CancelCurrent` clears Blink preview/time state, cleave hit state, FOV ownership, destination and cast ownership. Player death, deletion, replacement, invalid destination, mission end and exceptions route through cancellation.
 
+Voidstep Cleave captures one immutable execution snapshot before wind-up. The snapshot contains the normalized starting facing, mastery-scaled teleport range, sweep geometry, damage/force values, target cap and targeting flags. Revalidation, execution, effects and recovery all use that same snapshot, preventing MCM or progression changes from altering a cast halfway through its phase sequence.
+
 ## Teleport validation
 
 `TeleportValidator` performs these checks in order:
@@ -86,19 +88,23 @@ Immediate abilities traverse a reduced legal path. `CancelCurrent` clears Blink 
 
 Failure at the requested point triggers deterministic concentric fallback candidates. `DestinationSelector` chooses by planar distance, vertical delta and ordinal.
 
+`AbilityManager.TeleportActor` treats facing as owned state. It captures normalized horizontal look directions for the actor and active mount, performs native teleport and optional momentum reset, then reapplies both directions after those mutations. Cleave also reapplies its pre-cast direction before teleport, before the execution action and during every active/recovery update.
+
 ## Cleave target ordering
 
-The active sweep stores start angle, sweep radians and direction. A nearby-agent query builds reusable candidate and schedule buffers. `AngleMath.TravelFromStart` normalises clockwise or counter-clockwise travel. `SweepPlanner` filters by radius and sweep gap, computes expected animation progress and sorts by progress then distance.
+The active sweep stores start angle, sweep radians and direction from the immutable execution snapshot. A nearby-agent query builds reusable candidate and schedule buffers. `AngleMath.TravelFromStart` normalises clockwise or counter-clockwise travel. `SweepPlanner` filters by radius and sweep gap, computes expected animation progress and sorts by progress then distance.
 
 Live mode rebuilds the schedule during the active strike. A target is eligible when its angle has not already been passed. Snapshot mode stores agent index to expected progress and resolves the agent at contact time. Both modes use `HitRegistry<int>`.
 
 ## Blow construction
 
-`BlowFactory.ApplyMeleeBlow` builds an `AttackCollisionData` record, calls `Mission.CreateMeleeBlow` with the player's current `MissionWeapon`, adjusts configured magnitude/knock flags, and calls `Agent.RegisterBlow`. This is the closest audited 1.3.15 path to native melee processing without a fabricated area-damage event.
+`BlowFactory.ApplyMeleeBlow` builds an `AttackCollisionData` record, calls `Mission.CreateMeleeBlow` with the player's captured `MissionWeapon`, adjusts configured magnitude/knock flags, and calls `Agent.RegisterBlow`. This is the closest audited 1.3.15 path to native melee processing without a fabricated area-damage event.
 
 ## Animation synchronisation
 
-`AnimationController` is the replaceable presentation boundary. The current implementation uses a concrete native Bannerlord action verified in the supplied 1.3.15 assembly; it does not claim an original skeletal asset. The sweep controller drives actor yaw and action-channel progress from the same scalar. Target progress therefore corresponds to visual body/weapon progress. Recovery rotates the configured unhit gap, returning the player to its starting facing. A future one-handed/two-handed action asset can replace this controller without changing target resolution or blow construction.
+`AnimationController` is the replaceable presentation boundary. Cleave owns one execution action after arrival; the generic successful-cast animation hook explicitly excludes Cleave so no earlier action can compete for channel or body state. The sweep controller computes actor yaw absolutely from `startAngle + signedSweep * progress` and drives action-channel progress from the same scalar. Engine/action mutations therefore cannot accumulate yaw drift away from the angle used by target scheduling. Recovery also computes an absolute facing and finishes by assigning the exact pre-cast direction.
+
+The current implementation uses best-effort native action names and does not claim an original skeletal asset. A future one-handed/two-handed action asset can replace this controller without changing target resolution or blow construction.
 
 ## Time ownership
 
