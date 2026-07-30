@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0
+
+- Added an optional level-99 Voidstep Mastery progression system with 19 skills across Core, Mobility, Force, Dominion, Reservoir and Convergence branches.
+- Added campaign-save persistence for mastery XP, rank and per-hero skill investments, with full point respec support.
+- Added a dedicated Gauntlet mastery screen accessible from a new Character screen button or `Ctrl+Shift+V` on the campaign map.
+- Reused the proven deferred character-state transition from Guided Arrow: close the native character state, wait for the rebuilt campaign map, settle it, then push the mastery screen.
+- Added a separate `Voidstep — Mastery Progression` MCM entry with an enable toggle and mastery XP multiplier.
+- Added explicit progression unlocks for all six abilities and skill-driven energy-cost, cooldown, maximum-energy and regeneration growth.
+- Gated configured Blink momentum preservation, complete time suspension, cooldown-only mode and unlimited energy behind their corresponding advanced mastery skills.
+- Added bounded mastery XP awards for successful ability use, including Cleave XP scaled by successfully registered hits.
+- Made the final convergence path and Avatar of the Void capstone fully reachable within the rank-99 point budget.
+- Preserved the original unrestricted Voidstep MCM behavior whenever progression is disabled.
+- Kept mission hot paths on one immutable cached profile with allocation-free thread-local runtime scoping and no periodic campaign tick or campaign-map agent scan.
+- Added progression-specific source invariants and required both mastery prefabs in verified release packages.
+
 ## 1.1.1
 
 - Fixed the standalone Q wheel permanently capturing mouse-wheel input by making its Gauntlet layer display-only.
