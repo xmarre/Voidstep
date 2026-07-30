@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Version = "1.1.1"
+$Version = "1.2.0"
 $Solution = Join-Path $Root "Voidstep.sln"
 $RuntimeProject = Join-Path $Root "src/Voidstep/Voidstep.csproj"
 $TestProject = Join-Path $Root "tests/Voidstep.Core.Tests/Voidstep.Core.Tests.csproj"
@@ -113,6 +113,8 @@ Get-ChildItem $StageBin -File | Where-Object {
 
 if (-not (Test-Path (Join-Path $StageModule "SubModule.xml"))) { throw "Staged module lacks SubModule.xml" }
 if (-not (Test-Path (Join-Path $StageModule "GUI/Prefabs/VoidstepAbilityWheel.xml"))) { throw "Staged module lacks standalone ability-wheel prefab" }
+if (-not (Test-Path (Join-Path $StageModule "GUI/Prefabs/VoidstepCharacterButton.xml"))) { throw "Staged module lacks character-screen mastery button prefab" }
+if (-not (Test-Path (Join-Path $StageModule "GUI/Prefabs/VoidstepMastery.xml"))) { throw "Staged module lacks mastery-tree prefab" }
 $Forbidden = Get-ChildItem $StageModule -Recurse -File | Where-Object {
     $_.Name -like "TaleWorlds.*.dll" -or $_.Name -eq "TOR_Core.dll" -or $_.Name -like "MCM*.dll" -or $_.Name -like "Bannerlord.MBOptionScreen*.dll"
 }
@@ -130,7 +132,9 @@ try {
         "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.dll",
         "Modules/Voidstep/bin/Win64_Shipping_Client/Voidstep.Core.dll",
         "Modules/Voidstep/README.txt",
-        "Modules/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml"
+        "Modules/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml",
+        "Modules/Voidstep/GUI/Prefabs/VoidstepCharacterButton.xml",
+        "Modules/Voidstep/GUI/Prefabs/VoidstepMastery.xml"
     )
     foreach ($entry in $required) {
         if ($entries -notcontains $entry) { throw "Release ZIP verification failed: missing $entry" }
