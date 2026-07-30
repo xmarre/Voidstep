@@ -113,7 +113,7 @@ namespace Voidstep
         internal bool AllowWallTraversal(bool configured)
         {
             return Enabled
-                ? configured && (Level(VoidstepSkillId.MomentumWeave) >= 10 || Level(VoidstepSkillId.AvatarOfTheVoid) >= 5)
+                ? configured && Level(VoidstepSkillId.MomentumWeave) >= 10
                 : configured;
         }
 
