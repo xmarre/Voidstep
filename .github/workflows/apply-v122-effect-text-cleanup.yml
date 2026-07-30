@@ -37,8 +37,8 @@ jobs:
                   '"Domino range/propagation +" + F(3f * level, 1) + "% and link capacity +" + (level / 2) + "."',
               '"Maximum energy contribution: +" + (4 * level) + "."':
                   '"Maximum Void Energy +" + (4 * level) + "."',
-              '"Global energy-cost reduction: " + F(0.75f * level, 2) + "% ."':
-                  '"Ability energy costs -" + F(0.75f * level, 2) + "% ."',
+              '"Global energy-cost reduction: " + F(0.75f * level, 2) + "%."':
+                  '"Ability energy costs -" + F(0.75f * level, 2) + "%."',
               '"Regeneration contribution: +" + F(0.3f * level, 1) + "/s. Global cooldown reduction: " + F(0.6f * level, 1) + "%."':
                   '"Void Energy regeneration +" + F(0.3f * level, 1) + "/s. Ability cooldowns -" + F(0.6f * level, 1) + "%."',
               '"All range/radius +"': '"All ability ranges/radii +"',
@@ -50,10 +50,6 @@ jobs:
               '"All mechanical effects receive a final +"': '"All ability effects +"',
               '"% contribution."': '"%."',
           }
-
-          # Two exact entries contain no space before the percentage period.
-          replacements['"Global energy-cost reduction: " + F(0.75f * level, 2) + "%."'] = \
-              '"Ability energy costs -" + F(0.75f * level, 2) + "%."'
 
           for old, new in replacements.items():
               count = source.count(old)
