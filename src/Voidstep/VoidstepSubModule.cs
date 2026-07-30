@@ -357,6 +357,7 @@ namespace Voidstep
             int amount;
             if (args == null || args.Count != 1 || !int.TryParse(args[0], out amount) || amount <= 0)
                 return "Usage: voidstep.add_mastery_xp <positive amount>";
+            if (!progression.Enabled) return "Enable Voidstep mastery progression before awarding XP.";
             progression.AddXp(amount);
             return "Added " + amount + " Voidstep mastery XP.";
         }
