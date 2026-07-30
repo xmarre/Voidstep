@@ -1,7 +1,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Version = "1.2.0"
+    [string]$Version = "1.2.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,6 +50,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Source invariant validation failed." }
     & python scripts/verify_progression_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Progression integration invariant validation failed." }
+    & python scripts/verify_mastery_power_invariants.py
+    if ($LASTEXITCODE -ne 0) { throw "Mastery power invariant validation failed." }
     & python scripts/verify_wheel_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Wheel and TOR invariant validation failed." }
     & python scripts/verify_runtime_regression_invariants.py
