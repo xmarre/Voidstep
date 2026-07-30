@@ -1,8 +1,63 @@
 # Technical architecture
 
-## Mission lifetime
+## Runtime lifetimes
 
-`VoidstepSubModule.OnMissionBehaviorInitialize` adds one `VoidstepMissionBehavior`. Bannerlord 1.3.15 runs that hook after its normal `OnBehaviorInitialize` pass, so the behavior performs idempotent runtime initialization from `EarlyStart`, with `OnBehaviorInitialize` and the first mission tick retained as compatibility/fallback paths. The behavior owns `AbilityManager`, all services and every mutable collection. `OnEndMission` calls one idempotent cleanup path. No campaign behavior, campaign event or global agent patch exists.
+`VoidstepSubModule.OnMissionBehaviorInitialize` adds one `VoidstepMissionBehavior`. Bannerlord 1.3.15 runs that hook after its normal `OnBehaviorInitialize` pass, so the behavior performs idempotent runtime initialization from `EarlyStart`, with `OnBehaviorInitialize` and the first mission tick retained as compatibility/fallback paths. The behavior owns `AbilityManager`, all mission services and every mission-owned mutable collection. `OnEndMission` calls one idempotent cleanup path.
+
+`VoidstepProgressionBehavior` is a separate campaign save component. It stores only hero-keyed integer XP and skill-level dictionaries plus the progression-enabled flag. It listens to session launch, game load and new-game lifecycle events and participates in `SyncData`; it registers no hourly, daily or campaign-map tick and stores no mission agent.
+
+## Mastery persistence and cached profile
+
+Mastery state is keyed by `Hero.MainHero.StringId`, allowing the save model to remain stable across campaign sessions. The data keys are versioned:
+
+```text
+_voidstepMasteryXp_v1
+_voidstepSkillLevels_v1
+_voidstepProgressionEnabled_v1
+_voidstepProgressionDataVersion
+```
+
+Mission code never queries those dictionaries directly. `VoidstepProgressionService` builds one immutable `VoidstepProgressionProfile` containing an indexed skill-level array. The volatile profile reference is replaced only when campaign state changes: attach/load, XP gain, rank change, investment, respec, enable/disable or detach. Mission reads are constant-time and lock-free.
+
+Progression-disabled and no-campaign states use a shared disabled profile. Every runtime modifier returns the original configured value in that state.
+
+## Progression integration scope
+
+The ordinary MCM values remain the source configuration. Progression applies caps and multipliers only while Voidstep-owned ability code is executing.
+
+Harmony prefixes enter a thread-static integer scope for:
+
+- `AbilityContext` construction;
+- `AbilityManager.Tick`;
+- `AbilityManager.TryActivate`.
+
+Harmony finalizers release the scope on normal return, prefix rejection or exception. No lease object or closure is allocated on the mission-tick path. Patched MCM property getters consult the cached mastery profile only while the scope is active, so MCM UI and unrelated callers still observe their raw configured values.
+
+Ability unlock validation occurs before `AbilityManager.TryActivate`. Active Dark Vision remains removable after a respec or progression-state change so a locked ability cannot become permanently active.
+
+## Mastery point economy
+
+The catalogue contains 19 skills across Core, Mobility, Force, Dominion, Reservoir and Convergence branches. One mastery rank grants one point, up to rank 99. Rank, melee-skill and prerequisite checks are evaluated before each investment.
+
+The final path is intentionally reachable within the finite budget. The complete prerequisite route to `Avatar of the Void` costs 78 points, leaving enough points to raise that 10-rank capstone to maximum before rank 99.
+
+## Mastery XP ownership
+
+XP is awarded only from successful owned ability outcomes. Cleave scales its award from successfully registered hits; other abilities use bounded fixed awards. A `ConditionalWeakTable` keys throttle state to the owning mission controller or manager, so mission teardown releases award state without a global registry. One cached factory delegate creates throttle state and avoids repeated delegate allocation.
+
+## Mastery UI state transition
+
+The native Character screen button does not directly push a Gauntlet screen. Its controller follows this sequence:
+
+1. suspend and detach the overlay button;
+2. pop `CharacterDeveloperState`;
+3. wait until Bannerlord rebuilds the campaign map screen;
+4. allow two additional application frames for the map to settle;
+5. push `VoidstepMasteryScreen`.
+
+Any unexpected screen, mission start, campaign end or timeout cancels the transition. Campaign end and submodule unload explicitly pop the mastery screen before its view model and progression service are detached.
+
+The campaign-map shortcut (`Ctrl+Shift+V`) opens the same screen only when the settled map is already the top screen.
 
 ## Ability state machine
 
@@ -43,27 +98,31 @@ Live mode rebuilds the schedule during the active strike. A target is eligible w
 
 ## Animation synchronisation
 
-`AnimationController` is the replaceable presentation boundary. v1.0.0 uses the concrete `ActionIndexCache.act_strike_bent_over` field verified in the supplied Bannerlord 1.3.15 assembly; it does not claim an original skeletal asset. The sweep controller drives actor yaw and action-channel progress from the same scalar. Target progress therefore corresponds to visual body/weapon progress. Recovery rotates the configured unhit gap, returning the player to its starting facing. A future one-handed/two-handed action asset can replace this controller without changing target resolution or blow construction.
+`AnimationController` is the replaceable presentation boundary. The current implementation uses a concrete native Bannerlord action verified in the supplied 1.3.15 assembly; it does not claim an original skeletal asset. The sweep controller drives actor yaw and action-channel progress from the same scalar. Target progress therefore corresponds to visual body/weapon progress. Recovery rotates the configured unhit gap, returning the player to its starting facing. A future one-handed/two-handed action asset can replace this controller without changing target resolution or blow construction.
 
 ## Time ownership
 
 Bend Time uses request ID `0x56535450`. Blink aiming uses `0x5653424C`. Each service removes only its own request. `OwnershipLedger<int>` prevents release of a token that the service no longer owns. Other mission speed requests are never cached or overwritten.
 
-## Domino recursion prevention
+## Domino callback ownership
 
-Domino stores `HashSet<int>` agent indices. `OnAgentHit` enters one constant recursion key before creating propagated blows. A synchronous propagated callback cannot enter the same key, so it returns without another propagation pass. Invalid indices are removed on tick, removal and deletion callbacks.
+Domino keeps identity-checked linked targets and marker ownership for the current mission. Native hit and removal callbacks enqueue propagation records and return without registering a new blow. Dispatch occurs on the following mission tick after the native callback has unwound.
+
+Per-target propagated-hit and propagated-death ledgers suppress only Domino-owned callbacks. Removed agents, changed identities and reused indices are rejected before dispatch. Persistent links remain independent of the transient ability-cast state.
 
 ## Cleanup guarantees
 
 - Per-cast hit and snapshot collections clear at cleave end or cancellation.
 - Blink preview entities and aim-speed requests clear on every exit.
 - FOV restoration occurs only while the current value still equals Voidstep's owned value.
-- Bend Time removes only its request ID.
-- Domino stores no `Agent` beyond the current player pointer and resolves linked agents by index.
+- Bend Time removes only its request ID and restores only owned driven-property changes.
+- Domino clears links, markers, pending propagation and suppression ledgers.
 - Dark Vision clears every contour it applied.
 - `EffectController` owns and removes every marker entity it creates.
+- Character and mastery Gauntlet layers release their movies, input restrictions and view models.
+- Campaign end and module unload close the mastery screen before detaching progression state.
 - Exceptions in activation or mission tick invoke cleanup before control returns to Bannerlord.
 
 ## Extension points
 
-New abilities should add one controller, one `AbilityId`, settings cost/cooldown mappings, and one `AbilityManager` activation path. They should use the existing cast token, resource/cooldown, effect ownership and cleanup conventions.
+New abilities should add one controller, one `AbilityId`, settings cost/cooldown mappings, one `AbilityManager` activation path and an explicit mastery foundation skill when progression should gate it. They should use the existing cast token, resource/cooldown, effect ownership, cached progression profile and cleanup conventions.
