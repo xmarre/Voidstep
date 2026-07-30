@@ -6,6 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[1]
 fix_path = root / "src" / "Voidstep" / "VoidstepProgressionBoundaryFixes.cs"
 patch_path = root / "src" / "Voidstep" / "VoidstepProgressionPatches.cs"
+context_path = root / "src" / "Voidstep" / "AbilityContext.cs"
 catalog_path = root / "src" / "Voidstep" / "VoidstepProgressionCatalog.cs"
 runtime_path = root / "src" / "Voidstep" / "VoidstepProgressionRuntime.cs"
 mission_path = root / "src" / "Voidstep" / "VoidstepMissionBehavior.cs"
@@ -16,6 +17,7 @@ wheel_suppression_path = root / "src" / "Voidstep" / "AbilityWheelInputSuppressi
 for path in (
     fix_path,
     patch_path,
+    context_path,
     catalog_path,
     runtime_path,
     mission_path,
@@ -29,6 +31,7 @@ for path in (
 
 fix = fix_path.read_text(encoding="utf-8")
 patches = patch_path.read_text(encoding="utf-8")
+context = context_path.read_text(encoding="utf-8")
 catalog = catalog_path.read_text(encoding="utf-8")
 runtime = runtime_path.read_text(encoding="utf-8")
 mission = mission_path.read_text(encoding="utf-8")
@@ -61,10 +64,6 @@ description_definitions = re.findall(
     flags=re.DOTALL,
 )
 
-context_class = extract_named_block(
-    patches,
-    "internal static class ProgressionAbilityContextScopePatch",
-)
 activation_class = extract_named_block(
     patches,
     "internal static class ProgressionAbilityActivationPatch",
@@ -72,16 +71,24 @@ activation_class = extract_named_block(
 context_sync = "VoidstepProgressionBoundarySynchronizer.SynchronizeAll();"
 activation_sync = "VoidstepProgressionBoundarySynchronizer.SynchronizeUnlock(ability);"
 scope_enter = "VoidstepProgressionRuntimeScope.Enter();"
+scope_exit = "VoidstepProgressionRuntimeScope.Exit();"
 profile_gate = "VoidstepProgressionService.Profile.CanUse(ability, out reason)"
 
 checks = {
     "mission construction synchronizes before entering the settings scope": (
-        context_class is not None
-        and context_sync in context_class
-        and scope_enter in context_class
-        and context_class.index(context_sync) < context_class.index(scope_enter)
+        context_sync in context
+        and scope_enter in context
+        and scope_exit in context
+        and context.index(context_sync) < context.index(scope_enter)
+        and "finally" in context
+        and context.index("finally") < context.index(scope_exit)
         and "foreach (var skill in VoidstepSkillCatalog.All)" in fix
         and "profile.Level(skill.Id) == behavior.GetSkillLevel(skill.Id)" in fix
+    ),
+    "AbilityContext uses direct owned scoping instead of a Harmony constructor patch": (
+        "ProgressionAbilityContextScopePatch" not in patches
+        and "HarmonyPatch(typeof(AbilityContext)" not in patches
+        and "older shipped Harmony" in context
     ),
     "activation synchronizes the requested unlock immediately before the gate": (
         activation_class is not None
@@ -151,9 +158,9 @@ checks = {
             )
         )
     ),
-    "runtime version literals match v1.2.2": (
-        "Voidstep v1.2.2 active" in mission
-        and "Voidstep v1.2.2 submodule loaded." in submodule
+    "runtime version literals match v1.2.3": (
+        "Voidstep v1.2.3 active" in mission
+        and "Voidstep v1.2.3 submodule loaded." in submodule
         and "Voidstep v1.1.0 active" not in mission
         and "Voidstep v1.2.0 submodule loaded." not in submodule
     ),
