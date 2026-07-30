@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed the standalone Q wheel permanently capturing mouse-wheel input by making its Gauntlet layer display-only.
+- Repaired TOR's live Q-wheel component before opening so all six Voidstep entries remain visible with stable, distinct icons.
+- Released TOR's temporary targeting stance for every Voidstep proxy and restored wielded items and weapon bindings without putting Blink's weapon away.
+- Added retry-safe TOR weapon-state restoration when TOR's reflected state is temporarily unavailable.
+- Moved Bend Time compensation after Bannerlord and TOR finish recalculating driven properties so the controlled player and mount remain responsive while the world is slowed.
+- Added owned native maximum-speed multiplier compensation for the player and controlled mount.
+- Fixed Bend Time's post-effect speed tail by restoring native speed multipliers in the same multiplier mode and only after local time-control cleanup completes.
+- Fixed Domino ignoring player-owned missile and synthetic hits when Bannerlord reports a missing or inactive affector.
+- Preserved valid existing Domino affectors and retained deferred propagation, identity checks and recursion suppression.
+- Added focused regression gates for TOR targeting handoff, mouse-wheel preservation, Bend Time cleanup and Domino hit ownership.
+
 ## 1.1.0
 
 - Added a unified Dishonored-style casting flow: open the Q wheel, select an ability, aim with a live cast indicator and confirm with Right Mouse Button.
