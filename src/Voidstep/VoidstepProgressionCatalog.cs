@@ -159,7 +159,7 @@ namespace Voidstep
             D(VoidstepSkillId.BendTheHour, "Bend the Hour", "Force", "⌛", 20, 25, 125, 3,
                 "Rank 1 unlocks Bend Time. Further ranks reduce its energy cost.", R(VoidstepSkillId.CrushingWave, 5)),
             D(VoidstepSkillId.Chronomancer, "Chronomancer", "Force", "◷", 10, 45, 175, 4,
-                "Reduces Bend Time cost and cooldown. Rank 10 permits the configured complete-suspension option.", R(VoidstepSkillId.BendTheHour, 10)),
+                "Reduces Bend Time cost and cooldown. Rank 10 permits the configured complete-suspension option.", R(VoidstepSkillId.BendTheHour, 5)),
 
             D(VoidstepSkillId.FatefulLink, "Fateful Link", "Dominion", "∞", 20, 5, 75, 1,
                 "Rank 1 unlocks Domino and opens the dominion branch.", R(VoidstepSkillId.VoidAffinity, 5)),
@@ -168,7 +168,7 @@ namespace Voidstep
             D(VoidstepSkillId.UmbralSight, "Umbral Sight", "Dominion", "◉", 20, 10, 75, 3,
                 "Rank 1 unlocks Dark Vision and establishes the perception side of dominion.", R(VoidstepSkillId.VoidAffinity, 5)),
             D(VoidstepSkillId.SovereignGaze, "Sovereign Gaze", "Dominion", "☉", 10, 35, 150, 4,
-                "Reduces Dark Vision energy cost and cooldown and contributes to advanced dominion efficiency.", R(VoidstepSkillId.UmbralSight, 10)),
+                "Reduces Dark Vision energy cost and cooldown and contributes to advanced dominion efficiency.", R(VoidstepSkillId.UmbralSight, 5)),
 
             D(VoidstepSkillId.DeepReservoir, "Deep Reservoir", "Reservoir", "◇", 20, 2, 50, 1,
                 "Raises the maximum Void Energy available while progression is enabled.", R(VoidstepSkillId.VoidAffinity, 3)),
@@ -177,13 +177,13 @@ namespace Voidstep
             D(VoidstepSkillId.RapidRecovery, "Rapid Recovery", "Reservoir", "↻", 20, 20, 100, 3,
                 "Raises Void Energy regeneration and reduces every ability cooldown.", R(VoidstepSkillId.EfficientChanneling, 5)),
             D(VoidstepSkillId.UnboundPower, "Unbound Power", "Reservoir", "✹", 10, 45, 175, 4,
-                "Raises energy capacity and regeneration. Rank 5 permits cooldown-only mode; rank 10 permits unlimited energy.", R(VoidstepSkillId.RapidRecovery, 10)),
+                "Raises energy capacity and regeneration. Rank 5 permits cooldown-only mode; rank 10 permits unlimited energy.", R(VoidstepSkillId.RapidRecovery, 5)),
 
             D(VoidstepSkillId.Singularity, "Singularity", "Convergence", "⊙", 10, 60, 200, 1,
                 "Combines mobility, force and dominion mastery to reduce all energy costs and cooldowns.",
-                R(VoidstepSkillId.VoidDancer, 5), R(VoidstepSkillId.Chronomancer, 5),
-                R(VoidstepSkillId.SharedAgony, 10), R(VoidstepSkillId.SovereignGaze, 5)),
-            D(VoidstepSkillId.AvatarOfTheVoid, "Avatar of the Void", "Convergence", "✺", 10, 75, 225, 2,
+                R(VoidstepSkillId.VoidDancer, 1), R(VoidstepSkillId.Chronomancer, 1),
+                R(VoidstepSkillId.SharedAgony, 5), R(VoidstepSkillId.SovereignGaze, 1)),
+            D(VoidstepSkillId.AvatarOfTheVoid, "Avatar of the Void", "Convergence", "✺", 10, 80, 225, 2,
                 "The final convergence. Rank 10 releases progression caps on configured maximum energy and regeneration.",
                 R(VoidstepSkillId.Singularity, 5), R(VoidstepSkillId.UnboundPower, 5))
         };
