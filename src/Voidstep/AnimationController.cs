@@ -69,6 +69,20 @@ namespace Voidstep
             }
         }
 
+        public void SetActorFacing(Agent actor, Vec3 facing)
+        {
+            if (actor == null || !actor.IsActive()) return;
+            facing.z = 0f;
+            if (facing.Normalize() < 0.001f)
+                facing = Vec3.Forward;
+            actor.LookDirection = facing;
+        }
+
+        public void SetActorFacing(Agent actor, double radians)
+        {
+            SetActorFacing(actor, new Vec3((float)Math.Cos(radians), (float)Math.Sin(radians), 0f, 0f));
+        }
+
         public void RotateActor(Agent actor, float radians)
         {
             if (actor == null || !actor.IsActive()) return;
@@ -77,7 +91,7 @@ namespace Voidstep
             if (look.Normalize() < 0.001f)
                 look = Vec3.Forward;
             look.RotateAboutZ(radians);
-            actor.LookDirection = look;
+            SetActorFacing(actor, look);
         }
 
         public void ResetActionSpeed(Agent actor)
