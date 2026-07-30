@@ -311,7 +311,7 @@ checks = {
     'all selected abilities receive area previews': all(token in selection for token in ('BuildCleavePreview', 'BuildWindblastPreview', 'BuildDominoPreview', 'BuildRadiusPreview')) and 'AbilityId.Blink' in selection,
     'standalone wheel derives radial sectors from registry': 'var count = VoidstepInputBindings.Abilities.Length;' in standalone_wheel and 'var sector = Math.PI * 2.0 / count;' in standalone_wheel and 'VoidstepInputBindings.Abilities[selected]' in standalone_wheel,
     'standalone wheel retains failed layer cleanup': 'ownership was retained for a later cleanup retry' in standalone_wheel and 'private bool _layerAdded;' in standalone_wheel,
-    'standalone wheel uses semantic input restriction mask': 'Enum.GetNames(type)' in standalone_wheel and 'string.Equals(name, "All", StringComparison.Ordinal)' in standalone_wheel and 'Enum.ToObject(type, -1)' not in standalone_wheel,
+    'standalone wheel is display-only and preserves native scrolling': 'display-only Gauntlet layer' in standalone_wheel and all(token not in standalone_wheel for token in ('IsFocusLayer', 'ConfigureInputRestrictions', 'SetInputRestrictions', 'TrySetFocus', 'TryLoseFocus', 'InputUsageMask')),
     'standalone wheel has Gauntlet prefab': wheel_prefab_path.exists() and '<Prefab>' in wheel_prefab and all(name in wheel_prefab for name in ('@CleaveText', '@BlinkText', '@WindblastText', '@BendTimeText', '@DominoText', '@DarkVisionText')),
     'standalone wheel view model rejects invalid entries': 'internal bool SetSelected(int index)' in wheel_vm and 'return false;' in wheel_vm,
     'TOR integration is reflection isolated': 'TOR_Core' in tor_wheel and 'Assembly' in tor_wheel and 'GetType(' in tor_wheel and 'using TOR_Core' not in tor_wheel,

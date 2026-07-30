@@ -1,0 +1,6 @@
+{
+  "version": "v1.1.1",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable release after in-game acceptance of TOR wheel integration, native mouse-wheel weapon cycling, Blink weapon retention, Bend Time player compensation, Domino damage propagation and synchronized Bend Time cleanup."
+}

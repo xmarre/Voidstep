@@ -1,7 +1,7 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    [string]$Version = "1.1.0"
+    [string]$Version = "1.1.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,6 +50,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Source invariant validation failed." }
     & python scripts/verify_wheel_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Wheel and TOR invariant validation failed." }
+    & python scripts/verify_runtime_regression_invariants.py
+    if ($LASTEXITCODE -ne 0) { throw "Blink, Bend Time and Domino regression validation failed." }
 
     & dotnet build $Project -c $Configuration --no-restore
     if ($LASTEXITCODE -ne 0) { throw "Runtime build failed." }
