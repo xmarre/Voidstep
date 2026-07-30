@@ -127,7 +127,7 @@ checks = {
     "disabled progression preserves configured values": (
         "if (!Enabled)" in profile
         and "return true;" in profile
-        and profile.count("if (!Enabled) return configured;") == 4
+        and profile.count("if (!Enabled) return configured;") == 6
         and "VoidstepProgressionProfile.Disabled" in behavior
     ),
     "runtime setting interception is scope bounded and allocation free": (
