@@ -4,20 +4,30 @@ namespace Voidstep
 {
     internal static class VoidstepProgressionBoundarySynchronizer
     {
-        internal static void SynchronizeAll()
+        private static bool TryGetEnabledState(
+            out VoidstepProgressionBehavior behavior,
+            out VoidstepProgressionProfile profile)
         {
-            var behavior = VoidstepProgressionService.Current;
+            behavior = VoidstepProgressionService.Current;
+            profile = null;
             if (behavior == null)
-                return;
+                return false;
 
-            var profile = VoidstepProgressionService.Profile;
+            profile = VoidstepProgressionService.Profile;
             if (profile.Enabled != behavior.Enabled)
             {
                 VoidstepProgressionService.NotifyChanged();
-                return;
+                return false;
             }
 
-            if (!behavior.Enabled)
+            return behavior.Enabled;
+        }
+
+        internal static void SynchronizeAll()
+        {
+            VoidstepProgressionBehavior behavior;
+            VoidstepProgressionProfile profile;
+            if (!TryGetEnabledState(out behavior, out profile))
                 return;
 
             foreach (var skill in VoidstepSkillCatalog.All)
@@ -32,18 +42,9 @@ namespace Voidstep
 
         internal static void SynchronizeUnlock(AbilityId ability)
         {
-            var behavior = VoidstepProgressionService.Current;
-            if (behavior == null)
-                return;
-
-            var profile = VoidstepProgressionService.Profile;
-            if (profile.Enabled != behavior.Enabled)
-            {
-                VoidstepProgressionService.NotifyChanged();
-                return;
-            }
-
-            if (!behavior.Enabled)
+            VoidstepProgressionBehavior behavior;
+            VoidstepProgressionProfile profile;
+            if (!TryGetEnabledState(out behavior, out profile))
                 return;
 
             var required = VoidstepSkillCatalog.RequiredSkill(ability);
