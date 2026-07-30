@@ -29,21 +29,32 @@ description_definitions = re.findall(
     flags=re.DOTALL,
 )
 
+context_sync = "VoidstepProgressionBoundarySynchronizer.SynchronizeAll();"
+activation_sync = "VoidstepProgressionBoundarySynchronizer.SynchronizeUnlock(ability);"
+profile_gate = "VoidstepProgressionService.Profile.CanUse(ability, out reason)"
+
 checks = {
-    "mission boundary synchronizes the complete profile": all(token in fix for token in (
-        "ProgressionMissionBoundarySynchronizationPatch",
-        "[HarmonyPriority(Priority.First)]",
-        "VoidstepProgressionBoundarySynchronizer.SynchronizeAll();",
-        "foreach (var skill in VoidstepSkillCatalog.All)",
-        "profile.Level(skill.Id) == behavior.GetSkillLevel(skill.Id)",
-    )),
-    "activation synchronizes the requested unlock before the existing gate": all(token in fix for token in (
-        "ProgressionActivationBoundarySynchronizationPatch",
-        "private static void Prefix(AbilityId ability)",
-        "VoidstepProgressionBoundarySynchronizer.SynchronizeUnlock(ability);",
-        "var required = VoidstepSkillCatalog.RequiredSkill(ability);",
-        "profile.Level(required) != behavior.GetSkillLevel(required)",
-    )) and "VoidstepProgressionService.Profile.CanUse(ability, out reason)" in patches,
+    "mission construction synchronizes before entering the settings scope": (
+        "internal static class ProgressionAbilityContextScopePatch" in patches
+        and context_sync in patches
+        and patches.index(context_sync) < patches.index("VoidstepProgressionRuntimeScope.Enter();")
+        and "foreach (var skill in VoidstepSkillCatalog.All)" in fix
+        and "profile.Level(skill.Id) == behavior.GetSkillLevel(skill.Id)" in fix
+    ),
+    "activation synchronizes the requested unlock immediately before the gate": (
+        "internal static class ProgressionAbilityActivationPatch" in patches
+        and activation_sync in patches
+        and profile_gate in patches
+        and patches.index(activation_sync) < patches.index(profile_gate)
+        and "var required = VoidstepSkillCatalog.RequiredSkill(ability);" in fix
+        and "profile.Level(required) != behavior.GetSkillLevel(required)" in fix
+    ),
+    "no independent Harmony ordering dependency remains": (
+        "HarmonyPatch" not in fix
+        and "HarmonyPriority" not in fix
+        and "ProgressionMissionBoundarySynchronizationPatch" not in fix
+        and "ProgressionActivationBoundarySynchronizationPatch" not in fix
+    ),
     "profile rebuild occurs only when live state differs": (
         fix.count("VoidstepProgressionService.NotifyChanged();") == 4
         and "if (profile.Enabled != behavior.Enabled)" in fix
