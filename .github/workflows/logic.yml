@@ -45,6 +45,8 @@ jobs:
         run: python scripts/verify_progression_invariants.py
       - name: Verify mastery power invariants
         run: python scripts/verify_mastery_power_invariants.py
+      - name: Verify mastery unlock invariants
+        run: python scripts/verify_mastery_unlock_invariants.py
       - name: Verify wheel and TOR invariants
         run: python scripts/verify_wheel_invariants.py
       - name: Verify Blink Bend Time and Domino regressions
