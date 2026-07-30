@@ -79,7 +79,6 @@ namespace Voidstep
         private string _progressionText;
         private string _progressionActionText;
         private string _messageText;
-        private int _xpProgress;
 
         internal VoidstepMasteryVM(Action close)
         {
@@ -108,7 +107,6 @@ namespace Voidstep
         [DataSourceProperty] public string XpText { get => _xpText; set => Set(ref _xpText, value, nameof(XpText)); }
         [DataSourceProperty] public string PointsText { get => _pointsText; set => Set(ref _pointsText, value, nameof(PointsText)); }
         [DataSourceProperty] public string MeleeText { get => _meleeText; set => Set(ref _meleeText, value, nameof(MeleeText)); }
-        [DataSourceProperty] public int XpProgress { get => _xpProgress; set { if (value != _xpProgress) { _xpProgress = value; OnPropertyChangedWithValue(value, nameof(XpProgress)); } } }
         [DataSourceProperty] public string SelectedName { get => _selectedName; set => Set(ref _selectedName, value, nameof(SelectedName)); }
         [DataSourceProperty] public string SelectedLevel { get => _selectedLevel; set => Set(ref _selectedLevel, value, nameof(SelectedLevel)); }
         [DataSourceProperty] public string SelectedRequirements { get => _selectedRequirements; set => Set(ref _selectedRequirements, value, nameof(SelectedRequirements)); }
@@ -177,16 +175,13 @@ namespace Voidstep
                 XpText = "XP 0 / " + VoidstepSkillCatalog.GetNextThreshold(1);
                 PointsText = "Points Available: 0";
                 MeleeText = "Melee Skill: 0";
-                XpProgress = 0;
                 ProgressionText = "Progression: Unavailable";
                 ProgressionActionText = "Enable Progression";
             }
             else
             {
                 var rank = progression.Rank;
-                var currentThreshold = VoidstepSkillCatalog.GetThreshold(rank);
                 var nextThreshold = VoidstepSkillCatalog.GetNextThreshold(rank);
-                var width = Math.Max(1, nextThreshold - currentThreshold);
 
                 MasteryText = "Mastery Rank " + rank + " / 99";
                 XpText = rank >= VoidstepProgressionBalance.MaximumMasteryRank
@@ -194,9 +189,6 @@ namespace Voidstep
                     : "XP " + progression.Xp + " / " + nextThreshold;
                 PointsText = "Points Available: " + progression.AvailablePoints + "  •  Invested: " + progression.InvestedPoints;
                 MeleeText = "Melee Skill: " + progression.MeleeSkill;
-                XpProgress = rank >= VoidstepProgressionBalance.MaximumMasteryRank
-                    ? 100
-                    : Math.Max(0, Math.Min(100, (progression.Xp - currentThreshold) * 100 / width));
                 ProgressionText = progression.Enabled ? "Progression: ENABLED" : "Progression: DISABLED";
                 ProgressionActionText = progression.Enabled ? "Disable Progression" : "Enable Progression";
             }
