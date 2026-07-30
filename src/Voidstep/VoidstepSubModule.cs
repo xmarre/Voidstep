@@ -76,6 +76,7 @@ namespace Voidstep
         public override void OnGameEnd(Game game)
         {
             CancelPendingCharacterScreenOpen();
+            CloseMasteryScreen();
             _characterButton.Detach();
             VoidstepProgressionService.Detach();
             _masteryOpenLatch = false;
@@ -115,6 +116,7 @@ namespace Voidstep
             InputSuppressionReady = false;
             NativeHotkeysReady = false;
             CancelPendingCharacterScreenOpen();
+            CloseMasteryScreen();
             _characterButton.Detach();
             VoidstepProgressionService.Detach();
             InputConflictSuppression.Reset();
@@ -271,6 +273,19 @@ namespace Voidstep
             if (ScreenManager.TopScreen is VoidstepMasteryScreen) return;
             if (!IsCampaignMapScreen(ScreenManager.TopScreen)) return;
             ScreenManager.PushScreen(new VoidstepMasteryScreen());
+        }
+
+        private static void CloseMasteryScreen()
+        {
+            try
+            {
+                if (ScreenManager.TopScreen is VoidstepMasteryScreen)
+                    ScreenManager.PopScreen();
+            }
+            catch
+            {
+                // Campaign or module teardown may already own the screen stack.
+            }
         }
 
         private static bool IsCampaignMapScreen(ScreenBase screen)
