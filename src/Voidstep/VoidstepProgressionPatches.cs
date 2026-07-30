@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
@@ -17,40 +16,28 @@ namespace Voidstep
 
         internal static bool Active => _depth > 0;
 
-        internal static Lease Enter()
+        internal static void Enter()
         {
             _depth++;
-            return new Lease();
         }
 
-        internal sealed class Lease : IDisposable
+        internal static void Exit()
         {
-            private int _disposed;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-                if (_depth > 0) _depth--;
-            }
+            if (_depth > 0) _depth--;
         }
     }
 
     [HarmonyPatch(typeof(AbilityContext), MethodType.Constructor)]
     internal static class ProgressionAbilityContextScopePatch
     {
-        private static void Prefix(out VoidstepProgressionRuntimeScope.Lease __state)
+        private static void Prefix()
         {
-            __state = VoidstepProgressionRuntimeScope.Enter();
+            VoidstepProgressionRuntimeScope.Enter();
         }
 
-        private static void Postfix(VoidstepProgressionRuntimeScope.Lease __state)
+        private static Exception Finalizer(Exception __exception)
         {
-            __state?.Dispose();
-        }
-
-        private static Exception Finalizer(Exception __exception, VoidstepProgressionRuntimeScope.Lease __state)
-        {
-            __state?.Dispose();
+            VoidstepProgressionRuntimeScope.Exit();
             return __exception;
         }
     }
@@ -58,19 +45,14 @@ namespace Voidstep
     [HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.Tick))]
     internal static class ProgressionAbilityTickScopePatch
     {
-        private static void Prefix(out VoidstepProgressionRuntimeScope.Lease __state)
+        private static void Prefix()
         {
-            __state = VoidstepProgressionRuntimeScope.Enter();
+            VoidstepProgressionRuntimeScope.Enter();
         }
 
-        private static void Postfix(VoidstepProgressionRuntimeScope.Lease __state)
+        private static Exception Finalizer(Exception __exception)
         {
-            __state?.Dispose();
-        }
-
-        private static Exception Finalizer(Exception __exception, VoidstepProgressionRuntimeScope.Lease __state)
-        {
-            __state?.Dispose();
+            VoidstepProgressionRuntimeScope.Exit();
             return __exception;
         }
     }
@@ -78,13 +60,9 @@ namespace Voidstep
     [HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.TryActivate))]
     internal static class ProgressionAbilityActivationPatch
     {
-        private static bool Prefix(
-            AbilityManager __instance,
-            AbilityId ability,
-            ref bool __result,
-            out VoidstepProgressionRuntimeScope.Lease __state)
+        private static bool Prefix(AbilityManager __instance, AbilityId ability, ref bool __result)
         {
-            __state = VoidstepProgressionRuntimeScope.Enter();
+            VoidstepProgressionRuntimeScope.Enter();
 
             if (ability == AbilityId.DarkVision && __instance.IsDarkVisionActive)
                 return true;
@@ -99,14 +77,9 @@ namespace Voidstep
             return false;
         }
 
-        private static void Postfix(VoidstepProgressionRuntimeScope.Lease __state)
+        private static Exception Finalizer(Exception __exception)
         {
-            __state?.Dispose();
-        }
-
-        private static Exception Finalizer(Exception __exception, VoidstepProgressionRuntimeScope.Lease __state)
-        {
-            __state?.Dispose();
+            VoidstepProgressionRuntimeScope.Exit();
             return __exception;
         }
     }
@@ -200,12 +173,14 @@ namespace Voidstep
 
         private static readonly ConditionalWeakTable<object, AwardState> States =
             new ConditionalWeakTable<object, AwardState>();
+        private static readonly ConditionalWeakTable<object, AwardState>.CreateValueCallback StateFactory =
+            _ => new AwardState();
 
         internal static void Award(object owner, AbilityId ability, int amount, double minimumIntervalSeconds)
         {
             if (owner == null || amount <= 0 || !VoidstepProgressionService.Enabled) return;
 
-            var state = States.GetOrCreateValue(owner);
+            var state = States.GetValue(owner, StateFactory);
             var now = (double)MBCommon.GetApplicationTime();
             double last;
             if (state.LastAwards.TryGetValue(ability, out last) && now - last < minimumIntervalSeconds)
