@@ -7,7 +7,11 @@ namespace Voidstep
     [HarmonyPatch(typeof(CleaveSweepController), nameof(CleaveSweepController.Begin))]
     internal static class VoidstepCleaveEffectPatch
     {
-        private static void Postfix(Agent actor, bool __result, EffectController ____effects)
+        private static void Postfix(
+            Agent actor,
+            CleaveExecutionSnapshot snapshot,
+            bool __result,
+            EffectController ____effects)
         {
             if (!__result || actor == null) return;
             try
@@ -15,7 +19,7 @@ namespace Voidstep
                 VoidstepAbilityEffects.VoidCleave(
                     ____effects,
                     actor.Position,
-                    VoidstepSettings.Current.CleaveRadius);
+                    snapshot.Radius);
             }
             catch
             {
