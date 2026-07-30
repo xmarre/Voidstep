@@ -9,10 +9,10 @@ using Voidstep.Core;
 namespace Voidstep
 {
     /// <summary>
-    /// Replaces the provisional per-tick TOR stance release with a one-shot handoff.
-    /// TOR owns cached wielded items and weapon-key bindings while ability mode is active;
-    /// every Voidstep proxy selection must therefore leave TOR targeting immediately after
-    /// Voidstep has accepted the selection, not only Voidstep Cleave.
+    /// Performs a one-shot TOR targeting handoff for every Voidstep proxy and restores TOR's
+    /// cached wielded items and weapon bindings. Targeting release and restoration success are
+    /// tracked separately so a transient restoration failure can be retried without reopening or
+    /// closing TOR targeting again.
     /// </summary>
     internal static class TorCleaveWeaponStateRepair
     {
@@ -32,7 +32,9 @@ namespace Voidstep
 
         private sealed class State
         {
-            internal AbilityId? ReleasedAbility;
+            internal AbilityId? Ability;
+            internal bool TargetingReleased;
+            internal bool WeaponStateRestored;
             internal bool RestoreFailureLogged;
         }
 
@@ -47,27 +49,28 @@ namespace Voidstep
                     typeof(TorAbilityWheelAdapter),
                     nameof(TorAbilityWheelAdapter.Tick),
                     new[] { typeof(float) });
-                var obsoletePostfix = AccessTools.Method(
-                    typeof(TorCleaveStanceReleasePatch),
-                    "Postfix");
                 var replacementPostfix = AccessTools.Method(
                     typeof(TorCleaveWeaponStateRepair),
                     nameof(AfterAdapterTick));
 
-                if (target == null || obsoletePostfix == null || replacementPostfix == null)
+                if (target == null || replacementPostfix == null)
                     throw new MissingMethodException("Voidstep TOR weapon-state repair patch surface is incomplete.");
 
                 var harmony = new Harmony(HarmonyId);
-                harmony.Unpatch(target, obsoletePostfix);
-
                 var info = Harmony.GetPatchInfo(target);
                 var alreadyPatched = info != null && info.Postfixes.Any(
                     patch => patch.PatchMethod == replacementPostfix);
                 if (!alreadyPatched)
-                    harmony.Patch(target, postfix: new HarmonyMethod(replacementPostfix));
+                {
+                    var method = new HarmonyMethod(replacementPostfix)
+                    {
+                        priority = Priority.Last
+                    };
+                    harmony.Patch(target, postfix: method);
+                }
 
                 _installed = true;
-                Logger.Info("Replaced repeated TOR stance cleanup with one-shot Voidstep weapon-state restoration for every proxy ability.");
+                Logger.Info("Installed one-shot TOR targeting and weapon-state restoration for every Voidstep proxy ability.");
             }
             catch (Exception ex)
             {
@@ -86,35 +89,44 @@ namespace Voidstep
 
             if (!selectedAbility.HasValue)
             {
-                state.ReleasedAbility = null;
-                state.RestoreFailureLogged = false;
+                ResetState(state);
                 return;
             }
 
-            if (state.ReleasedAbility.HasValue && state.ReleasedAbility.Value != selectedAbility.Value)
+            if (!state.Ability.HasValue || state.Ability.Value != selectedAbility.Value)
             {
-                state.ReleasedAbility = null;
-                state.RestoreFailureLogged = false;
+                ResetState(state);
+                state.Ability = selectedAbility.Value;
             }
 
-            if (!__instance.OwnsTargeting)
-                return;
+            if (!state.TargetingReleased)
+            {
+                if (!__instance.OwnsTargeting)
+                    return;
 
-            if (state.ReleasedAbility.HasValue && state.ReleasedAbility.Value == selectedAbility.Value)
+                __instance.CloseTargetingMode();
+                state.TargetingReleased = true;
+            }
+            else if (__instance.OwnsTargeting)
             {
                 // TOR can expose its previous targeting state for one additional tick.
-                // Do not call its native cleanup path again; only clear Voidstep's stale
-                // ownership mirror so combat input and confirmation remain available.
+                // Clear only Voidstep's stale ownership mirror; never repeat native cleanup.
                 TargetingOwned(__instance) = false;
-                return;
             }
 
-            state.ReleasedAbility = selectedAbility.Value;
-            __instance.CloseTargetingMode();
-            RestoreTorWeaponState(__instance, state, selectedAbility.Value);
+            if (!state.WeaponStateRestored)
+            {
+                state.WeaponStateRestored = RestoreTorWeaponState(
+                    __instance,
+                    state,
+                    selectedAbility.Value);
+            }
         }
 
-        private static void RestoreTorWeaponState(TorAbilityWheelAdapter adapter, State state, AbilityId ability)
+        private static bool RestoreTorWeaponState(
+            TorAbilityWheelAdapter adapter,
+            State state,
+            AbilityId ability)
         {
             try
             {
@@ -123,37 +135,53 @@ namespace Voidstep
                     throw new InvalidOperationException("TOR ability-manager logic is unavailable after Voidstep selection.");
 
                 var logicType = logic.GetType();
-                var updateWieldedItems = logicType.GetMethod(
-                    "UpdateWieldedItems",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    null,
-                    Type.EmptyTypes,
-                    null);
-                var bindWeaponKeys = logicType.GetMethod(
-                    "BindWeaponKeys",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    null,
-                    Type.EmptyTypes,
-                    null);
-
-                updateWieldedItems?.Invoke(logic, null);
-                bindWeaponKeys?.Invoke(logic, null);
-
+                var updateWieldedItems = FindInstanceMethod(logicType, "UpdateWieldedItems");
+                var bindWeaponKeys = FindInstanceMethod(logicType, "BindWeaponKeys");
                 if (updateWieldedItems == null || bindWeaponKeys == null)
                 {
                     throw new MissingMethodException(
                         "TOR did not expose both UpdateWieldedItems() and BindWeaponKeys().");
                 }
 
+                updateWieldedItems.Invoke(logic, null);
+                bindWeaponKeys.Invoke(logic, null);
+                state.RestoreFailureLogged = false;
                 Logger.Debug("TOR " + ability + " selection restored cached wielded items and weapon-key bindings once.");
+                return true;
             }
             catch (Exception ex)
             {
-                if (state.RestoreFailureLogged)
-                    return;
-                state.RestoreFailureLogged = true;
-                Logger.Error("TOR Voidstep weapon-state restoration failed for " + ability + ".", Unwrap(ex));
+                if (!state.RestoreFailureLogged)
+                {
+                    state.RestoreFailureLogged = true;
+                    Logger.Error("TOR Voidstep weapon-state restoration failed for " + ability + "; retrying on a later tick.", Unwrap(ex));
+                }
+                return false;
             }
+        }
+
+        private static MethodInfo FindInstanceMethod(Type type, string name)
+        {
+            for (var current = type; current != null; current = current.BaseType)
+            {
+                var method = current.GetMethod(
+                    name,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
+                    null,
+                    Type.EmptyTypes,
+                    null);
+                if (method != null)
+                    return method;
+            }
+            return null;
+        }
+
+        private static void ResetState(State state)
+        {
+            state.Ability = null;
+            state.TargetingReleased = false;
+            state.WeaponStateRestored = false;
+            state.RestoreFailureLogged = false;
         }
 
         private static Exception Unwrap(Exception exception)
