@@ -14,7 +14,8 @@ namespace Voidstep
                                   __instance.ActiveAbility == AbilityId.Blink &&
                                   __instance.Phase == AbilityPhase.Targeting;
             var enteringBlinkTargeting = ability == AbilityId.Blink && !confirmingBlink;
-            __state = disablingDarkVision || enteringBlinkTargeting;
+            var cleaveOwnsExecutionAction = ability == AbilityId.VoidstepCleave;
+            __state = disablingDarkVision || enteringBlinkTargeting || cleaveOwnsExecutionAction;
         }
 
         private static void Postfix(AbilityManager __instance, AbilityId ability, bool __result, bool __state)
