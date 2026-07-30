@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.2.0
+VOIDSTEP — ARCANE MELEE ABILITIES v1.2.1
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional integration: The Old Realms 1.16
 
@@ -33,7 +33,10 @@ Mastery progression is optional and disabled by default.
 Enable it under MCM > Voidstep — Mastery Progression > Progression.
 The system provides 99 mastery ranks and 19 skills across Core, Mobility, Force, Dominion, Reservoir and Convergence branches.
 Successful ability use awards bounded mastery XP. Each mastery rank grants one skill point.
-Foundation skills unlock the six abilities. Later skills reduce energy costs and cooldowns, raise progression energy and regeneration caps, and unlock advanced configured options.
+Foundation skills unlock the six abilities. Branch investment now directly increases actual ability mechanics: Blink and Voidstep teleport distance; Cleave radius, sweep, damage, knockback and target capacity; Windblast cone, range, force and damage; Bend Time strength and duration; Domino reach, links and propagation; and Dark Vision range and refresh speed.
+Energy-cost and cooldown reductions remain secondary support bonuses rather than the primary progression reward.
+Momentum preservation, sealed-wall traversal, complete suspension, cooldown-only mode, unlimited energy and unlimited Cleave targets require advanced masteries.
+Existing v1.2.0 skill investments remain compatible because the saved skill IDs are unchanged and now map to the stronger effects.
 The final Avatar of the Void capstone is fully reachable within the rank-99 point budget.
 Disabling progression immediately restores unrestricted use of the normal Voidstep MCM configuration.
 
