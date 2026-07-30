@@ -43,3 +43,5 @@ jobs:
         run: python scripts/verify_source_invariants.py
       - name: Verify wheel and TOR invariants
         run: python scripts/verify_wheel_invariants.py
+      - name: Verify Blink Bend Time and Domino regressions
+        run: python scripts/verify_runtime_regression_invariants.py
