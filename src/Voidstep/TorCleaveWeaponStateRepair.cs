@@ -9,9 +9,10 @@ using Voidstep.Core;
 namespace Voidstep
 {
     /// <summary>
-    /// Replaces the provisional per-tick Cleave stance release with a one-shot handoff.
+    /// Replaces the provisional per-tick TOR stance release with a one-shot handoff.
     /// TOR owns cached wielded items and weapon-key bindings while ability mode is active;
-    /// repeatedly calling DisableAbilityMode can therefore keep weapon selection disabled.
+    /// every Voidstep proxy selection must therefore leave TOR targeting immediately after
+    /// Voidstep has accepted the selection, not only Voidstep Cleave.
     /// </summary>
     internal static class TorCleaveWeaponStateRepair
     {
@@ -31,7 +32,7 @@ namespace Voidstep
 
         private sealed class State
         {
-            internal bool ReleasedForCurrentSelection;
+            internal AbilityId? ReleasedAbility;
             internal bool RestoreFailureLogged;
         }
 
@@ -54,7 +55,7 @@ namespace Voidstep
                     nameof(AfterAdapterTick));
 
                 if (target == null || obsoletePostfix == null || replacementPostfix == null)
-                    throw new MissingMethodException("Voidstep Cleave stance repair patch surface is incomplete.");
+                    throw new MissingMethodException("Voidstep TOR weapon-state repair patch surface is incomplete.");
 
                 var harmony = new Harmony(HarmonyId);
                 harmony.Unpatch(target, obsoletePostfix);
@@ -66,11 +67,11 @@ namespace Voidstep
                     harmony.Patch(target, postfix: new HarmonyMethod(replacementPostfix));
 
                 _installed = true;
-                Logger.Info("Replaced repeated TOR Cleave stance cleanup with one-shot weapon-state restoration.");
+                Logger.Info("Replaced repeated TOR stance cleanup with one-shot Voidstep weapon-state restoration for every proxy ability.");
             }
             catch (Exception ex)
             {
-                Logger.Error("TOR Cleave weapon-state repair could not be installed.", ex);
+                Logger.Error("TOR Voidstep weapon-state repair could not be installed.", ex);
             }
         }
 
@@ -81,21 +82,25 @@ namespace Voidstep
 
             var state = States.GetOrCreateValue(__instance);
             var selection = Selection(__instance);
-            var cleaveSelected = selection != null &&
-                                 selection.SelectedAbility.HasValue &&
-                                 selection.SelectedAbility.Value == AbilityId.VoidstepCleave;
+            var selectedAbility = selection?.SelectedAbility;
 
-            if (!cleaveSelected)
+            if (!selectedAbility.HasValue)
             {
-                state.ReleasedForCurrentSelection = false;
+                state.ReleasedAbility = null;
                 state.RestoreFailureLogged = false;
                 return;
+            }
+
+            if (state.ReleasedAbility.HasValue && state.ReleasedAbility.Value != selectedAbility.Value)
+            {
+                state.ReleasedAbility = null;
+                state.RestoreFailureLogged = false;
             }
 
             if (!__instance.OwnsTargeting)
                 return;
 
-            if (state.ReleasedForCurrentSelection)
+            if (state.ReleasedAbility.HasValue && state.ReleasedAbility.Value == selectedAbility.Value)
             {
                 // TOR can expose its previous targeting state for one additional tick.
                 // Do not call its native cleanup path again; only clear Voidstep's stale
@@ -104,18 +109,18 @@ namespace Voidstep
                 return;
             }
 
-            state.ReleasedForCurrentSelection = true;
+            state.ReleasedAbility = selectedAbility.Value;
             __instance.CloseTargetingMode();
-            RestoreTorWeaponState(__instance, state);
+            RestoreTorWeaponState(__instance, state, selectedAbility.Value);
         }
 
-        private static void RestoreTorWeaponState(TorAbilityWheelAdapter adapter, State state)
+        private static void RestoreTorWeaponState(TorAbilityWheelAdapter adapter, State state, AbilityId ability)
         {
             try
             {
                 var logic = Logic(adapter);
                 if (logic == null)
-                    throw new InvalidOperationException("TOR ability-manager logic is unavailable after Cleave selection.");
+                    throw new InvalidOperationException("TOR ability-manager logic is unavailable after Voidstep selection.");
 
                 var logicType = logic.GetType();
                 var updateWieldedItems = logicType.GetMethod(
@@ -140,14 +145,14 @@ namespace Voidstep
                         "TOR did not expose both UpdateWieldedItems() and BindWeaponKeys().");
                 }
 
-                Logger.Debug("TOR Cleave selection restored cached wielded items and weapon-key bindings once.");
+                Logger.Debug("TOR " + ability + " selection restored cached wielded items and weapon-key bindings once.");
             }
             catch (Exception ex)
             {
                 if (state.RestoreFailureLogged)
                     return;
                 state.RestoreFailureLogged = true;
-                Logger.Error("TOR Cleave weapon-state restoration failed.", Unwrap(ex));
+                Logger.Error("TOR Voidstep weapon-state restoration failed for " + ability + ".", Unwrap(ex));
             }
         }
 
