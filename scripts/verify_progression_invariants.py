@@ -7,6 +7,7 @@ runtime = root / "src" / "Voidstep"
 behavior_path = runtime / "Progression" / "VoidstepProgressionBehavior.cs"
 profile_path = runtime / "VoidstepProgressionRuntime.cs"
 patches_path = runtime / "VoidstepProgressionPatches.cs"
+context_path = runtime / "AbilityContext.cs"
 settings_path = runtime / "VoidstepProgressionSettings.cs"
 catalog_path = runtime / "VoidstepProgressionCatalog.cs"
 submodule_path = runtime / "VoidstepSubModule.cs"
@@ -22,6 +23,7 @@ required_paths = (
     behavior_path,
     profile_path,
     patches_path,
+    context_path,
     settings_path,
     catalog_path,
     submodule_path,
@@ -31,7 +33,6 @@ required_paths = (
     button_path,
     mastery_path,
 )
-
 missing = [str(path.relative_to(root)) for path in required_paths if not path.is_file()]
 if missing:
     for item in missing:
@@ -41,6 +42,7 @@ if missing:
 behavior = behavior_path.read_text(encoding="utf-8")
 profile = profile_path.read_text(encoding="utf-8")
 patches = patches_path.read_text(encoding="utf-8")
+context = context_path.read_text(encoding="utf-8")
 settings = settings_path.read_text(encoding="utf-8")
 catalog = catalog_path.read_text(encoding="utf-8")
 submodule = submodule_path.read_text(encoding="utf-8")
@@ -60,25 +62,11 @@ ability_gate_tokens = (
     "AbilityId.Domino",
     "AbilityId.DarkVision",
 )
-branch_tokens = (
-    '"Core"',
-    '"Mobility"',
-    '"Force"',
-    '"Dominion"',
-    '"Reservoir"',
-    '"Convergence"',
-)
+branch_tokens = ('"Core"', '"Mobility"', '"Force"', '"Dominion"', '"Reservoir"', '"Convergence"')
 prefab_bindings = (
-    "{MobilityNodes}",
-    "{ForceNodes}",
-    "{CoreNodes}",
-    "{DominionNodes}",
-    "{ReservoirNodes}",
-    "{ConvergenceNodes}",
-    "@SelectedName",
-    "ExecuteConfirm",
-    "ExecuteRespec",
-    "ExecuteToggleProgression",
+    "{MobilityNodes}", "{ForceNodes}", "{CoreNodes}", "{DominionNodes}",
+    "{ReservoirNodes}", "{ConvergenceNodes}", "@SelectedName", "ExecuteConfirm",
+    "ExecuteRespec", "ExecuteToggleProgression",
 )
 reachable_capstone_tokens = (
     "R(VoidstepSkillId.BendTheHour, 5)",
@@ -98,16 +86,11 @@ checks = {
         and "_voidstepMasteryXp_v1" in behavior
         and "_voidstepSkillLevels_v1" in behavior
     ),
-    "campaign behavior has no periodic tick listener": (
-        "TickEvent" not in behavior
-        and "HourlyTick" not in behavior
-        and "DailyTick" not in behavior
-        and "OnMissionTick" not in behavior
+    "campaign behavior has no periodic tick listener": all(
+        token not in behavior for token in ("TickEvent", "HourlyTick", "DailyTick", "OnMissionTick")
     ),
-    "campaign persistence stores no mission agents": (
-        "Agent " not in behavior
-        and "List<Agent" not in behavior
-        and "Dictionary<int, Agent" not in behavior
+    "campaign persistence stores no mission agents": all(
+        token not in behavior for token in ("Agent ", "List<Agent", "Dictionary<int, Agent")
     ),
     "runtime profile is immutable and cached": (
         "private readonly int[] _levels" in profile
@@ -121,9 +104,11 @@ checks = {
         and "Attach(VoidstepProgressionBehavior behavior)" in behavior
         and "Detach()" in behavior
     ),
-    "all six abilities have explicit mastery gates": all(token in catalog for token in ability_gate_tokens)
+    "all six abilities have explicit mastery gates": (
+        all(token in catalog for token in ability_gate_tokens)
         and "CanUse(AbilityId ability" in profile
-        and "ProgressionAbilityActivationPatch" in patches,
+        and "ProgressionAbilityActivationPatch" in patches
+    ),
     "disabled progression preserves configured values": (
         "if (!Enabled)" in profile
         and "return true;" in profile
@@ -133,13 +118,23 @@ checks = {
     "runtime setting interception is scope bounded and allocation free": (
         "[ThreadStatic]" in patches
         and "VoidstepProgressionRuntimeScope.Active" in patches
-        and "VoidstepProgressionRuntimeScope.Enter();" in patches
-        and "VoidstepProgressionRuntimeScope.Exit();" in patches
         and "new Lease" not in patches
         and "ProgressionAbilityTickScopePatch" in patches
-        and "ProgressionAbilityContextScopePatch" in patches
+        and "ProgressionAbilityActivationPatch" in patches
+        and "VoidstepProgressionRuntimeScope.Enter();" in context
+        and "VoidstepProgressionRuntimeScope.Exit();" in context
+        and "finally" in context
     ),
-    "runtime scope exits exactly through three finalizers": patches.count("private static Exception Finalizer") == 3,
+    "owned constructor is not Harmony patched": (
+        "ProgressionAbilityContextScopePatch" not in patches
+        and "HarmonyPatch(typeof(AbilityContext)" not in patches
+        and "VoidstepProgressionBoundarySynchronizer.SynchronizeAll();" in context
+    ),
+    "runtime scope exits through two Harmony finalizers plus constructor finally": (
+        patches.count("private static Exception Finalizer") == 2
+        and context.count("VoidstepProgressionRuntimeScope.Exit();") == 1
+        and context.count("finally") == 1
+    ),
     "xp awards are bounded and weak mission lifetime scoped": (
         "ConditionalWeakTable<object, AwardState>" in patches
         and "CreateValueCallback StateFactory" in patches
@@ -150,8 +145,9 @@ checks = {
     ),
     "mastery catalogue contains nineteen skills": catalog.count("D(VoidstepSkillId.") == 19,
     "mastery catalogue contains all branches": all(token in catalog for token in branch_tokens),
-    "final capstone is reachable inside the rank-99 budget": all(token in catalog for token in reachable_capstone_tokens)
-        and 78 + 10 <= 99,
+    "final capstone is reachable inside the rank-99 budget": (
+        all(token in catalog for token in reachable_capstone_tokens) and 78 + 10 <= 99
+    ),
     "progression has a separate MCM entry": (
         'Id => "Voidstep_Progression_v1"' in settings
         and "Enable Mastery Progression" in settings
@@ -176,17 +172,14 @@ checks = {
         and "ScreenManager.PopScreen();" in submodule
     ),
     "mastery XP console command rejects disabled progression": (
-        "if (!progression.Enabled) return \"Enable Voidstep mastery progression before awarding XP.\";" in submodule
+        'if (!progression.Enabled) return "Enable Voidstep mastery progression before awarding XP.";' in submodule
     ),
     "shortcut avoids Guided Arrow control-U": (
-        "InputKey.V" in submodule
-        and "InputKey.LeftShift" in submodule
-        and "InputKey.LeftControl" in submodule
-        and "InputKey.U" not in submodule
+        "InputKey.V" in submodule and "InputKey.LeftShift" in submodule
+        and "InputKey.LeftControl" in submodule and "InputKey.U" not in submodule
     ),
     "character button avoids Guided Arrow button position": (
-        'MarginBottom="164"' in button
-        and "ExecuteOpenMastery" in button
+        'MarginBottom="164"' in button and "ExecuteOpenMastery" in button
     ),
     "character button owns mouse buttons only": (
         "SetInputRestrictions(true, InputUsageMask.MouseButtons);" in character_button_controller
@@ -195,12 +188,8 @@ checks = {
     "standalone wheel remains display only in this independent gate": (
         "display-only Gauntlet layer" in standalone_wheel
         and all(token not in standalone_wheel for token in (
-            "IsFocusLayer",
-            "ConfigureInputRestrictions",
-            "SetInputRestrictions",
-            "TrySetFocus",
-            "TryLoseFocus",
-            "InputUsageMask",
+            "IsFocusLayer", "ConfigureInputRestrictions", "SetInputRestrictions",
+            "TrySetFocus", "TryLoseFocus", "InputUsageMask",
         ))
     ),
     "mastery prefab binds every branch and action": all(token in mastery for token in prefab_bindings),
@@ -211,16 +200,13 @@ checks = {
         and "VoidstepProgressionService.Changed -= RefreshAll" in viewmodels
     ),
     "packages require both mastery prefabs": all(
-        name in build and name in ci_build
-        for name in ("VoidstepCharacterButton.xml", "VoidstepMastery.xml")
+        name in build and name in ci_build for name in ("VoidstepCharacterButton.xml", "VoidstepMastery.xml")
     ),
 }
 
 failed = [name for name, passed in checks.items() if not passed]
 for name, passed in checks.items():
     print(("PASS " if passed else "FAIL ") + name)
-
 if failed:
     sys.exit(1)
-
 print("Voidstep progression invariants passed.")
