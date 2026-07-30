@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Version = "1.2.0"
+$Version = "1.2.1"
 $Solution = Join-Path $Root "Voidstep.sln"
 $RuntimeProject = Join-Path $Root "src/Voidstep/Voidstep.csproj"
 $TestProject = Join-Path $Root "tests/Voidstep.Core.Tests/Voidstep.Core.Tests.csproj"
@@ -148,17 +148,3 @@ try {
 } finally {
     $zip.Dispose()
 }
-
-$ZipHash = (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$DllHash = (Get-FileHash $RuntimeDll -Algorithm SHA256).Hash.ToLowerInvariant()
-$CoreHash = (Get-FileHash $CoreDll -Algorithm SHA256).Hash.ToLowerInvariant()
-@(
-    "$ZipHash  $([IO.Path]::GetFileName($ZipPath))",
-    "$DllHash  Voidstep.dll",
-    "$CoreHash  Voidstep.Core.dll"
-) | Set-Content (Join-Path $Dist "SHA256SUMS.txt") -Encoding UTF8
-
-Write-Host "Build and tests passed."
-Write-Host "Release ZIP: $ZipPath"
-Write-Host "Release ZIP SHA-256: $ZipHash"
-Write-Host "Voidstep.dll SHA-256: $DllHash"

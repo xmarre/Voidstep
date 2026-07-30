@@ -6,11 +6,13 @@ namespace Voidstep
     internal sealed class VoidstepProgressionProfile
     {
         private readonly int[] _levels;
+        private readonly Func<VoidstepSkillId, int> _levelResolver;
 
         private VoidstepProgressionProfile(bool enabled, int[] levels)
         {
             Enabled = enabled;
             _levels = levels ?? new int[VoidstepSkillCatalog.All.Count];
+            _levelResolver = Level;
         }
 
         internal static readonly VoidstepProgressionProfile Disabled =
@@ -77,13 +79,13 @@ namespace Voidstep
         internal float EffectiveCost(AbilityId ability, float configured)
         {
             if (!Enabled) return configured;
-            return Math.Max(0f, configured * VoidstepProgressionBalance.CostMultiplier(ability, Level));
+            return Math.Max(0f, configured * VoidstepProgressionBalance.CostMultiplier(ability, _levelResolver));
         }
 
         internal float EffectiveCooldown(AbilityId ability, float configured)
         {
             if (!Enabled) return configured;
-            return Math.Max(0f, configured * VoidstepProgressionBalance.CooldownMultiplier(ability, Level));
+            return Math.Max(0f, configured * VoidstepProgressionBalance.CooldownMultiplier(ability, _levelResolver));
         }
 
         internal bool AllowMomentumPreservation(bool configured)
@@ -108,6 +110,108 @@ namespace Voidstep
         {
             if (!Enabled) return configured;
             return configured && Level(VoidstepSkillId.UnboundPower) >= 10;
+        }
+
+        internal bool AllowWallTraversal(bool configured)
+        {
+            return Enabled
+                ? configured && Level(VoidstepSkillId.MomentumWeave) >= 10
+                : configured;
+        }
+
+        internal float EffectiveCleaveRadius(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveRadius(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveCleaveSweepDegrees(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveSweepDegrees(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveCleaveDamageMultiplier(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveDamageMultiplier(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveCleaveKnockback(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveKnockback(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveCleaveKnockdownThreshold(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveKnockdownThreshold(configured, _levelResolver) : configured;
+        }
+
+        internal int EffectiveMaximumCleaveTargets(int configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.MaximumCleaveTargets(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveVoidstepRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.VoidstepRange(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveBlinkRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.BlinkRange(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveWindblastAngle(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastAngle(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveWindblastRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastRange(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveWindblastForce(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastForce(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveWindblastDamage(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastDamage(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveBendTimeFactor(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.BendTimeFactor(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveBendTimeDuration(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.BendTimeDuration(configured, _levelResolver) : configured;
+        }
+
+        internal int EffectiveDominoMaximumLinks(int configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DominoMaximumLinks(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveDominoDamageFactor(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DominoDamageFactor(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveDominoRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DominoRange(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveDarkVisionRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DarkVisionRange(configured, _levelResolver) : configured;
+        }
+
+        internal float EffectiveDarkVisionRefreshInterval(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DarkVisionRefreshInterval(configured, _levelResolver) : configured;
         }
     }
 }

@@ -42,11 +42,18 @@ While enabled:
 - each mastery rank grants one skill point, up to rank 99;
 - the tree contains Core, Mobility, Force, Dominion, Reservoir and Convergence branches;
 - rank 1 in the corresponding foundation skill unlocks each of the six abilities;
-- further investment reduces configured energy costs and cooldowns or raises the progression caps applied to configured maximum energy and regeneration;
-- Blink momentum preservation, complete time suspension, cooldown-only mode and unlimited energy require their advanced mastery skills;
-- **Avatar of the Void** is fully reachable and can release the progression energy and regeneration caps at rank 10.
+- **Blink gains real teleport-range progression** through Rift Step, Rift Reach and Void Dancer; **Voidstep Cleave's teleport range** grows through Void Affinity, Rift Reach and Void Dancer;
+- Cleave also gains radius, sweep angle, damage, knockback, knockdown reliability and target capacity;
+- Windblast gains cone angle, range, force and damage;
+- Bend Time gains duration and slowdown strength;
+- Domino gains marking range, link capacity and damage propagation;
+- Dark Vision gains detection range and refresh speed;
+- Unbound Power, Singularity and Avatar of the Void amplify mechanical ability effects across every branch;
+- energy-cost and cooldown reductions remain secondary support bonuses rather than the tree's primary reward;
+- Blink momentum preservation, sealed-wall traversal, complete time suspension, cooldown-only mode, unlimited energy and unlimited Cleave targets require advanced mastery skills;
+- **Avatar of the Void** is fully reachable and releases progression energy and regeneration caps at rank 10.
 
-The normal Voidstep MCM configuration remains unrestricted whenever progression is disabled. Existing saves receive an empty progression record without changing mission behaviour until the feature is enabled.
+The normal Voidstep MCM configuration remains unrestricted whenever progression is disabled. Existing v1.2.0 mastery XP and invested points remain compatible because the persisted skill IDs are unchanged; those points now map to the stronger v1.2.1 effects.
 
 Open the mastery tree from the **Voidstep Mastery** button on the native Character screen, or press:
 
@@ -166,10 +173,12 @@ voidstep.add_mastery_xp <positive amount>
 ## Compatibility and performance
 
 - The combat runtime remains mission-scoped and owns all mission agents, markers, input state and effects for one mission lifetime.
-- The progression campaign behavior stores only integers and hero-keyed dictionaries and listens only to campaign lifecycle/save events; it registers no hourly, daily or campaign-map tick.
-- Mission code reads one immutable cached progression profile. Profile rebuilding occurs only on load, enable/disable, XP/rank changes, investment, respec or teardown.
-- Progression setting interception is thread-local and allocation-free on the mission tick path.
+- The progression campaign behavior stores only versioned hero-keyed integer state and registers no hourly, daily or campaign-map tick.
+- Mission code reads one immutable volatile mastery profile rebuilt only on lifecycle/state mutations.
+- Progression setting interception uses allocation-free thread-static ownership limited to Voidstep ability execution.
+- Mechanical mastery scaling patches only Voidstep-owned settings reads and performs constant-time arithmetic with no allocations or agent scans.
 - No static collection stores mission agents.
+- XP throttle state is weakly owned by mission controllers/managers.
 - Wheel, preview, proxy, marker and input state is deterministically removed.
 - TOR integration is reflection-isolated and does not redistribute or compile against `TOR_Core.dll`.
 - Domino never registers a propagated blow from inside Bannerlord's native hit or removal callbacks.
@@ -191,4 +200,4 @@ Place the exact files listed in `references/reference-manifest.json` in `referen
 .\build.ps1
 ```
 
-The build validates reference hashes and API signatures, runs xUnit and independent mirrors, checks mission, progression, wheel/TOR and runtime-regression invariants, compiles Release, stages only runtime files, requires all three Gauntlet prefabs, rejects bundled TaleWorlds/TOR/MCM DLLs and emits ZIP/DLL/source SHA-256 identities.
+The build validates reference hashes and API signatures, runs xUnit and independent mirrors, checks mission, progression, mastery-power, wheel/TOR and runtime-regression invariants, compiles Release, stages only runtime files, requires all three Gauntlet prefabs, rejects bundled TaleWorlds/TOR/MCM DLLs and emits ZIP/DLL/source SHA-256 identities.
