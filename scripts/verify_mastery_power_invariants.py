@@ -70,9 +70,10 @@ checks = {
         and "supports ability growth rather than replacing it" in catalog
         and "range, radius, force, damage and duration" in catalog
     ),
-    "sealed wall traversal has a late mastery gate": (
+    "sealed wall traversal has exactly the documented late mastery gate": (
         "AllowWallTraversal" in profile
-        and "MomentumWeave) >= 10" in profile
+        and "configured && Level(VoidstepSkillId.MomentumWeave) >= 10" in profile
+        and "|| Level(VoidstepSkillId.AvatarOfTheVoid)" not in profile
         and '"get_BlinkThroughWalls"' in patches
     ),
     "unlimited cleave targets require the final capstone": (
