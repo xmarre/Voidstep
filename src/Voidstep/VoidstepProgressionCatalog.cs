@@ -511,8 +511,8 @@ namespace Voidstep
                 case VoidstepSkillId.RapidRecovery:
                     return "Regeneration contribution: +" + F(0.3f * level, 1) + "/s. Global cooldown reduction: " + F(0.6f * level, 1) + "%.";
                 case VoidstepSkillId.UnboundPower:
-                    return "All range/radius +" + F(level, 1) + "%; raw force/damage/duration +" + F(1f * level, 1) +
-                           "%. Maximum energy +" + (6 * level) + "; regeneration +" + F(0.5f * level, 1) + "/s." +
+                    return "All range/radius +" + F(level, 1) + "%; raw force/damage/duration +at least " + F(1f * level, 1) +
+                           "% (some effects scale faster). Maximum energy +" + (6 * level) + "; regeneration +" + F(0.5f * level, 1) + "/s." +
                            (level >= 5 ? " Cooldown-only mode permitted." : string.Empty) +
                            (level >= 10 ? " Unlimited energy permitted." : string.Empty);
                 case VoidstepSkillId.Singularity:
