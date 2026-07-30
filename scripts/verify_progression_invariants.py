@@ -11,6 +11,8 @@ settings_path = runtime / "VoidstepProgressionSettings.cs"
 catalog_path = runtime / "VoidstepProgressionCatalog.cs"
 submodule_path = runtime / "VoidstepSubModule.cs"
 viewmodels_path = runtime / "VoidstepMasteryViewModels.cs"
+character_button_controller_path = runtime / "VoidstepCharacterScreenButton.cs"
+standalone_wheel_path = runtime / "StandaloneAbilityWheel.cs"
 button_path = root / "module" / "Voidstep" / "GUI" / "Prefabs" / "VoidstepCharacterButton.xml"
 mastery_path = root / "module" / "Voidstep" / "GUI" / "Prefabs" / "VoidstepMastery.xml"
 build_path = root / "build.ps1"
@@ -24,6 +26,8 @@ required_paths = (
     catalog_path,
     submodule_path,
     viewmodels_path,
+    character_button_controller_path,
+    standalone_wheel_path,
     button_path,
     mastery_path,
 )
@@ -41,6 +45,8 @@ settings = settings_path.read_text(encoding="utf-8")
 catalog = catalog_path.read_text(encoding="utf-8")
 submodule = submodule_path.read_text(encoding="utf-8")
 viewmodels = viewmodels_path.read_text(encoding="utf-8")
+character_button_controller = character_button_controller_path.read_text(encoding="utf-8")
+standalone_wheel = standalone_wheel_path.read_text(encoding="utf-8")
 button = button_path.read_text(encoding="utf-8")
 mastery = mastery_path.read_text(encoding="utf-8")
 build = build_path.read_text(encoding="utf-8")
@@ -118,9 +124,10 @@ checks = {
     "all six abilities have explicit mastery gates": all(token in catalog for token in ability_gate_tokens)
         and "CanUse(AbilityId ability" in profile
         and "ProgressionAbilityActivationPatch" in patches,
-    "disabled progression preserves original behavior": (
+    "disabled progression preserves configured values": (
         "if (!Enabled)" in profile
         and "return true;" in profile
+        and profile.count("if (!Enabled) return configured;") == 4
         and "VoidstepProgressionProfile.Disabled" in behavior
     ),
     "runtime setting interception is scope bounded and allocation free": (
@@ -168,6 +175,9 @@ checks = {
         and "if (ScreenManager.TopScreen is VoidstepMasteryScreen)" in submodule
         and "ScreenManager.PopScreen();" in submodule
     ),
+    "mastery XP console command rejects disabled progression": (
+        "if (!progression.Enabled) return \"Enable Voidstep mastery progression before awarding XP.\";" in submodule
+    ),
     "shortcut avoids Guided Arrow control-U": (
         "InputKey.V" in submodule
         and "InputKey.LeftShift" in submodule
@@ -178,7 +188,24 @@ checks = {
         'MarginBottom="164"' in button
         and "ExecuteOpenMastery" in button
     ),
+    "character button owns mouse buttons only": (
+        "SetInputRestrictions(true, InputUsageMask.MouseButtons);" in character_button_controller
+        and "SetInputRestrictions();" not in character_button_controller
+    ),
+    "standalone wheel remains display only in this independent gate": (
+        "display-only Gauntlet layer" in standalone_wheel
+        and all(token not in standalone_wheel for token in (
+            "IsFocusLayer",
+            "ConfigureInputRestrictions",
+            "SetInputRestrictions",
+            "TrySetFocus",
+            "TryLoseFocus",
+            "InputUsageMask",
+        ))
+    ),
     "mastery prefab binds every branch and action": all(token in mastery for token in prefab_bindings),
+    "mastery header status is read only": mastery.count('Command.Click="ExecuteToggleProgression"') == 1,
+    "mastery view model has no unbound XP property": "XpProgress" not in viewmodels and "@XpProgress" not in mastery,
     "view model unsubscribes from progression events": (
         "VoidstepProgressionService.Changed += RefreshAll" in viewmodels
         and "VoidstepProgressionService.Changed -= RefreshAll" in viewmodels
