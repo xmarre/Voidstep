@@ -98,6 +98,7 @@ if ($Python) {
         "scripts/verify_progression_invariants.py",
         "scripts/verify_mastery_power_invariants.py",
         "scripts/verify_mastery_unlock_invariants.py",
+        "scripts/verify_ability_effect_invariants.py",
         "scripts/verify_wheel_invariants.py",
         "scripts/verify_runtime_regression_invariants.py"
     )) {
