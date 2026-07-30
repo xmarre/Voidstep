@@ -343,50 +343,50 @@ namespace Voidstep
         internal static readonly IReadOnlyList<VoidstepSkillDefinition> All = new[]
         {
             D(VoidstepSkillId.VoidAffinity, "Void Affinity", "Core", "◆", 20, 1, 25, 0,
-                "Unlocks Voidstep Cleave and directly grows its radius, teleport range, sweep, damage, knockback and target capacity."),
+                "Unlocks Voidstep Cleave. Increases teleport range, cleave radius, sweep, damage, knockback and target capacity."),
 
             D(VoidstepSkillId.RiftStep, "Rift Step", "Mobility", "↯", 20, 2, 50, 1,
-                "Unlocks Blink. Every rank increases Blink distance instead of merely making the cast cheaper.", R(VoidstepSkillId.VoidAffinity, 3)),
+                "Unlocks Blink. Increases Blink teleport range.", R(VoidstepSkillId.VoidAffinity, 3)),
             D(VoidstepSkillId.PhaseRecovery, "Rift Reach", "Mobility", "⌁", 20, 8, 75, 2,
-                "Expands both teleport abilities: Blink range, Voidstep teleport range, Cleave radius and Cleave target capacity.", R(VoidstepSkillId.RiftStep, 5)),
+                "Extends Blink and Voidstep Cleave teleport range and increases Cleave radius and target capacity.", R(VoidstepSkillId.RiftStep, 5)),
             D(VoidstepSkillId.MomentumWeave, "Momentum Weave", "Mobility", "➤", 10, 20, 100, 3,
-                "Rank 1 permits configured momentum preservation. Rank 10 permits configured sealed-wall traversal.", R(VoidstepSkillId.PhaseRecovery, 5)),
+                "Rank 1 preserves momentum after Blink. Rank 10 allows passage through sealed obstacles when enabled.", R(VoidstepSkillId.PhaseRecovery, 5)),
             D(VoidstepSkillId.VoidDancer, "Void Dancer", "Mobility", "✦", 10, 40, 150, 4,
-                "Mobility capstone: greatly expands Blink and Voidstep range while widening, strengthening and raising the target cap of Cleave.", R(VoidstepSkillId.MomentumWeave, 5)),
+                "Greatly extends both teleports and increases Cleave radius, damage, knockback and target capacity.", R(VoidstepSkillId.MomentumWeave, 5)),
 
             D(VoidstepSkillId.GaleForce, "Gale Force", "Force", "≋", 20, 5, 75, 1,
-                "Unlocks Windblast and grows its cone angle, range, force and damage with every rank.", R(VoidstepSkillId.VoidAffinity, 5)),
+                "Unlocks Windblast. Increases its cone angle, range, force and damage.", R(VoidstepSkillId.VoidAffinity, 5)),
             D(VoidstepSkillId.CrushingWave, "Crushing Wave", "Force", "◈", 20, 15, 100, 2,
-                "Turns Windblast into a heavy battlefield tool by sharply increasing force and damage, while also reinforcing Cleave impact.", R(VoidstepSkillId.GaleForce, 5)),
+                "Greatly increases Windblast force and damage and strengthens Voidstep Cleave impacts.", R(VoidstepSkillId.GaleForce, 5)),
             D(VoidstepSkillId.BendTheHour, "Bend the Hour", "Force", "⌛", 20, 25, 125, 3,
-                "Unlocks Bend Time. Every rank increases duration and deepens the world slowdown.", R(VoidstepSkillId.CrushingWave, 5)),
+                "Unlocks Bend Time. Increases its duration and slowdown strength.", R(VoidstepSkillId.CrushingWave, 5)),
             D(VoidstepSkillId.Chronomancer, "Chronomancer", "Force", "◷", 10, 45, 175, 4,
-                "Force capstone: strongly increases Bend Time duration and slowdown. Rank 10 permits configured complete suspension.", R(VoidstepSkillId.BendTheHour, 5)),
+                "Greatly increases Bend Time duration and slowdown strength. Rank 10 allows complete suspension when enabled.", R(VoidstepSkillId.BendTheHour, 5)),
 
             D(VoidstepSkillId.FatefulLink, "Fateful Link", "Dominion", "∞", 20, 5, 75, 1,
-                "Unlocks Domino and increases marking range, link capacity and propagated damage.", R(VoidstepSkillId.VoidAffinity, 5)),
+                "Unlocks Domino. Increases marking range, linked targets and propagated damage.", R(VoidstepSkillId.VoidAffinity, 5)),
             D(VoidstepSkillId.SharedAgony, "Shared Agony", "Dominion", "⛓", 20, 18, 100, 2,
-                "Greatly increases Domino link count, marking range and damage propagation strength.", R(VoidstepSkillId.FatefulLink, 5)),
+                "Greatly increases Domino range, linked targets and propagated damage.", R(VoidstepSkillId.FatefulLink, 5)),
             D(VoidstepSkillId.UmbralSight, "Umbral Sight", "Dominion", "◉", 20, 10, 75, 3,
-                "Unlocks Dark Vision and expands its detection radius while accelerating hostile refreshes.", R(VoidstepSkillId.VoidAffinity, 5)),
+                "Unlocks Dark Vision. Increases detection range and refresh speed.", R(VoidstepSkillId.VoidAffinity, 5)),
             D(VoidstepSkillId.SovereignGaze, "Sovereign Gaze", "Dominion", "☉", 10, 35, 150, 4,
-                "Dominion capstone: massively improves Dark Vision range and refresh speed and also extends Domino reach and capacity.", R(VoidstepSkillId.UmbralSight, 5)),
+                "Greatly increases Dark Vision range and refresh speed and extends Domino range and link capacity.", R(VoidstepSkillId.UmbralSight, 5)),
 
             D(VoidstepSkillId.DeepReservoir, "Deep Reservoir", "Reservoir", "◇", 20, 2, 50, 1,
-                "Raises maximum Void Energy while progression is enabled.", R(VoidstepSkillId.VoidAffinity, 3)),
+                "Increases maximum Void Energy.", R(VoidstepSkillId.VoidAffinity, 3)),
             D(VoidstepSkillId.EfficientChanneling, "Efficient Channeling", "Reservoir", "△", 20, 10, 75, 2,
-                "Provides a moderate global energy-cost reduction; it supports ability growth rather than replacing it.", R(VoidstepSkillId.DeepReservoir, 5)),
+                "Reduces the Void Energy cost of every ability.", R(VoidstepSkillId.DeepReservoir, 5)),
             D(VoidstepSkillId.RapidRecovery, "Rapid Recovery", "Reservoir", "↻", 20, 20, 100, 3,
-                "Raises Void Energy regeneration and moderately reduces global cooldowns.", R(VoidstepSkillId.EfficientChanneling, 5)),
+                "Increases Void Energy regeneration and reduces ability cooldowns.", R(VoidstepSkillId.EfficientChanneling, 5)),
             D(VoidstepSkillId.UnboundPower, "Unbound Power", "Reservoir", "✹", 10, 45, 175, 4,
-                "Raises energy capacity and regeneration and adds raw range, radius, force, damage and duration to every branch. Rank 5 permits cooldown-only mode; rank 10 permits unlimited energy.", R(VoidstepSkillId.RapidRecovery, 5)),
+                "Strengthens every ability and increases Void Energy capacity and regeneration. Rank 5 unlocks cooldown-only mode; rank 10 unlocks unlimited energy.", R(VoidstepSkillId.RapidRecovery, 5)),
 
             D(VoidstepSkillId.Singularity, "Singularity", "Convergence", "⊙", 10, 60, 200, 1,
-                "Convergence mastery that increases every ability's range, radius, force, damage, duration, target capacity and refresh power.",
+                "Increases every ability's range, radius, force, damage, duration, target capacity and refresh speed.",
                 R(VoidstepSkillId.VoidDancer, 1), R(VoidstepSkillId.Chronomancer, 1),
                 R(VoidstepSkillId.SharedAgony, 5), R(VoidstepSkillId.SovereignGaze, 1)),
             D(VoidstepSkillId.AvatarOfTheVoid, "Avatar of the Void", "Convergence", "✺", 10, 80, 225, 2,
-                "Final transformation: further amplifies every mechanical effect. Rank 10 releases progression energy caps and configured unlimited Cleave targets.",
+                "Further strengthens every ability. Rank 10 removes progression energy limits and unlocks unlimited Cleave targets.",
                 R(VoidstepSkillId.Singularity, 5), R(VoidstepSkillId.UnboundPower, 5))
         };
 
@@ -470,12 +470,12 @@ namespace Voidstep
                         "%, damage +" + F(2f * level, 1) + "%, sweep +" + F(1.5f * level, 1) +
                         "%, knockback +" + F(2.5f * level, 1) + "% and target cap growth.";
                 case VoidstepSkillId.RiftStep:
-                    return level <= 0 ? "Rank 1 unlocks Blink." : "Blink range contribution: +" + F(2.5f * level, 1) + "%.";
+                    return level <= 0 ? "Rank 1 unlocks Blink." : "Blink range +" + F(2.5f * level, 1) + "%.";
                 case VoidstepSkillId.PhaseRecovery:
                     return "Blink and Voidstep range +" + F(3f * level, 1) + "%; Cleave radius +" + F(2.5f * level, 1) + "% and target cap growth.";
                 case VoidstepSkillId.MomentumWeave:
-                    return (level >= 1 ? "Configured momentum preservation permitted. " : "Rank 1 permits configured momentum preservation. ") +
-                           (level >= 10 ? "Configured sealed-wall traversal permitted." : "Rank 10 permits configured sealed-wall traversal.");
+                    return (level >= 1 ? "Blink preserves momentum. " : "Rank 1: Blink preserves momentum. ") +
+                           (level >= 10 ? "Blink can pass through sealed obstacles." : "Rank 10: Blink can pass through sealed obstacles.");
                 case VoidstepSkillId.VoidDancer:
                     return "Blink range +" + F(4f * level, 1) + "%, Voidstep range +" + F(3.5f * level, 1) +
                            "%, Cleave radius +" + F(3f * level, 1) + "%, damage +" + F(2.5f * level, 1) +
@@ -492,12 +492,12 @@ namespace Voidstep
                         "% and slowdown power +" + F(2.5f * level, 1) + "%.";
                 case VoidstepSkillId.Chronomancer:
                     return "Bend Time duration +" + F(4f * level, 1) + "% and slowdown power +" + F(3f * level, 1) + "%." +
-                           (level >= 10 ? " Configured complete suspension permitted." : " Rank 10 permits configured complete suspension.");
+                           (level >= 10 ? " Bend Time can completely suspend the world." : " Rank 10: Bend Time can completely suspend the world.");
                 case VoidstepSkillId.FatefulLink:
                     return level <= 0 ? "Rank 1 unlocks Domino." : "Domino range +" + F(2f * level, 1) +
                         "%, propagation +" + F(2.5f * level, 1) + "% and link-cap growth.";
                 case VoidstepSkillId.SharedAgony:
-                    return "Domino range/propagation +" + F(3f * level, 1) + "% and approximately +" + (level / 2) + " link capacity.";
+                    return "Domino range/propagation +" + F(3f * level, 1) + "% and link capacity +" + (level / 2) + ".";
                 case VoidstepSkillId.UmbralSight:
                     return level <= 0 ? "Rank 1 unlocks Dark Vision." : "Dark Vision range +" + F(2.5f * level, 1) +
                         "% and refresh speed +" + F(3f * level, 1) + "%.";
@@ -505,23 +505,23 @@ namespace Voidstep
                     return "Dark Vision range +" + F(3.5f * level, 1) + "% and refresh speed +" + F(6f * level, 1) +
                            "%; Domino range +" + F(2.5f * level, 1) + "% and link cap also increase.";
                 case VoidstepSkillId.DeepReservoir:
-                    return "Maximum energy contribution: +" + (4 * level) + ".";
+                    return "Maximum Void Energy +" + (4 * level) + ".";
                 case VoidstepSkillId.EfficientChanneling:
-                    return "Global energy-cost reduction: " + F(0.75f * level, 2) + "%.";
+                    return "Ability energy costs -" + F(0.75f * level, 2) + "%.";
                 case VoidstepSkillId.RapidRecovery:
-                    return "Regeneration contribution: +" + F(0.3f * level, 1) + "/s. Global cooldown reduction: " + F(0.6f * level, 1) + "%.";
+                    return "Void Energy regeneration +" + F(0.3f * level, 1) + "/s. Ability cooldowns -" + F(0.6f * level, 1) + "%.";
                 case VoidstepSkillId.UnboundPower:
-                    return "All range/radius +" + F(level, 1) + "%; raw force/damage/duration +at least " + F(1f * level, 1) +
+                    return "All ability ranges/radii +" + F(level, 1) + "%; force, damage and duration +at least " + F(1f * level, 1) +
                            "% (some effects scale faster). Maximum energy +" + (6 * level) + "; regeneration +" + F(0.5f * level, 1) + "/s." +
-                           (level >= 5 ? " Cooldown-only mode permitted." : string.Empty) +
-                           (level >= 10 ? " Unlimited energy permitted." : string.Empty);
+                           (level >= 5 ? " Cooldown-only casting unlocked." : string.Empty) +
+                           (level >= 10 ? " Unlimited Void Energy unlocked." : string.Empty);
                 case VoidstepSkillId.Singularity:
                     return "All ability range/radius/force/damage/duration +roughly " + F(2f * level, 1) +
                            "%; Cleave targets, Domino links and Dark Vision refresh also grow.";
                 case VoidstepSkillId.AvatarOfTheVoid:
                     return level >= 10
-                        ? "All mechanical effects amplified; configured energy caps and unlimited Cleave targets released."
-                        : "All mechanical effects receive a final +" + F(2f * level, 1) + " to " + F(4f * level, 1) + "% contribution.";
+                        ? "All ability effects strengthened; Void Energy caps removed; Cleave target limit removed."
+                        : "All ability effects +" + F(2f * level, 1) + " to " + F(4f * level, 1) + "%.";
                 default:
                     return string.Empty;
             }

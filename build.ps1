@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Version = "1.2.1"
+$Version = "1.2.2"
 $Solution = Join-Path $Root "Voidstep.sln"
 $RuntimeProject = Join-Path $Root "src/Voidstep/Voidstep.csproj"
 $TestProject = Join-Path $Root "tests/Voidstep.Core.Tests/Voidstep.Core.Tests.csproj"
@@ -89,6 +89,24 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXIT
 Write-Host "Running pure logic tests..."
 dotnet test $TestProject -c $Configuration --no-restore @BuildProperties
 if ($LASTEXITCODE -ne 0) { throw "Logic tests failed with exit code $LASTEXITCODE" }
+
+$Python = Get-Command python -ErrorAction SilentlyContinue
+if ($Python) {
+    foreach ($script in @(
+        "scripts/run_logic_mirror_tests.py",
+        "scripts/verify_source_invariants.py",
+        "scripts/verify_progression_invariants.py",
+        "scripts/verify_mastery_power_invariants.py",
+        "scripts/verify_mastery_unlock_invariants.py",
+        "scripts/verify_wheel_invariants.py",
+        "scripts/verify_runtime_regression_invariants.py"
+    )) {
+        & $Python.Source (Join-Path $Root $script)
+        if ($LASTEXITCODE -ne 0) { throw "Validation failed: $script" }
+    }
+} else {
+    throw "Python 3.12 or newer is required for release validation."
+}
 
 Write-Host "Compiling Voidstep..."
 dotnet build $RuntimeProject -c $Configuration --no-restore -o $BuildOut @BuildProperties

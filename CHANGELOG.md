@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.2
+
+- Synchronized invested mastery ranks with the immutable mission profile before battle initialization and ability activation.
+- Ensured Void Affinity rank 1 unlocks Voidstep Cleave in battle without requiring a reload or another mastery-state change.
+- Replaced all mastery descriptions with direct gameplay descriptions of their effects.
+- Added dedicated regression validation for mission-boundary unlock synchronization and all nineteen player-facing mastery descriptions.
+
 ## 1.2.1
 
 - Rebuilt Voidstep Mastery so skill investment directly improves the abilities instead of primarily reducing energy costs and cooldowns.
