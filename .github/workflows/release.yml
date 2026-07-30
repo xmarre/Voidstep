@@ -4,19 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'release/v1.2.0.json'
+      - 'release/v1.2.1.json'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: voidstep-v1.2.0-release
+  group: voidstep-v1.2.1-release
   cancel-in-progress: false
 
 env:
-  VERSION: 1.2.0
-  RELEASE_TAG: v1.2.0
+  VERSION: 1.2.1
+  RELEASE_TAG: v1.2.1
 
 jobs:
   release:
@@ -117,7 +117,8 @@ jobs:
             if ($isPrerelease) { $flags += '--prerelease' } else { $flags += '--latest' }
             & gh @flags
           }
-          if ($LASTEXITCODE -ne 0) { throw "Failed to publish $env:RELEASE_TAG." }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish $env:RELEASE_TAG."
+          }
       - name: Verify published assets
         shell: pwsh
         env:
