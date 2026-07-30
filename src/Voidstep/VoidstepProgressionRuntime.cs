@@ -109,5 +109,107 @@ namespace Voidstep
             if (!Enabled) return configured;
             return configured && Level(VoidstepSkillId.UnboundPower) >= 10;
         }
+
+        internal bool AllowWallTraversal(bool configured)
+        {
+            return Enabled
+                ? configured && (Level(VoidstepSkillId.MomentumWeave) >= 10 || Level(VoidstepSkillId.AvatarOfTheVoid) >= 5)
+                : configured;
+        }
+
+        internal float EffectiveCleaveRadius(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveRadius(configured, Level) : configured;
+        }
+
+        internal float EffectiveCleaveSweepDegrees(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveSweepDegrees(configured, Level) : configured;
+        }
+
+        internal float EffectiveCleaveDamageMultiplier(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveDamageMultiplier(configured, Level) : configured;
+        }
+
+        internal float EffectiveCleaveKnockback(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveKnockback(configured, Level) : configured;
+        }
+
+        internal float EffectiveCleaveKnockdownThreshold(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.CleaveKnockdownThreshold(configured, Level) : configured;
+        }
+
+        internal int EffectiveMaximumCleaveTargets(int configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.MaximumCleaveTargets(configured, Level) : configured;
+        }
+
+        internal float EffectiveVoidstepRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.VoidstepRange(configured, Level) : configured;
+        }
+
+        internal float EffectiveBlinkRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.BlinkRange(configured, Level) : configured;
+        }
+
+        internal float EffectiveWindblastAngle(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastAngle(configured, Level) : configured;
+        }
+
+        internal float EffectiveWindblastRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastRange(configured, Level) : configured;
+        }
+
+        internal float EffectiveWindblastForce(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastForce(configured, Level) : configured;
+        }
+
+        internal float EffectiveWindblastDamage(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.WindblastDamage(configured, Level) : configured;
+        }
+
+        internal float EffectiveBendTimeFactor(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.BendTimeFactor(configured, Level) : configured;
+        }
+
+        internal float EffectiveBendTimeDuration(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.BendTimeDuration(configured, Level) : configured;
+        }
+
+        internal int EffectiveDominoMaximumLinks(int configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DominoMaximumLinks(configured, Level) : configured;
+        }
+
+        internal float EffectiveDominoDamageFactor(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DominoDamageFactor(configured, Level) : configured;
+        }
+
+        internal float EffectiveDominoRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DominoRange(configured, Level) : configured;
+        }
+
+        internal float EffectiveDarkVisionRange(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DarkVisionRange(configured, Level) : configured;
+        }
+
+        internal float EffectiveDarkVisionRefreshInterval(float configured)
+        {
+            return Enabled ? VoidstepProgressionBalance.DarkVisionRefreshInterval(configured, Level) : configured;
+        }
     }
 }
