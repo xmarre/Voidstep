@@ -1,6 +1,6 @@
 # Voidstep — Arcane Melee Abilities
 
-Mission-scoped single-player combat abilities for **Mount & Blade II: Bannerlord 1.3.15**, with optional **The Old Realms 1.16** cast-wheel integration.
+Single-player combat abilities for **Mount & Blade II: Bannerlord 1.3.15**, with optional **The Old Realms 1.16** cast-wheel integration and an optional campaign-persisted mastery system.
 
 > Repository source is considered release-ready only after `./build.ps1` passes against the locked runtime references and the in-game matrix in `docs/TESTING.md` is completed. No TaleWorlds or TOR binary is redistributed.
 
@@ -26,10 +26,39 @@ Without TOR, Voidstep loads its own six-segment Gauntlet Q wheel. Both wheel pat
 - **Dark Vision** previews its radius, immediately highlights nearby hostiles and refreshes them at a configurable low frequency.
 - **Void Energy** is mission-local, configurable, regenerating and supports cooldown-only or unlimited modes.
 - **Native cast actions** play on successful activation, with suitable quick, heavy, vision and mounted fallbacks.
+- **Voidstep Mastery** optionally adds a level-99, 19-skill progression tree with save persistence, specialisation and respec support.
+
+## Voidstep Mastery
+
+Progression is disabled by default. Enable it under:
+
+```text
+MCM > Voidstep — Mastery Progression > Progression
+```
+
+While enabled:
+
+- successful ability use awards bounded mastery XP;
+- each mastery rank grants one skill point, up to rank 99;
+- the tree contains Core, Mobility, Force, Dominion, Reservoir and Convergence branches;
+- rank 1 in the corresponding foundation skill unlocks each of the six abilities;
+- further investment reduces configured energy costs and cooldowns or raises the progression caps applied to configured maximum energy and regeneration;
+- Blink momentum preservation, complete time suspension, cooldown-only mode and unlimited energy require their advanced mastery skills;
+- **Avatar of the Void** is fully reachable and can release the progression energy and regeneration caps at rank 10.
+
+The normal Voidstep MCM configuration remains unrestricted whenever progression is disabled. Existing saves receive an empty progression record without changing mission behaviour until the feature is enabled.
+
+Open the mastery tree from the **Voidstep Mastery** button on the native Character screen, or press:
+
+```text
+Ctrl+Shift+V on the campaign map
+```
+
+The Character-screen route closes the native character state, waits for the campaign map to rebuild, allows it to settle, and only then opens the mastery screen. This avoids pushing a Gauntlet screen onto an invalid Bannerlord state stack.
 
 ## Direct ability selectors
 
-The six native configurable bindings remain available, but they now **select** an ability instead of casting it immediately.
+The six native configurable bindings remain available, but they **select** an ability instead of casting it immediately.
 
 | Ability | Default selector |
 |---|---|
@@ -100,7 +129,9 @@ Modules/
     ├── README.txt
     ├── GUI/
     │   └── Prefabs/
-    │       └── VoidstepAbilityWheel.xml
+    │       ├── VoidstepAbilityWheel.xml
+    │       ├── VoidstepCharacterButton.xml
+    │       └── VoidstepMastery.xml
     └── bin/
         └── Win64_Shipping_Client/
             ├── Voidstep.dll
@@ -125,13 +156,23 @@ Enable **Debug logging** in MCM. The log records wheel mode, selected ability, M
 Documents/Mount and Blade II Bannerlord/Configs/ModLogs/Voidstep.log
 ```
 
+Development console helpers:
+
+```text
+voidstep.open_mastery
+voidstep.add_mastery_xp <positive amount>
+```
+
 ## Compatibility and performance
 
-- No campaign behavior or campaign-map tick is registered.
-- Wheel, preview, proxy, marker and input state is created per mission and deterministically removed.
+- The combat runtime remains mission-scoped and owns all mission agents, markers, input state and effects for one mission lifetime.
+- The progression campaign behavior stores only integers and hero-keyed dictionaries and listens only to campaign lifecycle/save events; it registers no hourly, daily or campaign-map tick.
+- Mission code reads one immutable cached progression profile. Profile rebuilding occurs only on load, enable/disable, XP/rank changes, investment, respec or teardown.
+- Progression setting interception is thread-local and allocation-free on the mission tick path.
+- No static collection stores mission agents.
+- Wheel, preview, proxy, marker and input state is deterministically removed.
 - TOR integration is reflection-isolated and does not redistribute or compile against `TOR_Core.dll`.
 - Domino never registers a propagated blow from inside Bannerlord's native hit or removal callbacks.
-- No static collection stores mission agents.
 - Preview updates reuse marker entities and bounded buffers rather than allocating or scanning the full agent list every frame.
 
 ## Known limitations
@@ -150,4 +191,4 @@ Place the exact files listed in `references/reference-manifest.json` in `referen
 .\build.ps1
 ```
 
-The build validates reference hashes and API signatures, runs xUnit and independent mirrors, compiles Release, stages only runtime files, verifies the standalone wheel prefab, rejects bundled TaleWorlds/TOR/MCM DLLs and emits ZIP/DLL/source SHA-256 identities.
+The build validates reference hashes and API signatures, runs xUnit and independent mirrors, checks mission, progression, wheel/TOR and runtime-regression invariants, compiles Release, stages only runtime files, requires all three Gauntlet prefabs, rejects bundled TaleWorlds/TOR/MCM DLLs and emits ZIP/DLL/source SHA-256 identities.
