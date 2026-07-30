@@ -27,15 +27,25 @@ namespace Voidstep
     [HarmonyPatch(typeof(AbilityManager), "ConfirmBlink")]
     internal static class BlinkSpellEffectPatch
     {
-        private static void Prefix(Agent player, out Vec3 __state)
+        private struct BlinkOriginState
         {
-            __state = player != null ? player.Position : Vec3.Invalid;
+            internal bool HasValue;
+            internal Vec3 Position;
         }
 
-        private static void Postfix(Agent player, Vec3 __state, bool __result, EffectController ____effects)
+        private static void Prefix(Agent player, out BlinkOriginState __state)
         {
-            if (!__result || player == null || !__state.IsValid) return;
-            try { VoidstepAbilityEffects.Blink(____effects, __state, player.Position); }
+            __state = new BlinkOriginState
+            {
+                HasValue = player != null,
+                Position = player != null ? player.Position : Vec3.Zero
+            };
+        }
+
+        private static void Postfix(Agent player, BlinkOriginState __state, bool __result, EffectController ____effects)
+        {
+            if (!__result || player == null || !__state.HasValue) return;
+            try { VoidstepAbilityEffects.Blink(____effects, __state.Position, player.Position); }
             catch { }
         }
     }
