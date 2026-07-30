@@ -41,6 +41,8 @@ jobs:
         run: python scripts/run_logic_mirror_tests.py
       - name: Verify mission-scope invariants
         run: python scripts/verify_source_invariants.py
+      - name: Verify progression integration invariants
+        run: python scripts/verify_progression_invariants.py
       - name: Verify wheel and TOR invariants
         run: python scripts/verify_wheel_invariants.py
       - name: Verify Blink Bend Time and Domino regressions
