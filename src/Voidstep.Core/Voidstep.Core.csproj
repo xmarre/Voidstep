@@ -4,9 +4,9 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>Voidstep.Core</AssemblyName>
     <RootNamespace>Voidstep.Core</RootNamespace>
-    <Version>1.2.1</Version>
-    <AssemblyVersion>1.2.1.0</AssemblyVersion>
-    <FileVersion>1.2.1.0</FileVersion>
+    <Version>1.2.2</Version>
+    <AssemblyVersion>1.2.2.0</AssemblyVersion>
+    <FileVersion>1.2.2.0</FileVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <Nullable>disable</Nullable>
