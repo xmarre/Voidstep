@@ -109,7 +109,7 @@ namespace Voidstep
                 _screen = screen;
                 _dataSource = new VoidstepCharacterScreenButtonVM(_openMastery);
                 _layer = new GauntletLayer("VoidstepCharacterButton", 221);
-                _layer.InputRestrictions.SetInputRestrictions();
+                _layer.InputRestrictions.SetInputRestrictions(true, InputUsageMask.MouseButtons);
                 _movie = _layer.LoadMovie("VoidstepCharacterButton", _dataSource);
                 _screen.AddLayer(_layer);
             }
