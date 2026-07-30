@@ -8,8 +8,9 @@ runtime = root / "src" / "Voidstep"
 catalog_path = runtime / "VoidstepProgressionCatalog.cs"
 profile_path = runtime / "VoidstepProgressionRuntime.cs"
 patches_path = runtime / "VoidstepProgressionPowerPatches.cs"
+selection_path = runtime / "AbilitySelectionController.cs"
 
-for path in (catalog_path, profile_path, patches_path):
+for path in (catalog_path, profile_path, patches_path, selection_path):
     if not path.is_file():
         print("FAIL missing mastery power file:", path.relative_to(root))
         sys.exit(1)
@@ -17,6 +18,7 @@ for path in (catalog_path, profile_path, patches_path):
 catalog = catalog_path.read_text(encoding="utf-8")
 profile = profile_path.read_text(encoding="utf-8")
 patches = patches_path.read_text(encoding="utf-8")
+selection = selection_path.read_text(encoding="utf-8")
 
 getter_methods = {
     "CleaveRadius": "EffectiveCleaveRadius",
@@ -82,6 +84,14 @@ checks = {
         "new " not in patches
         and "=>" not in patches
         and "VoidstepProgressionRuntimeScope.Active" in patches
+    ),
+    "cast previews use the same mastery-scaled settings as execution": (
+        "private void RefreshPreview(Agent player)" in selection
+        and "VoidstepProgressionRuntimeScope.Enter();" in selection
+        and "finally" in selection
+        and "VoidstepProgressionRuntimeScope.Exit();" in selection
+        and selection.index("VoidstepProgressionRuntimeScope.Enter();") < selection.index("BuildCleavePreview(player, ref color);")
+        and selection.index("BuildDominoPreview(player);") < selection.index("VoidstepProgressionRuntimeScope.Exit();")
     ),
 }
 
