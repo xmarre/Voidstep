@@ -1,143 +1,82 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
-using TaleWorlds.Engine;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using Voidstep.Core;
 
 namespace Voidstep
 {
-    // Retained as disabled documentation of the failed post-hoc restoration approach.
-    // Restoring LookDirection after a native turn request cannot undo the visual turn.
-    internal readonly struct CleaveFacingState
-    {
-        private CleaveFacingState(Agent actor, Vec3 actorFacing, Agent mount, Vec3 mountFacing)
-        {
-            Actor = actor;
-            ActorFacing = actorFacing;
-            Mount = mount;
-            MountFacing = mountFacing;
-        }
-
-        private Agent Actor { get; }
-        private Vec3 ActorFacing { get; }
-        private Agent Mount { get; }
-        private Vec3 MountFacing { get; }
-
-        internal static CleaveFacingState Capture(Agent actor)
-        {
-            if (actor == null || !actor.IsActive())
-                return default(CleaveFacingState);
-
-            var mount = actor.MountAgent;
-            if (mount != null && !mount.IsActive())
-                mount = null;
-
-            return new CleaveFacingState(
-                actor,
-                FluidCleaveRuntime.NormalizeFacing(actor.LookDirection),
-                mount,
-                mount != null ? FluidCleaveRuntime.NormalizeFacing(mount.LookDirection) : Vec3.Zero);
-        }
-
-        internal void Restore(VoidstepLogger logger, string stage)
-        {
-            if (Actor == null || !Actor.IsActive())
-                return;
-
-            try
-            {
-                if (Mount != null && Mount.IsActive())
-                    Mount.LookDirection = MountFacing;
-                Actor.LookDirection = ActorFacing;
-            }
-            catch (Exception ex)
-            {
-                logger?.Debug($"Cleave facing restoration failed during {stage}: {ex.Message}");
-            }
-        }
-    }
-
-    [HarmonyPatch(typeof(AbilityManager), "TickVoidstep")]
-    internal static class CleaveTickFacingGuardPatch
-    {
-        private static bool Prepare() => false;
-        private static void Prefix(Agent player, out CleaveFacingState __state) =>
-            __state = CleaveFacingState.Capture(player);
-        private static Exception Finalizer(AbilityManager __instance, CleaveFacingState __state, Exception __exception)
-        {
-            __state.Restore(__instance?.Logger, "Cleave tick");
-            return __exception;
-        }
-    }
-
-    [HarmonyPatch(typeof(AbilityManager), "CancelCurrent")]
-    internal static class CleaveCancellationFacingGuardPatch
-    {
-        private static bool Prepare() => false;
-        private static void Prefix(AbilityManager __instance, AbilityContext ____context, int ____castActorIndex, out CleaveFacingState __state)
-        {
-            __state = default(CleaveFacingState);
-            if (__instance == null || !__instance.IsBusy || __instance.ActiveAbility != AbilityId.VoidstepCleave)
-                return;
-            var actor = ____context?.Player;
-            if (actor != null && actor.Index == ____castActorIndex)
-                __state = CleaveFacingState.Capture(actor);
-        }
-        private static Exception Finalizer(AbilityManager __instance, CleaveFacingState __state, Exception __exception)
-        {
-            __state.Restore(__instance?.Logger, "Cleave cancellation");
-            return __exception;
-        }
-    }
-
-    internal sealed class FluidCleaveCastState
+    internal sealed class BodyAlignedCleaveState
     {
         internal readonly MBList<Agent> Nearby = new MBList<Agent>();
         internal Vec3 Facing = Vec3.Forward;
         internal Vec3 TargetPosition = Vec3.Invalid;
         internal int TargetIndex = -1;
+        internal int ActorIndex = -1;
         internal double StartAngle;
+        internal int VisualBurstIndex;
+        internal bool ForwardBurstPlayed;
         internal VoidstepLogger Logger;
     }
 
-    internal static class FluidCleaveRuntime
+    internal static class BodyAlignedCleaveRuntime
     {
-        private const float LockHalfAngleDegrees = 20f;
         private const float TargetStandOff = 1.30f;
-        private const float MinimumTargetAhead = 0.65f;
-        private static readonly float[] BackOffsets = { 0f, 0.30f, 0.60f, 0.95f, 1.30f, 1.70f, 2.15f };
-        private static readonly float[] SideOffsets = { 0f, 0.28f, -0.28f, 0.52f, -0.52f };
-        private static readonly ConditionalWeakTable<AbilityManager, FluidCleaveCastState> States =
-            new ConditionalWeakTable<AbilityManager, FluidCleaveCastState>();
+        private const float DefaultTravelDistance = 4.25f;
+        private const float MinimumForwardTargetDistance = 0.55f;
+        private const float MaximumTargetLateralOffset = 1.10f;
+        private const float ValidationStep = 0.35f;
+        private const float MinimumTeleportDistance = 0.10f;
+
+        private static readonly ConditionalWeakTable<AbilityManager, BodyAlignedCleaveState> States =
+            new ConditionalWeakTable<AbilityManager, BodyAlignedCleaveState>();
+        private static readonly Dictionary<int, BodyAlignedCleaveState> ActiveActors =
+            new Dictionary<int, BodyAlignedCleaveState>();
 
         [ThreadStatic]
         private static AbilityManager _validationOwner;
         [ThreadStatic]
         private static bool _validationBypass;
         [ThreadStatic]
-        private static FluidCleaveCastState _beginSweepState;
+        private static BodyAlignedCleaveState _beginSweepState;
         [ThreadStatic]
         private static int _facingSuppressionDepth;
 
         internal static bool FacingWritesSuppressed => _facingSuppressionDepth > 0;
-        internal static FluidCleaveCastState BeginSweepState => _beginSweepState;
-        internal static AbilityManager ValidationOwner => _validationOwner;
         internal static bool ValidationBypass => _validationBypass;
+        internal static AbilityManager ValidationOwner => _validationOwner;
+        internal static BodyAlignedCleaveState BeginSweepState => _beginSweepState;
 
-        internal static FluidCleaveCastState Get(AbilityManager manager)
+        internal static BodyAlignedCleaveState Get(AbilityManager manager)
         {
             if (manager == null) return null;
-            return States.GetValue(manager, _ => new FluidCleaveCastState());
+            return States.GetValue(manager, _ => new BodyAlignedCleaveState());
+        }
+
+        internal static BodyAlignedCleaveState GetForActor(Agent actor)
+        {
+            if (actor == null) return null;
+            ActiveActors.TryGetValue(actor.Index, out var state);
+            return state;
         }
 
         internal static void Clear(AbilityManager manager)
         {
-            if (manager != null)
-                States.Remove(manager);
+            if (manager == null) return;
+            if (States.TryGetValue(manager, out var state) && state.ActorIndex >= 0)
+                ActiveActors.Remove(state.ActorIndex);
+            States.Remove(manager);
+        }
+
+        internal static void BindActor(BodyAlignedCleaveState state, Agent actor)
+        {
+            if (state == null || actor == null) return;
+            if (state.ActorIndex >= 0 && state.ActorIndex != actor.Index)
+                ActiveActors.Remove(state.ActorIndex);
+            state.ActorIndex = actor.Index;
+            ActiveActors[actor.Index] = state;
         }
 
         internal static void EnterValidation(AbilityManager manager) => _validationOwner = manager;
@@ -146,9 +85,10 @@ namespace Voidstep
             if (ReferenceEquals(_validationOwner, manager))
                 _validationOwner = null;
         }
+
         internal static void EnterValidationBypass() => _validationBypass = true;
         internal static void ExitValidationBypass() => _validationBypass = false;
-        internal static void EnterBeginSweep(FluidCleaveCastState state) => _beginSweepState = state;
+        internal static void EnterBeginSweep(BodyAlignedCleaveState state) => _beginSweepState = state;
         internal static void ExitBeginSweep() => _beginSweepState = null;
         internal static void EnterFacingSuppression() => _facingSuppressionDepth++;
         internal static void ExitFacingSuppression()
@@ -165,6 +105,41 @@ namespace Voidstep
             return facing;
         }
 
+        // LookDirection follows aim/camera state and is not guaranteed to match the visible
+        // body yaw. Cleave is grounded in the rendered/native body frame instead.
+        internal static Vec3 GetBodyFacing(Agent actor)
+        {
+            if (actor == null) return Vec3.Forward;
+
+            try
+            {
+                var visuals = actor.AgentVisuals;
+                if (visuals != null && visuals.IsValid())
+                {
+                    var visualForward = visuals.GetGlobalFrame().rotation.f;
+                    visualForward.z = 0f;
+                    if (visualForward.Normalize() >= 0.001f)
+                        return visualForward;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var frameForward = actor.Frame.rotation.f;
+                frameForward.z = 0f;
+                if (frameForward.Normalize() >= 0.001f)
+                    return frameForward;
+            }
+            catch
+            {
+            }
+
+            return NormalizeFacing(actor.LookDirection);
+        }
+
         internal static Vec3 ResolveRequested(
             AbilityManager manager,
             AbilityContext context,
@@ -176,96 +151,76 @@ namespace Voidstep
                 return player != null ? player.Position : Vec3.Invalid;
 
             state.Logger = context.Logger;
-            state.Facing = NormalizeFacing(player.LookDirection);
-            var target = FindFacingTarget(context.Mission, player, state.Facing, range, state.Nearby);
+            state.Facing = GetBodyFacing(player);
+            var target = FindBodyAlignedTarget(context.Mission, player, state.Facing, range, state.Nearby);
             state.TargetIndex = target != null ? target.Index : -1;
             state.TargetPosition = target != null ? target.Position : Vec3.Invalid;
 
-            if (target == null)
-                return player.Position + state.Facing * Math.Min(range, 5f);
+            var travelDistance = Math.Min(Math.Max(0f, range), DefaultTravelDistance);
+            if (target != null)
+            {
+                var toTarget = target.Position - player.Position;
+                toTarget.z = 0f;
+                var forwardDistance = Vec3.DotProduct(toTarget, state.Facing);
+                travelDistance = Math.Max(0f, Math.Min(range, forwardDistance - TargetStandOff));
+            }
 
-            var toTarget = target.Position - player.Position;
-            toTarget.z = 0f;
-            var forwardDistance = Vec3.DotProduct(toTarget, state.Facing);
-            if (forwardDistance <= TargetStandOff + 0.15f)
-                return player.Position;
-
-            var requested = target.Position - state.Facing * TargetStandOff;
-            var travel = requested - player.Position;
-            travel.z = 0f;
-            var travelDistance = travel.Length;
-            if (travelDistance > range && travelDistance > 0.001f)
-                requested = player.Position + travel * (range / travelDistance);
-            return requested;
+            return player.Position + state.Facing * travelDistance;
         }
 
-        internal static TeleportValidationResult ValidateDirectional(
+        internal static TeleportValidationResult ValidateOnFacingAxis(
             TeleportValidator validator,
             Agent actor,
             Vec3 requested,
             float maximumRange,
             bool allowThroughWalls,
-            FluidCleaveCastState state)
+            BodyAlignedCleaveState state)
         {
             if (validator == null || actor == null || state == null)
                 return new TeleportValidationResult(false, Vec3.Invalid, "Cleave validation state was unavailable.", false);
 
-            var displacement = requested - actor.Position;
-            displacement.z = 0f;
-            if (displacement.Length <= 0.08f)
-                return new TeleportValidationResult(true, actor.Position, null, false);
-
             var facing = NormalizeFacing(state.Facing);
-            var right = new Vec3(-facing.y, facing.x, 0f, 0f);
-            var targetPosition = ResolveTargetPosition(actor, state);
-            var hasTarget = targetPosition.IsValid;
+            var requestedDelta = requested - actor.Position;
+            requestedDelta.z = 0f;
+            var requestedDistance = Math.Max(0f, Math.Min(maximumRange, Vec3.DotProduct(requestedDelta, facing)));
             string lastReason = null;
 
-            for (var backIndex = 0; backIndex < BackOffsets.Length; backIndex++)
+            for (var distance = requestedDistance; distance >= MinimumTeleportDistance; distance -= ValidationStep)
             {
-                for (var sideIndex = 0; sideIndex < SideOffsets.Length; sideIndex++)
+                var candidate = actor.Position + facing * distance;
+                TeleportValidationResult result;
+                try
                 {
-                    var candidate = requested - facing * BackOffsets[backIndex] + right * SideOffsets[sideIndex];
-                    var fromActor = candidate - actor.Position;
-                    fromActor.z = 0f;
-                    if (Vec3.DotProduct(fromActor, facing) < -0.05f)
-                        continue;
-                    if (Math.Abs(Vec3.DotProduct(fromActor, right)) > 2.25f)
-                        continue;
-                    if (hasTarget)
-                    {
-                        var targetAhead = targetPosition - candidate;
-                        targetAhead.z = 0f;
-                        if (Vec3.DotProduct(targetAhead, facing) < MinimumTargetAhead)
-                            continue;
-                    }
-
-                    TeleportValidationResult result;
-                    try
-                    {
-                        EnterValidationBypass();
-                        result = validator.Validate(actor, candidate, maximumRange, allowThroughWalls, 1);
-                    }
-                    finally
-                    {
-                        ExitValidationBypass();
-                    }
-
-                    if (result.Success)
-                        return new TeleportValidationResult(true, result.Position, null, backIndex != 0 || sideIndex != 0);
-                    lastReason = result.Reason;
+                    EnterValidationBypass();
+                    // A budget of one tests the exact candidate without accepting the validator's
+                    // unrestricted radial fallback ring.
+                    result = validator.Validate(actor, candidate, maximumRange, allowThroughWalls, 1);
                 }
+                finally
+                {
+                    ExitValidationBypass();
+                }
+
+                if (result.Success)
+                    return new TeleportValidationResult(true, result.Position, null, distance + 0.01f < requestedDistance);
+                lastReason = result.Reason;
             }
 
-            return new TeleportValidationResult(false, Vec3.Invalid, lastReason ?? "No facing-aligned Cleave destination was found.", false);
+            // A blocked dash degrades to an in-place Cleave rather than side-stepping,
+            // crossing the target, cancelling the cast, or changing the alignment axis.
+            return new TeleportValidationResult(true, actor.Position, lastReason, requestedDistance > MinimumTeleportDistance);
         }
 
-        internal static void PrepareSweep(FluidCleaveCastState state, CleaveExecutionSnapshot snapshot)
+        internal static void PrepareSweep(BodyAlignedCleaveState state, CleaveExecutionSnapshot snapshot, Agent actor)
         {
             if (state == null) return;
+            state.Facing = GetBodyFacing(actor);
             var facingAngle = AngleMath.NormalizeRadians(Math.Atan2(state.Facing.y, state.Facing.x));
             state.StartAngle = AngleMath.NormalizeRadians(
                 facingAngle - (int)snapshot.Direction * snapshot.SweepRadians * 0.5);
+            state.VisualBurstIndex = 0;
+            state.ForwardBurstPlayed = false;
+            BindActor(state, actor);
         }
 
         internal static void TeleportPositionOnly(Agent actor, Vec3 position)
@@ -273,7 +228,7 @@ namespace Voidstep
             if (actor == null || !actor.IsActive()) return;
             var delta = position - actor.Position;
             delta.z = 0f;
-            if (delta.Length <= 0.08f) return;
+            if (delta.Length <= MinimumTeleportDistance) return;
 
             var mount = actor.MountAgent;
             if (mount != null && mount.IsActive())
@@ -287,7 +242,61 @@ namespace Voidstep
             }
         }
 
-        private static Agent FindFacingTarget(
+        internal static void EmitArc(
+            BodyAlignedCleaveState state,
+            Agent actor,
+            EffectController effects,
+            float radius,
+            double sweepRadians,
+            SweepDirection direction,
+            float progress)
+        {
+            if (state == null || actor == null || effects == null || !actor.IsActive()) return;
+            progress = Math.Max(0f, Math.Min(1f, progress));
+
+            const int totalSamples = 30;
+            var emittedThisTick = 0;
+            while (state.VisualBurstIndex < totalSamples && emittedThisTick < 5)
+            {
+                var sample = (state.VisualBurstIndex + 1f) / totalSamples;
+                if (sample > progress + 0.0001f) break;
+
+                var eased = sample * sample * (3f - 2f * sample);
+                var angle = state.StartAngle + (int)direction * sweepRadians * eased;
+                var arcDirection = new Vec3((float)Math.Cos(angle), (float)Math.Sin(angle), 0f, 0f);
+                var reach = Math.Min(3.15f, Math.Max(1.25f, radius * 0.46f));
+                var center = actor.GetChestGlobalPosition() + Vec3.Up * 0.05f;
+                effects.WeaponTrail(center + arcDirection * reach);
+                if ((state.VisualBurstIndex & 1) == 0)
+                    effects.WeaponTrail(center + arcDirection * (reach * 0.68f));
+                state.VisualBurstIndex++;
+                emittedThisTick++;
+            }
+
+            // The exact forward crossing occurs halfway through a centred sweep. Reinforce it
+            // so the visual strike and the frontal target hit read on the body's facing axis.
+            if (!state.ForwardBurstPlayed && progress >= 0.5f)
+            {
+                state.ForwardBurstPlayed = true;
+                var forward = NormalizeFacing(state.Facing);
+                var right = new Vec3(-forward.y, forward.x, 0f, 0f);
+                var reach = Math.Min(3.25f, Math.Max(1.35f, radius * 0.48f));
+                var center = actor.GetChestGlobalPosition() + Vec3.Up * 0.12f;
+                effects.WeaponTrail(center + forward * reach);
+                effects.WeaponTrail(center + forward * (reach * 0.84f) + right * 0.32f);
+                effects.WeaponTrail(center + forward * (reach * 0.84f) - right * 0.32f);
+            }
+        }
+
+        internal static string DescribeFacing(Agent actor, Vec3 bodyFacing)
+        {
+            var look = actor != null ? NormalizeFacing(actor.LookDirection) : Vec3.Forward;
+            var dot = Math.Max(-1f, Math.Min(1f, Vec3.DotProduct(bodyFacing, look)));
+            var difference = Math.Acos(dot) * 180.0 / Math.PI;
+            return $"body={Format(bodyFacing)}, look={Format(look)}, bodyLookDifference={difference:0.0}deg";
+        }
+
+        private static Agent FindBodyAlignedTarget(
             Mission mission,
             Agent player,
             Vec3 facing,
@@ -297,20 +306,21 @@ namespace Voidstep
             if (mission == null || player?.Team == null) return null;
             nearby.Clear();
             mission.GetNearbyEnemyAgents(player.Position.AsVec2, range, player.Team, nearby);
-            var minimumDot = (float)Math.Cos(LockHalfAngleDegrees * Math.PI / 180.0);
+            var right = new Vec3(-facing.y, facing.x, 0f, 0f);
             Agent best = null;
             var bestScore = float.MaxValue;
+
             for (var i = 0; i < nearby.Count; i++)
             {
                 var candidate = nearby[i];
                 if (!TargetingService.IsUsableTarget(player, candidate, true)) continue;
                 var delta = candidate.GetChestGlobalPosition() - player.GetChestGlobalPosition();
                 delta.z = 0f;
-                var distance = delta.Normalize();
-                if (distance <= 0.001f) continue;
-                var dot = Vec3.DotProduct(facing, delta);
-                if (dot < minimumDot) continue;
-                var score = distance * (2f - dot);
+                var forwardDistance = Vec3.DotProduct(delta, facing);
+                if (forwardDistance < MinimumForwardTargetDistance || forwardDistance > range) continue;
+                var lateral = Math.Abs(Vec3.DotProduct(delta, right));
+                if (lateral > MaximumTargetLateralOffset) continue;
+                var score = forwardDistance + lateral * 2.5f;
                 if (score < bestScore)
                 {
                     best = candidate;
@@ -320,141 +330,33 @@ namespace Voidstep
             return best;
         }
 
-        private static Vec3 ResolveTargetPosition(Agent actor, FluidCleaveCastState state)
-        {
-            if (actor?.Mission != null && state.TargetIndex >= 0)
-            {
-                var target = actor.Mission.FindAgentWithIndex(state.TargetIndex);
-                if (target != null && target.IsActive() && target.Health > 0f)
-                    return target.Position;
-            }
-            return state.TargetPosition;
-        }
-    }
-
-    internal static class NativeCleavePresentation
-    {
-        private sealed class PresentationState
-        {
-            internal string Direction;
-            internal bool Released;
-            internal VoidstepLogger Logger;
-        }
-
-        private static readonly Dictionary<int, PresentationState> Active = new Dictionary<int, PresentationState>();
-        private static readonly object ResolveLock = new object();
-        private static MethodInfo _setEventControlFlags;
-        private static Type _eventFlagType;
-        private static bool _resolved;
-        private static bool _missingLogged;
-
-        internal static void Begin(Agent actor, bool clockwise, VoidstepLogger logger)
-        {
-            if (actor == null || !actor.IsActive()) return;
-            var state = new PresentationState
-            {
-                // AttackLeft swings from the actor's left through the forward line,
-                // matching a clockwise arc when viewed from above.
-                Direction = clockwise ? "AttackLeft" : "AttackRight",
-                Logger = logger
-            };
-            Active[actor.Index] = state;
-            TrySet(actor, state, false);
-        }
-
-        internal static void Tick(Agent actor, float progress)
-        {
-            if (actor == null || !actor.IsActive() || !Active.TryGetValue(actor.Index, out var state))
-                return;
-            if (progress < 0.10f)
-            {
-                TrySet(actor, state, false);
-                return;
-            }
-            if (!state.Released)
-            {
-                TrySet(actor, state, true);
-                state.Released = true;
-            }
-        }
-
-        internal static void End(Agent actor)
-        {
-            if (actor != null)
-                Active.Remove(actor.Index);
-        }
-
-        private static bool TrySet(Agent actor, PresentationState state, bool release)
-        {
-            Resolve(state.Logger);
-            if (_setEventControlFlags == null || _eventFlagType == null)
-                return false;
-            try
-            {
-                ulong bits = Convert.ToUInt64(Enum.Parse(_eventFlagType, state.Direction, false));
-                if (release)
-                    bits |= Convert.ToUInt64(Enum.Parse(_eventFlagType, "AttackRelease", false));
-                var flags = Enum.ToObject(_eventFlagType, bits);
-                _setEventControlFlags.Invoke(actor, new[] { flags });
-                return true;
-            }
-            catch (Exception ex)
-            {
-                state.Logger?.Debug("Native Cleave attack presentation was unavailable: " + ex.GetBaseException().Message);
-                return false;
-            }
-        }
-
-        private static void Resolve(VoidstepLogger logger)
-        {
-            if (_resolved) return;
-            lock (ResolveLock)
-            {
-                if (_resolved) return;
-                var methods = typeof(Agent).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                for (var i = 0; i < methods.Length; i++)
-                {
-                    var method = methods[i];
-                    if (!string.Equals(method.Name, "SetEventControlFlags", StringComparison.Ordinal)) continue;
-                    var parameters = method.GetParameters();
-                    if (parameters.Length != 1 || !parameters[0].ParameterType.IsEnum) continue;
-                    _setEventControlFlags = method;
-                    _eventFlagType = parameters[0].ParameterType;
-                    break;
-                }
-                _resolved = true;
-                if (_setEventControlFlags == null && !_missingLogged)
-                {
-                    _missingLogged = true;
-                    logger?.Debug("Native Cleave attack presentation method was not found; using the aligned particle arc only.");
-                }
-            }
-        }
+        private static string Format(Vec3 value) =>
+            $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
     }
 
     [HarmonyPatch(typeof(AbilityManager), "BeginVoidstep")]
-    internal static class FluidCleaveBeginScopePatch
+    internal static class BodyAlignedCleaveBeginScopePatch
     {
         private static void Prefix(AbilityManager __instance, AbilityContext ____context, Agent player)
         {
-            var state = FluidCleaveRuntime.Get(__instance);
+            var state = BodyAlignedCleaveRuntime.Get(__instance);
             if (state != null)
             {
                 state.Logger = ____context?.Logger;
-                state.Facing = FluidCleaveRuntime.NormalizeFacing(player != null ? player.LookDirection : Vec3.Forward);
+                state.Facing = BodyAlignedCleaveRuntime.GetBodyFacing(player);
             }
-            FluidCleaveRuntime.EnterValidation(__instance);
+            BodyAlignedCleaveRuntime.EnterValidation(__instance);
         }
 
         private static Exception Finalizer(AbilityManager __instance, Exception __exception)
         {
-            FluidCleaveRuntime.ExitValidation(__instance);
+            BodyAlignedCleaveRuntime.ExitValidation(__instance);
             return __exception;
         }
     }
 
     [HarmonyPatch(typeof(AbilityManager), "ResolveVoidstepDestination")]
-    internal static class FluidCleaveDestinationPatch
+    internal static class BodyAlignedCleaveDestinationPatch
     {
         private static bool Prefix(
             AbilityManager __instance,
@@ -463,13 +365,13 @@ namespace Voidstep
             float range,
             ref Vec3 __result)
         {
-            __result = FluidCleaveRuntime.ResolveRequested(__instance, ____context, player, range);
+            __result = BodyAlignedCleaveRuntime.ResolveRequested(__instance, ____context, player, range);
             return false;
         }
     }
 
     [HarmonyPatch(typeof(TeleportValidator), nameof(TeleportValidator.Validate))]
-    internal static class FluidCleaveValidationPatch
+    internal static class BodyAlignedCleaveValidationPatch
     {
         private static bool Prefix(
             TeleportValidator __instance,
@@ -479,31 +381,30 @@ namespace Voidstep
             bool allowThroughWalls,
             ref TeleportValidationResult __result)
         {
-            if (FluidCleaveRuntime.ValidationBypass) return true;
-            var owner = FluidCleaveRuntime.ValidationOwner;
+            if (BodyAlignedCleaveRuntime.ValidationBypass) return true;
+            var owner = BodyAlignedCleaveRuntime.ValidationOwner;
             if (owner == null) return true;
-            var state = FluidCleaveRuntime.Get(owner);
-            __result = FluidCleaveRuntime.ValidateDirectional(
+            __result = BodyAlignedCleaveRuntime.ValidateOnFacingAxis(
                 __instance,
                 actor,
                 requested,
                 maximumRange,
                 allowThroughWalls,
-                state);
+                BodyAlignedCleaveRuntime.Get(owner));
             return false;
         }
     }
 
     [HarmonyPatch(typeof(AbilityManager), "TickVoidstep")]
-    internal static class FluidCleaveTickPatch
+    internal static class BodyAlignedCleaveTickPatch
     {
-        private const float WindUpSeconds = 0.10f;
-        private const float RecoverySeconds = 0.06f;
-        private static readonly MethodInfo RollbackPayment = AccessTools.Method(typeof(AbilityManager), "RollbackPayment");
-        private static readonly MethodInfo Fail = AccessTools.Method(typeof(AbilityManager), "Fail");
-        private static readonly MethodInfo CancelCurrent = AccessTools.Method(typeof(AbilityManager), "CancelCurrent");
-        private static readonly MethodInfo CompleteCurrent = AccessTools.Method(typeof(AbilityManager), "CompleteCurrent");
-        private static readonly MethodInfo RemoveCleaveMarker = AccessTools.Method(typeof(AbilityManager), "RemoveCleaveMarker");
+        private const float WindUpSeconds = 0.045f;
+        private const float RecoverySeconds = 0.035f;
+        private static readonly System.Reflection.MethodInfo RollbackPayment = AccessTools.Method(typeof(AbilityManager), "RollbackPayment");
+        private static readonly System.Reflection.MethodInfo Fail = AccessTools.Method(typeof(AbilityManager), "Fail");
+        private static readonly System.Reflection.MethodInfo CancelCurrent = AccessTools.Method(typeof(AbilityManager), "CancelCurrent");
+        private static readonly System.Reflection.MethodInfo CompleteCurrent = AccessTools.Method(typeof(AbilityManager), "CompleteCurrent");
+        private static readonly System.Reflection.MethodInfo RemoveCleaveMarker = AccessTools.Method(typeof(AbilityManager), "RemoveCleaveMarker");
 
         private static bool Prefix(
             AbilityManager __instance,
@@ -526,14 +427,14 @@ namespace Voidstep
                     if (____state.PhaseElapsed < WindUpSeconds)
                         return false;
 
-                    var state = FluidCleaveRuntime.Get(__instance);
-                    state.Facing = FluidCleaveRuntime.NormalizeFacing(player.LookDirection);
-                    var requested = FluidCleaveRuntime.ResolveRequested(
+                    var state = BodyAlignedCleaveRuntime.Get(__instance);
+                    state.Facing = BodyAlignedCleaveRuntime.GetBodyFacing(player);
+                    var requested = BodyAlignedCleaveRuntime.ResolveRequested(
                         __instance,
                         ____context,
                         player,
                         ____cleaveSnapshot.TeleportRange);
-                    var validation = FluidCleaveRuntime.ValidateDirectional(
+                    var validation = BodyAlignedCleaveRuntime.ValidateOnFacingAxis(
                         ____teleportValidator,
                         player,
                         requested,
@@ -543,7 +444,7 @@ namespace Voidstep
                     if (!validation.Success)
                     {
                         RollbackPayment?.Invoke(__instance, new object[] { AbilityId.VoidstepCleave });
-                        Fail?.Invoke(__instance, new object[] { validation.Reason ?? "No facing-aligned Cleave destination was found." });
+                        Fail?.Invoke(__instance, new object[] { validation.Reason ?? "No body-aligned Cleave destination was found." });
                         CancelCurrent?.Invoke(__instance, new object[] { CancelReason.InvalidDestination });
                         return false;
                     }
@@ -551,15 +452,15 @@ namespace Voidstep
                     ____destination = validation.Position;
                     ____effects.Departure(player.Position);
                     ____state.Transition(____token, AbilityPhase.Departing);
-                    FluidCleaveRuntime.TeleportPositionOnly(player, ____destination);
+                    BodyAlignedCleaveRuntime.TeleportPositionOnly(player, ____destination);
                     RemoveCleaveMarker?.Invoke(__instance, null);
                     ____effects.Arrival(player.Position);
                     ____effects.PlaySound("event:/mission/combat/swing/weapon_swing", player.Position);
                     ____state.Transition(____token, AbilityPhase.Teleporting);
                     ____state.Transition(____token, AbilityPhase.Arriving);
 
-                    FluidCleaveRuntime.PrepareSweep(state, ____cleaveSnapshot);
-                    FluidCleaveRuntime.EnterBeginSweep(state);
+                    BodyAlignedCleaveRuntime.PrepareSweep(state, ____cleaveSnapshot, player);
+                    BodyAlignedCleaveRuntime.EnterBeginSweep(state);
                     try
                     {
                         if (!____cleave.Begin(player, ____cleaveWeapon, ____cleaveSnapshot, out var failure))
@@ -572,18 +473,20 @@ namespace Voidstep
                     }
                     finally
                     {
-                        FluidCleaveRuntime.ExitBeginSweep();
+                        BodyAlignedCleaveRuntime.ExitBeginSweep();
                     }
+
                     ____context.Logger.Debug(
-                        $"Fluid Cleave started facing={Format(state.Facing)}, destination={Format(____destination)}, " +
-                        $"target={state.TargetIndex}, directionalFallback={validation.UsedFallback}.");
+                        $"Body-aligned Cleave started {BodyAlignedCleaveRuntime.DescribeFacing(player, state.Facing)}, " +
+                        $"destination=({____destination.x:0.00}, {____destination.y:0.00}, {____destination.z:0.00}), " +
+                        $"target={state.TargetIndex}, axialBacktrack={validation.UsedFallback}.");
                     ____state.Transition(____token, AbilityPhase.Active);
                     return false;
 
                 case AbilityPhase.Active:
                     if (____cleave.Tick(dt))
                     {
-                        ____context.Logger.Debug($"Fluid Cleave active phase finished; hits={____cleave.SuccessfulHits}.");
+                        ____context.Logger.Debug($"Body-aligned Cleave active phase finished; hits={____cleave.SuccessfulHits}.");
                         ____state.Transition(____token, AbilityPhase.Recovery);
                     }
                     return false;
@@ -591,9 +494,8 @@ namespace Voidstep
                 case AbilityPhase.Recovery:
                     if (____state.PhaseElapsed >= RecoverySeconds)
                     {
-                        NativeCleavePresentation.End(player);
                         CompleteCurrent?.Invoke(__instance, null);
-                        FluidCleaveRuntime.Clear(__instance);
+                        BodyAlignedCleaveRuntime.Clear(__instance);
                     }
                     return false;
 
@@ -601,33 +503,23 @@ namespace Voidstep
                     return false;
             }
         }
-
-        private static string Format(Vec3 value) =>
-            $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
     }
 
     [HarmonyPatch(typeof(CleaveExecutionSnapshot), "get_StartAngle")]
-    internal static class FluidCleaveStartAnglePatch
+    internal static class BodyAlignedCleaveStartAnglePatch
     {
         private static void Postfix(ref double __result)
         {
-            var state = FluidCleaveRuntime.BeginSweepState;
+            var state = BodyAlignedCleaveRuntime.BeginSweepState;
             if (state != null)
                 __result = state.StartAngle;
         }
     }
 
     [HarmonyPatch(typeof(CleaveSweepController), nameof(CleaveSweepController.Begin))]
-    internal static class FluidCleaveBeginPresentationPatch
+    internal static class BodyAlignedCleaveBeginPatch
     {
-        private static void Prefix(
-            Agent actor,
-            CleaveExecutionSnapshot snapshot,
-            VoidstepLogger ____logger)
-        {
-            FluidCleaveRuntime.EnterFacingSuppression();
-            NativeCleavePresentation.Begin(actor, snapshot.Clockwise, ____logger);
-        }
+        private static void Prefix() => BodyAlignedCleaveRuntime.EnterFacingSuppression();
 
         private static void Postfix(
             ref float ____duration,
@@ -637,84 +529,59 @@ namespace Voidstep
         {
             if (__result)
             {
-                ____duration = 0.46f;
+                ____duration = 0.22f;
                 ____trailAccumulator = 0f;
-                // Reserve 0-11 so the legacy straight-ahead trail path remains disabled.
                 ____trailBursts = 12;
             }
         }
 
         private static Exception Finalizer(Exception __exception)
         {
-            FluidCleaveRuntime.ExitFacingSuppression();
+            BodyAlignedCleaveRuntime.ExitFacingSuppression();
             return __exception;
         }
     }
 
     [HarmonyPatch(typeof(CleaveSweepController), nameof(CleaveSweepController.Tick))]
-    internal static class FluidCleaveArcPresentationPatch
+    internal static class BodyAlignedCleaveArcPatch
     {
-        private const int FirstArcBurst = 12;
-        private const int LastArcBurst = 30;
-
         private static void Prefix(
             float dt,
             Agent ____actor,
             float ____elapsed,
             float ____duration,
-            double ____startAngle,
             double ____sweepRadians,
             SweepDirection ____direction,
             float ____radius,
-            EffectController ____effects,
-            ref int ____trailBursts,
-            out Agent __state)
+            EffectController ____effects)
         {
-            __state = ____actor;
-            FluidCleaveRuntime.EnterFacingSuppression();
-            if (____actor == null || !____actor.IsActive() || ____duration <= 0f)
-                return;
-
+            BodyAlignedCleaveRuntime.EnterFacingSuppression();
+            if (____actor == null || ____duration <= 0f) return;
             var progress = Math.Min(1f, (____elapsed + Math.Max(0f, dt)) / ____duration);
-            NativeCleavePresentation.Tick(____actor, progress);
-            var emitted = 0;
-            while (____trailBursts < LastArcBurst && emitted < 3)
-            {
-                var sample = (____trailBursts - FirstArcBurst + 1f) / (LastArcBurst - FirstArcBurst);
-                if (progress + 0.0001f < sample) break;
-                var eased = sample * sample * (3f - 2f * sample);
-                var angle = ____startAngle + (int)____direction * ____sweepRadians * eased;
-                var direction = new Vec3((float)Math.Cos(angle), (float)Math.Sin(angle), 0f, 0f);
-                var visualRadius = Math.Min(2.65f, Math.Max(1.15f, ____radius * 0.42f));
-                var center = ____actor.GetChestGlobalPosition();
-                ____effects.WeaponTrail(center + direction * visualRadius);
-                if (((____trailBursts - FirstArcBurst) % 3) == 0)
-                    ____effects.WeaponTrail(center + direction * (visualRadius * 0.66f));
-                ____trailBursts++;
-                emitted++;
-            }
-        }
-
-        private static void Postfix(bool __result, Agent __state)
-        {
-            if (__result)
-                NativeCleavePresentation.End(__state);
+            BodyAlignedCleaveRuntime.EmitArc(
+                BodyAlignedCleaveRuntime.GetForActor(____actor),
+                ____actor,
+                ____effects,
+                ____radius,
+                ____sweepRadians,
+                ____direction,
+                progress);
         }
 
         private static Exception Finalizer(Exception __exception)
         {
-            FluidCleaveRuntime.ExitFacingSuppression();
+            BodyAlignedCleaveRuntime.ExitFacingSuppression();
             return __exception;
         }
     }
 
     [HarmonyPatch(typeof(AnimationController), nameof(AnimationController.BeginCleave))]
-    internal static class CleaveUnsafeActionSuppressionPatch
+    internal static class BodyAlignedCleaveActionSuppressionPatch
     {
         private static bool Prefix(AnimationController __instance, Agent actor)
         {
-            // The fluid presentation uses Bannerlord's native attack input path instead of
-            // an unrelated heavy-thrown/command action with manually forced progress.
+            // A single native left/right attack cannot represent or synchronize with a 340-degree
+            // radial sweep. The aligned arc and hit schedule are the presentation source of truth.
             __instance?.ResetActionSpeed(actor);
             return false;
         }
@@ -724,108 +591,56 @@ namespace Voidstep
         typeof(AnimationController),
         nameof(AnimationController.SetActorFacing),
         new Type[] { typeof(Agent), typeof(Vec3) })]
-    internal static class FluidCleaveVectorFacingSuppressionPatch
+    internal static class BodyAlignedCleaveVectorFacingSuppressionPatch
     {
-        private static bool Prefix() => !FluidCleaveRuntime.FacingWritesSuppressed;
+        private static bool Prefix() => !BodyAlignedCleaveRuntime.FacingWritesSuppressed;
     }
 
     [HarmonyPatch(
         typeof(AnimationController),
         nameof(AnimationController.SetActorFacing),
         new Type[] { typeof(Agent), typeof(double) })]
-    internal static class FluidCleaveAngleFacingSuppressionPatch
+    internal static class BodyAlignedCleaveAngleFacingSuppressionPatch
     {
-        private static bool Prefix() => !FluidCleaveRuntime.FacingWritesSuppressed;
+        private static bool Prefix() => !BodyAlignedCleaveRuntime.FacingWritesSuppressed;
     }
 
     [HarmonyPatch(typeof(AbilityManager), "BeginFovPulse")]
-    internal static class FluidCleaveFovSuppressionPatch
+    internal static class BodyAlignedCleaveFovSuppressionPatch
     {
         private static bool Prefix(AbilityManager __instance) =>
             __instance == null || __instance.ActiveAbility != AbilityId.VoidstepCleave;
     }
 
     [HarmonyPatch(typeof(AbilityManager), "CancelCurrent")]
-    internal static class FluidCleaveCancellationPatch
+    internal static class BodyAlignedCleaveCancellationPatch
     {
-        private static void Prefix(
-            AbilityManager __instance,
-            ref Vec3 ____castOriginalLook,
-            AbilityContext ____context)
+        private static void Prefix(AbilityManager __instance, ref Vec3 ____castOriginalLook)
         {
             if (__instance == null || !__instance.IsBusy || __instance.ActiveAbility != AbilityId.VoidstepCleave)
                 return;
             ____castOriginalLook = Vec3.Zero;
-            NativeCleavePresentation.End(____context?.Player);
         }
 
-        private static void Postfix(AbilityManager __instance)
-        {
-            FluidCleaveRuntime.Clear(__instance);
-        }
-    }
-
-    [HarmonyPatch(
-        typeof(AbilityManager),
-        "TeleportActor",
-        new Type[] { typeof(Agent), typeof(Vec3), typeof(bool) })]
-    internal static class OrientationNeutralTeleportPatch
-    {
-        private static bool Prefix(
-            AbilityManager __instance,
-            Agent actor,
-            Vec3 position,
-            bool preserveMomentum)
-        {
-            if (actor == null || !actor.IsActive())
-                return false;
-
-            var before = actor.LookDirection;
-            var mount = actor.MountAgent;
-            if (mount != null && mount.IsActive())
-            {
-                mount.TeleportToPosition(position);
-                actor.TeleportToPosition(position + Vec3.Up * 0.4f);
-            }
-            else
-            {
-                actor.TeleportToPosition(position);
-            }
-
-            if (!preserveMomentum)
-            {
-                actor.MovementInputVector = Vec2.Zero;
-                if (mount != null && mount.IsActive())
-                    mount.MovementInputVector = Vec2.Zero;
-            }
-
-            __instance?.Logger.Debug(
-                $"Orientation-neutral teleport position={Format(position)}, " +
-                $"lookBefore={Format(before)}, lookAfter={Format(actor.LookDirection)}, " +
-                $"movementDirectionWasNotOverwritten=true.");
-            return false;
-        }
-
-        private static string Format(Vec3 value) =>
-            $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
+        private static void Postfix(AbilityManager __instance) => BodyAlignedCleaveRuntime.Clear(__instance);
     }
 
     [HarmonyPatch(typeof(VoidstepAbilityEffects), nameof(VoidstepAbilityEffects.VoidCleave))]
-    internal static class FluidCleaveInitialEffectPatch
+    internal static class BodyAlignedCleaveInitialEffectPatch
     {
         private static bool Prefix(EffectController effects, Vec3 center, float cleaveRadius)
         {
             if (effects == null || VoidstepSettings.Current.EffectIntensity <= 0f)
                 return false;
-            var state = FluidCleaveRuntime.BeginSweepState;
+            var state = BodyAlignedCleaveRuntime.BeginSweepState;
             var facing = state != null ? state.Facing : Vec3.Forward;
-            facing = FluidCleaveRuntime.NormalizeFacing(facing);
+            facing = BodyAlignedCleaveRuntime.NormalizeFacing(facing);
             var right = new Vec3(-facing.y, facing.x, 0f, 0f);
-            var radius = Math.Min(2.4f, Math.Max(1.1f, cleaveRadius * 0.36f));
-            effects.Arrival(center + Vec3.Up * 0.35f);
-            effects.WeaponTrail(center + Vec3.Up * 0.85f + facing * radius);
-            effects.WeaponTrail(center + Vec3.Up * 0.82f + facing * (radius * 0.82f) + right * 0.42f);
-            effects.WeaponTrail(center + Vec3.Up * 0.82f + facing * (radius * 0.82f) - right * 0.42f);
+            var radius = Math.Min(2.5f, Math.Max(1.15f, cleaveRadius * 0.38f));
+            effects.Arrival(center + Vec3.Up * 0.30f);
+            effects.WeaponTrail(center + Vec3.Up * 0.82f + facing * radius);
+            effects.WeaponTrail(center + Vec3.Up * 0.80f + facing * (radius * 0.82f) + right * 0.38f);
+            effects.WeaponTrail(center + Vec3.Up * 0.80f + facing * (radius * 0.82f) - right * 0.38f);
             return false;
         }
     }
