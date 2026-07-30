@@ -1,0 +1,6 @@
+{
+  "version": "v1.2.1",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable release replacing resource-only mastery progression with direct mechanical growth for teleport range, Cleave radius and impact, Windblast power, Bend Time strength, Domino reach, and Dark Vision range while preserving existing mastery saves."
+}
