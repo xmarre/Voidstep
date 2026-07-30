@@ -10,7 +10,7 @@ namespace Voidstep
     /// <summary>
     /// TOR snapshots KnownAbilitySystem into AbilityRadialSelection_VM. Voidstep abilities
     /// are injected later, and TOR can also replace or rebuild the live AbilityComponent.
-    /// Repair the current component and the actual radial VM immediately before Q opens.
+    /// Repair the current component and actual radial VM immediately before Q opens.
     /// </summary>
     internal static class TorRadialMenuRefresh
     {
@@ -30,7 +30,7 @@ namespace Voidstep
         private static FieldInfo _coordinatorTorField;
         private static MethodInfo _attachToAgent;
         private static PropertyInfo _radialAbilitiesProperty;
-        private static Mission _lastMission;
+        private static WeakReference<Mission> _lastMission;
         private static int _lastKnownCount = -1;
         private static int _lastVoidstepCount = -1;
         private static int _lastRadialCount = -1;
@@ -161,13 +161,7 @@ namespace Voidstep
                     if (mission == null || agent == null || !agent.IsActive() || __instance == null)
                         return;
 
-                    if (!ReferenceEquals(_lastMission, mission))
-                    {
-                        _lastMission = mission;
-                        _lastKnownCount = -1;
-                        _lastVoidstepCount = -1;
-                        _lastRadialCount = -1;
-                    }
+                    ResetCountersForNewMission(mission);
 
                     var component = GetAbilityComponent(agent);
                     var knownAbilities = GetKnownAbilities(component);
@@ -175,17 +169,22 @@ namespace Voidstep
 
                     if (knownAbilities == null || voidstepCount != ExpectedVoidstepAbilityCount)
                     {
-                        ForceAdapterReattach(agent);
-                        component = GetAbilityComponent(agent);
-                        knownAbilities = GetKnownAbilities(component);
-                        voidstepCount = CountVoidstepAbilities(knownAbilities);
+                        if (ForceAdapterReattach(agent))
+                        {
+                            component = GetAbilityComponent(agent);
+                            knownAbilities = GetKnownAbilities(component);
+                            voidstepCount = CountVoidstepAbilities(knownAbilities);
+                        }
                     }
 
                     var abilityView = _managerAbilityViewField.GetValue(__instance);
                     var radialVm = abilityView == null ? null : _viewRadialVmField.GetValue(abilityView);
                     if (radialVm == null)
                     {
-                        LogState(knownAbilities?.Count ?? -1, voidstepCount, -1,
+                        LogState(
+                            knownAbilities?.Count ?? -1,
+                            voidstepCount,
+                            -1,
                             "TOR radial VM was not ready when Q opened");
                         return;
                     }
@@ -193,7 +192,10 @@ namespace Voidstep
                     _fillAbilities.Invoke(radialVm, new object[] { agent });
                     var radialAbilities = _radialAbilitiesProperty.GetValue(radialVm, null);
                     var radialCount = ReadCount(radialAbilities);
-                    LogState(knownAbilities?.Count ?? -1, voidstepCount, radialCount,
+                    LogState(
+                        knownAbilities?.Count ?? -1,
+                        voidstepCount,
+                        radialCount,
                         voidstepCount == ExpectedVoidstepAbilityCount
                             ? "Rebuilt TOR Q wheel from the repaired live component"
                             : "TOR Q wheel repair could not restore all Voidstep proxies");
@@ -203,6 +205,22 @@ namespace Voidstep
                     Logger.Error("TOR Q-wheel live repair failed during Q open.", Unwrap(ex));
                 }
             }
+        }
+
+        private static void ResetCountersForNewMission(Mission mission)
+        {
+            Mission previous;
+            if (_lastMission != null &&
+                _lastMission.TryGetTarget(out previous) &&
+                ReferenceEquals(previous, mission))
+            {
+                return;
+            }
+
+            _lastMission = new WeakReference<Mission>(mission);
+            _lastKnownCount = -1;
+            _lastVoidstepCount = -1;
+            _lastRadialCount = -1;
         }
 
         private static object GetAbilityComponent(Agent agent)
@@ -217,17 +235,24 @@ namespace Voidstep
             return component == null ? null : _knownAbilitiesProperty.GetValue(component, null) as IList;
         }
 
-        private static void ForceAdapterReattach(Agent agent)
+        private static bool ForceAdapterReattach(Agent agent)
         {
             var coordinator = VoidstepWheelRuntime.Current;
             if (coordinator == null)
-                throw new InvalidOperationException("Voidstep ability-wheel coordinator is unavailable during TOR Q open.");
+            {
+                Logger.Debug("Voidstep ability-wheel coordinator is not live yet during TOR Q open.");
+                return false;
+            }
 
             var adapter = _coordinatorTorField.GetValue(coordinator);
             if (adapter == null)
-                throw new InvalidOperationException("Voidstep TOR adapter is unavailable during TOR Q open.");
+            {
+                Logger.Debug("Voidstep TOR adapter is not live yet during TOR Q open.");
+                return false;
+            }
 
             _attachToAgent.Invoke(adapter, new object[] { agent });
+            return true;
         }
 
         private static int CountVoidstepAbilities(IList abilities)
@@ -260,8 +285,12 @@ namespace Voidstep
 
         private static void LogState(int knownCount, int voidstepCount, int radialCount, string prefix)
         {
-            if (knownCount == _lastKnownCount && voidstepCount == _lastVoidstepCount && radialCount == _lastRadialCount)
+            if (knownCount == _lastKnownCount &&
+                voidstepCount == _lastVoidstepCount &&
+                radialCount == _lastRadialCount)
+            {
                 return;
+            }
 
             _lastKnownCount = knownCount;
             _lastVoidstepCount = voidstepCount;
