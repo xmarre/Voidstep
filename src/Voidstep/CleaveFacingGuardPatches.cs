@@ -117,4 +117,18 @@ namespace Voidstep
             return __exception;
         }
     }
+
+    // The previous Cleave presentation forced a heavy-thrown/command action onto
+    // action channel 1 and manually drove its progress. Those are not melee sweep
+    // animations and can leave the skeleton twisted even when LookDirection is
+    // restored. Cleave now uses its radial effects and virtual hit sweep only.
+    [HarmonyPatch(typeof(AnimationController), nameof(AnimationController.BeginCleave))]
+    internal static class CleaveUnsafeActionSuppressionPatch
+    {
+        private static bool Prefix(AnimationController __instance, Agent actor)
+        {
+            __instance?.ResetActionSpeed(actor);
+            return false;
+        }
+    }
 }
