@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.3
+
+- Removed the unresolved Harmony constructor patch that disabled the entire Voidstep runtime during module startup.
+- Moved mission-entry progression synchronization and scoped settings access directly into Voidstep's owned `AbilityContext` constructor with guaranteed cleanup.
+- Confirmed that invested Void Affinity rank 1 now makes Voidstep Cleave available in battle.
+- Greatly enlarged the Voidstep Cleave spell effect with layered outer, inner and raised impact bursts.
+- Added bounded void effects to Blink, Bend Time, Domino and Dark Vision.
+- Added a directional widening gust effect to Windblast.
+- Added regression validation for runtime patch installation and all new ability-effect compositions.
+
 ## 1.2.2
 
 - Synchronized invested mastery ranks with the immutable mission profile before battle initialization and ability activation.

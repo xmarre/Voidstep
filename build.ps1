@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Version = "1.2.2"
+$Version = "1.2.3"
 $Solution = Join-Path $Root "Voidstep.sln"
 $RuntimeProject = Join-Path $Root "src/Voidstep/Voidstep.csproj"
 $TestProject = Join-Path $Root "tests/Voidstep.Core.Tests/Voidstep.Core.Tests.csproj"
@@ -98,6 +98,7 @@ if ($Python) {
         "scripts/verify_progression_invariants.py",
         "scripts/verify_mastery_power_invariants.py",
         "scripts/verify_mastery_unlock_invariants.py",
+        "scripts/verify_ability_effect_invariants.py",
         "scripts/verify_wheel_invariants.py",
         "scripts/verify_runtime_regression_invariants.py"
     )) {

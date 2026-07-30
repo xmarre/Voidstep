@@ -10,8 +10,21 @@ namespace Voidstep
         {
             Mission = mission ?? throw new ArgumentNullException(nameof(mission));
             Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            Energy = new VoidEnergyPool(Math.Max(1f, VoidstepSettings.Current.MaximumEnergy));
-            Cooldowns = new CooldownBook();
+
+            // AbilityContext is Voidstep-owned code. Enter the progression settings scope
+            // directly instead of Harmony-patching this constructor; older shipped Harmony
+            // builds can fail to resolve constructor-only patch attributes and abort PatchAll.
+            VoidstepProgressionBoundarySynchronizer.SynchronizeAll();
+            VoidstepProgressionRuntimeScope.Enter();
+            try
+            {
+                Energy = new VoidEnergyPool(Math.Max(1f, VoidstepSettings.Current.MaximumEnergy));
+                Cooldowns = new CooldownBook();
+            }
+            finally
+            {
+                VoidstepProgressionRuntimeScope.Exit();
+            }
         }
 
         public Mission Mission { get; }
