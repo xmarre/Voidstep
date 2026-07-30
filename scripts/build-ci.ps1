@@ -48,6 +48,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Independent logic mirror failed." }
     & python scripts/verify_source_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Source invariant validation failed." }
+    & python scripts/verify_progression_invariants.py
+    if ($LASTEXITCODE -ne 0) { throw "Progression integration invariant validation failed." }
     & python scripts/verify_wheel_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Wheel and TOR invariant validation failed." }
     & python scripts/verify_runtime_regression_invariants.py
