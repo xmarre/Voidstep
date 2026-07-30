@@ -100,7 +100,7 @@ checks = {
         and "VoidstepProgressionProfile.Build" in behavior
     ),
     "runtime profile is rebuilt only by lifecycle mutations": (
-        behavior.count("VoidstepProgressionProfile.Build") == 3
+        behavior.count("VoidstepProgressionProfile.Build") == 2
         and "NotifyChanged()" in behavior
         and "Attach(VoidstepProgressionBehavior behavior)" in behavior
         and "Detach()" in behavior
