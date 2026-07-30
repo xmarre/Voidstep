@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import math
+import re
 import sys
 
 root = Path(__file__).resolve().parents[1]
@@ -43,6 +44,31 @@ getter_methods = {
     "DarkVisionRefreshInterval": "EffectiveDarkVisionRefreshInterval",
 }
 
+
+def extract_method_body(source, method_name):
+    match = re.search(
+        rf"\binternal\s+(?:bool|int|float)\s+{re.escape(method_name)}\s*\([^)]*\)\s*\{{",
+        source,
+    )
+    if match is None:
+        return None
+    opening = source.find("{", match.start(), match.end())
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+    return None
+
+
+def preserves_configured_value(method_name):
+    body = extract_method_body(profile, method_name)
+    return body is not None and ": configured;" in body
+
+
 wall_traversal_method = """internal bool AllowWallTraversal(bool configured)
         {
             return Enabled
@@ -56,9 +82,9 @@ checks = {
         for getter, method in getter_methods.items()
     ),
     "all combat effects preserve configured values while disabled": all(
-        f"internal {'bool' if method == 'AllowWallTraversal' else ('int' if 'Maximum' in method else 'float')} {method}" in profile
+        preserves_configured_value(method)
         for method in getter_methods.values()
-    ) and profile.count(": configured;") >= 15,
+    ),
     "teleport growth is explicit": all(token in catalog for token in (
         "CleaveRadius(", "VoidstepRange(", "BlinkRange(", '"Rift Reach"',
     )) and all(token in profile for token in ("EffectiveVoidstepRange", "EffectiveBlinkRange")),
@@ -111,17 +137,21 @@ checks = {
 def clamp(value, low, high):
     return max(low, min(high, value))
 
+
 def blink(configured, rift, reach, dancer, unbound=0, singularity=0, avatar=0):
     scale = 0.55 + 0.025 * rift + 0.03 * reach + 0.04 * dancer + 0.01 * unbound + 0.02 * singularity + 0.02 * avatar
     return clamp(configured * min(2.0, scale), 1.0, 45.0)
+
 
 def voidstep(configured, affinity, reach, dancer, unbound=0, singularity=0, avatar=0):
     scale = 0.55 + 0.02 * affinity + 0.03 * reach + 0.035 * dancer + 0.01 * unbound + 0.02 * singularity + 0.02 * avatar
     return clamp(configured * min(1.9, scale), 1.0, 45.0)
 
+
 def cleave_radius(configured, affinity, reach, dancer, unbound=0, singularity=0, avatar=0):
     scale = 0.65 + 0.018 * affinity + 0.025 * reach + 0.03 * dancer + 0.01 * unbound + 0.018 * singularity + 0.02 * avatar
     return clamp(configured * min(1.75, scale), 1.0, 14.0)
+
 
 def cleave_targets(configured, affinity, reach, dancer, singularity=0, avatar=0):
     if configured == 0 and avatar >= 10:
@@ -130,29 +160,36 @@ def cleave_targets(configured, affinity, reach, dancer, singularity=0, avatar=0)
     cap = max(1, min(200, cap))
     return cap if configured <= 0 else min(configured, cap)
 
+
 def wind_force(configured, gale, crushing, unbound=0, singularity=0, avatar=0):
     scale = 0.55 + 0.025 * gale + 0.035 * crushing + 0.015 * unbound + 0.02 * singularity + 0.025 * avatar
     return clamp(configured * min(2.0, scale), 0.0, 45.0)
+
 
 def bend_factor(configured, bend, chrono, unbound=0, singularity=0, avatar=0):
     power = min(1.2, 0.2 + 0.025 * bend + 0.03 * chrono + 0.01 * unbound + 0.015 * singularity + 0.02 * avatar)
     return clamp(1.0 - (1.0 - configured) * power, 0.02, 1.0)
 
+
 def bend_duration(configured, bend, chrono, unbound=0, singularity=0, avatar=0):
     scale = 0.55 + 0.02 * bend + 0.04 * chrono + 0.01 * unbound + 0.02 * singularity + 0.025 * avatar
     return clamp(configured * min(1.8, scale), 0.25, 45.0)
+
 
 def domino_range(configured, fate, agony, gaze, unbound=0, singularity=0, avatar=0):
     scale = 0.55 + 0.02 * fate + 0.03 * agony + 0.025 * gaze + 0.01 * unbound + 0.02 * singularity + 0.02 * avatar
     return clamp(configured * min(1.8, scale), 1.0, 45.0)
 
+
 def vision_range(configured, sight, gaze, unbound=0, singularity=0, avatar=0):
     scale = 0.5 + 0.025 * sight + 0.035 * gaze + 0.01 * unbound + 0.02 * singularity + 0.02 * avatar
     return clamp(configured * min(1.8, scale), 5.0, 150.0)
 
+
 def vision_refresh(configured, sight, gaze, unbound=0, singularity=0, avatar=0):
     speed = 0.75 + 0.03 * sight + 0.06 * gaze + 0.02 * unbound + 0.03 * singularity + 0.04 * avatar
     return clamp(configured / max(0.25, speed), 0.1, 3.0)
+
 
 numeric_checks = {
     "Blink range grows past configured default at high mastery": blink(9, 1, 0, 0) < blink(9, 20, 0, 0) < blink(9, 20, 20, 10, 10, 10, 10),
