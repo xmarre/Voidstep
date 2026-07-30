@@ -29,11 +29,11 @@ namespace Voidstep
         private float _configuredMaximum;
         private bool _fovOwned;
         private float _previousFov;
-        private float _recoveryRotationProgress;
         private float _castRecoveryRadians;
         private int _controlledAgentIndex;
         private Vec3 _castOriginalLook;
         private MissionWeapon _cleaveWeapon;
+        private CleaveExecutionSnapshot _cleaveSnapshot;
         private GameEntity _cleaveMarker;
         private const float OwnedFov = 1.08f;
 
@@ -207,27 +207,28 @@ namespace Voidstep
             var wieldedWeapon = player.WieldedWeapon;
             if (!WeaponValidation.IsUsableMeleeWeapon(wieldedWeapon))
                 return Fail("Voidstep Cleave requires a currently wielded melee weapon.");
-            _cleaveWeapon = wieldedWeapon;
 
             var settings = VoidstepSettings.Current;
-            var requested = ResolveVoidstepDestination(player, settings.VoidstepRange);
-            var validation = _teleportValidator.Validate(player, requested, settings.VoidstepRange, false);
+            var snapshot = CleaveExecutionSnapshot.Capture(player, settings);
+            var requested = ResolveVoidstepDestination(player, snapshot.TeleportRange);
+            var validation = _teleportValidator.Validate(player, requested, snapshot.TeleportRange, false);
             if (!validation.Success)
                 return Fail(validation.Reason ?? "No safe Voidstep destination was found.");
             if (!PayAndStartCooldown(AbilityId.VoidstepCleave))
                 return Fail("Not enough Void Energy.");
 
+            _cleaveWeapon = wieldedWeapon;
+            _cleaveSnapshot = snapshot;
             _token = _state.Begin(AbilityId.VoidstepCleave);
             _castActorIndex = player.Index;
             _destination = validation.Position;
-            _castOriginalLook = player.LookDirection;
-            _recoveryRotationProgress = 0f;
-            _castRecoveryRadians = (settings.CleaveClockwise ? -1f : 1f) * (360f - settings.CleaveSweepDegrees) * (float)Math.PI / 180f;
+            _castOriginalLook = snapshot.InitialFacing;
+            _castRecoveryRadians = (float)((snapshot.Clockwise ? -1.0 : 1.0) * (360.0 - snapshot.SweepDegrees) * Math.PI / 180.0);
             _state.Transition(_token, AbilityPhase.Validating);
             _state.Transition(_token, AbilityPhase.WindUp);
             _cleaveMarker = _effects.CreateWorldMarker(_destination + Vec3.Up * 0.2f, 0x60E080FFu);
             BeginFovPulse();
-            _context.Logger.Debug($"Voidstep Cleave locked destination={Format(_destination)}, fallback={validation.UsedFallback}.");
+            _context.Logger.Debug($"Voidstep Cleave locked destination={Format(_destination)}, fallback={validation.UsedFallback}, facing={Format(_castOriginalLook)}.");
             _hud.ShowAbilityResult(AbilityId.VoidstepCleave, _context.Energy, _context.Cooldowns);
             return true;
         }
@@ -248,7 +249,7 @@ namespace Voidstep
                 case AbilityPhase.Departing:
                     if (_state.PhaseElapsed >= 0.055f)
                     {
-                        var validation = _teleportValidator.Validate(player, _destination, VoidstepSettings.Current.VoidstepRange, false);
+                        var validation = _teleportValidator.Validate(player, _destination, _cleaveSnapshot.TeleportRange, false);
                         if (!validation.Success)
                         {
                             RollbackPayment(AbilityId.VoidstepCleave);
@@ -257,9 +258,11 @@ namespace Voidstep
                             return;
                         }
                         _destination = validation.Position;
+                        _animation.SetActorFacing(player, _castOriginalLook);
                         TeleportActor(player, _destination, false);
+                        _animation.SetActorFacing(player, _castOriginalLook);
                         RemoveCleaveMarker();
-                        _context.Logger.Debug($"Voidstep Cleave teleported actor to {Format(player.Position)}.");
+                        _context.Logger.Debug($"Voidstep Cleave teleported actor to {Format(player.Position)} without changing facing={Format(player.LookDirection)}.");
                         _state.Transition(_token, AbilityPhase.Teleporting);
                     }
                     break;
@@ -270,7 +273,8 @@ namespace Voidstep
                 case AbilityPhase.Arriving:
                     if (_state.PhaseElapsed >= 0.08f)
                     {
-                        if (!_cleave.Begin(player, _cleaveWeapon, out var failure))
+                        _animation.SetActorFacing(player, _castOriginalLook);
+                        if (!_cleave.Begin(player, _cleaveWeapon, _cleaveSnapshot, out var failure))
                         {
                             RollbackPayment(AbilityId.VoidstepCleave);
                             Fail(failure ?? "Cleave execution could not start.");
@@ -290,11 +294,14 @@ namespace Voidstep
                     break;
                 case AbilityPhase.Recovery:
                     var progress = Math.Min(1f, _state.PhaseElapsed / 0.25f);
-                    var delta = Math.Max(0f, progress - _recoveryRotationProgress);
-                    _animation.RotateActor(player, _castRecoveryRadians * delta);
-                    _recoveryRotationProgress = progress;
+                    var facing = _castOriginalLook;
+                    facing.RotateAboutZ((float)(_cleaveSnapshot.SignedSweepRadians + _castRecoveryRadians * progress));
+                    _animation.SetActorFacing(player, facing);
                     if (_state.PhaseElapsed >= 0.25f)
+                    {
+                        _animation.SetActorFacing(player, _castOriginalLook);
                         CompleteCurrent();
+                    }
                     break;
             }
         }
@@ -423,10 +430,10 @@ namespace Voidstep
             }
             _castActorIndex = -1;
             _destination = Vec3.Invalid;
-            _recoveryRotationProgress = 0f;
             _castRecoveryRadians = 0f;
             _castOriginalLook = Vec3.Zero;
             _cleaveWeapon = default(MissionWeapon);
+            _cleaveSnapshot = default(CleaveExecutionSnapshot);
             RemoveCleaveMarker();
             RestoreFov();
         }
@@ -444,16 +451,16 @@ namespace Voidstep
             var actor = _context.Player;
             if (actor != null && actor.IsActive() && actor.Index == _castActorIndex && _castOriginalLook.LengthSquared > 0.001f)
             {
-                try { actor.LookDirection = _castOriginalLook; } catch { }
+                try { _animation.SetActorFacing(actor, _castOriginalLook); } catch { }
             }
             _context.Logger.Debug($"Ability state cancelled reason={reason}.");
             _token = default(CastToken);
             _castActorIndex = -1;
             _destination = Vec3.Invalid;
-            _recoveryRotationProgress = 0f;
             _castRecoveryRadians = 0f;
             _castOriginalLook = Vec3.Zero;
             _cleaveWeapon = default(MissionWeapon);
+            _cleaveSnapshot = default(CleaveExecutionSnapshot);
             RemoveCleaveMarker();
             RestoreFov();
         }
@@ -492,7 +499,9 @@ namespace Voidstep
 
         private void TeleportActor(Agent actor, Vec3 position, bool preserveMomentum)
         {
+            var actorFacing = CaptureHorizontalFacing(actor);
             var mount = actor.MountAgent;
+            var mountFacing = mount != null && mount.IsActive() ? CaptureHorizontalFacing(mount) : Vec3.Zero;
             if (mount != null && mount.IsActive())
             {
                 mount.TeleportToPosition(position);
@@ -514,6 +523,19 @@ namespace Voidstep
                     mount.SetMovementDirection(in zero);
                 }
             }
+
+            if (mount != null && mount.IsActive())
+                _animation.SetActorFacing(mount, mountFacing);
+            _animation.SetActorFacing(actor, actorFacing);
+        }
+
+        private static Vec3 CaptureHorizontalFacing(Agent actor)
+        {
+            var facing = actor != null ? actor.LookDirection : Vec3.Forward;
+            facing.z = 0f;
+            if (facing.Normalize() < 0.001f)
+                facing = Vec3.Forward;
+            return facing;
         }
 
         private bool CanPay(AbilityId ability)
