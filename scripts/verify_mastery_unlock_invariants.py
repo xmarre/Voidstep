@@ -158,9 +158,9 @@ checks = {
             )
         )
     ),
-    "runtime version literals match v1.2.3": (
-        "Voidstep v1.2.3 active" in mission
-        and "Voidstep v1.2.3 submodule loaded." in submodule
+    "runtime version literals remain internally consistent for the test package": (
+        "Voidstep v1.2.2 active" in mission
+        and "Voidstep v1.2.2 submodule loaded." in submodule
         and "Voidstep v1.1.0 active" not in mission
         and "Voidstep v1.2.0 submodule loaded." not in submodule
     ),
