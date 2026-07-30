@@ -8,8 +8,7 @@ namespace Voidstep
     /// <summary>
     /// Bannerlord recalculates AgentDrivenProperties after mission behaviours tick and only
     /// then submits the resulting array to native agent simulation. Bend Time compensation
-    /// therefore has to run after that model calculation, not only against the earlier managed
-    /// property snapshot held by TimeControlService.
+    /// therefore runs after that model calculation rather than only mutating an earlier snapshot.
     /// </summary>
     [HarmonyPatch]
     internal static class BendTimePostCalculatedDrivenPropertiesPatch
@@ -19,6 +18,9 @@ namespace Voidstep
         private static readonly AccessTools.FieldRef<AbilityManager, TimeControlService> Time =
             AccessTools.FieldRefAccess<AbilityManager, TimeControlService>("_time");
 
+        private static WeakReference<Mission> _cachedMission;
+        private static WeakReference<TimeControlService> _cachedTime;
+
         private static MethodBase TargetMethod()
         {
             return AccessTools.Method(
@@ -27,9 +29,15 @@ namespace Voidstep
                 new[] { typeof(Agent) });
         }
 
-        [HarmonyPriority(Priority.Last)]
-        private static void Postfix(AgentDrivenProperties __instance, Agent agent)
+        private static bool Prepare()
         {
+            return TargetMethod() != null;
+        }
+
+        [HarmonyPriority(Priority.Last)]
+        private static void Postfix(AgentDrivenProperties __instance, Agent __0)
+        {
+            var agent = __0;
             if (__instance == null || agent == null)
                 return;
 
@@ -45,13 +53,38 @@ namespace Voidstep
                 return;
             }
 
-            var behavior = mission.GetMissionBehavior<VoidstepMissionBehavior>();
-            var manager = behavior == null ? null : Manager(behavior);
-            var time = manager == null ? null : Time(manager);
+            var time = ResolveTime(mission);
             if (time == null)
                 return;
 
             BendTimeDrivenPropertyCompensation.Apply(time, agent, __instance);
+        }
+
+        internal static void ResetCache()
+        {
+            _cachedMission = null;
+            _cachedTime = null;
+        }
+
+        private static TimeControlService ResolveTime(Mission mission)
+        {
+            Mission cachedMission;
+            TimeControlService cachedTime;
+            if (_cachedMission != null &&
+                _cachedMission.TryGetTarget(out cachedMission) &&
+                ReferenceEquals(cachedMission, mission) &&
+                _cachedTime != null &&
+                _cachedTime.TryGetTarget(out cachedTime))
+            {
+                return cachedTime;
+            }
+
+            var behavior = mission.GetMissionBehavior<VoidstepMissionBehavior>();
+            var manager = behavior == null ? null : Manager(behavior);
+            var resolved = manager == null ? null : Time(manager);
+            _cachedMission = new WeakReference<Mission>(mission);
+            _cachedTime = resolved == null ? null : new WeakReference<TimeControlService>(resolved);
+            return resolved;
         }
     }
 
@@ -62,17 +95,11 @@ namespace Voidstep
     [HarmonyPatch(typeof(TimeControlService), "ApplyPlayerCompensation")]
     internal static class BendTimeNativeDrivenPropertyRefreshPatch
     {
-        // These are cached field-access delegates, not stored Agent references.
-        private static AccessTools.FieldRef<TimeControlService, Agent> Player =
-            AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
-        private static AccessTools.FieldRef<TimeControlService, Agent> Mount =
-            AccessTools.FieldRefAccess<TimeControlService, Agent>("_mount");
-
         private static void Postfix(TimeControlService __instance)
         {
-            var player = Player(__instance);
+            var player = BendTimeDrivenPropertyCompensation.GetPlayer(__instance);
             BendTimeDrivenPropertyCompensation.RefreshNative(player);
-            var mount = Mount(__instance);
+            var mount = BendTimeDrivenPropertyCompensation.GetMount(__instance);
             if (!ReferenceEquals(mount, player))
                 BendTimeDrivenPropertyCompensation.RefreshNative(mount);
         }
@@ -85,12 +112,6 @@ namespace Voidstep
     [HarmonyPatch(typeof(TimeControlService), "CompleteLocalState")]
     internal static class BendTimeNativeDrivenPropertyCleanupPatch
     {
-        // These are cached field-access delegates, not stored Agent references.
-        private static AccessTools.FieldRef<TimeControlService, Agent> Player =
-            AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
-        private static AccessTools.FieldRef<TimeControlService, Agent> Mount =
-            AccessTools.FieldRefAccess<TimeControlService, Agent>("_mount");
-
         private struct RefreshState
         {
             internal Agent Player;
@@ -101,8 +122,8 @@ namespace Voidstep
         {
             __state = new RefreshState
             {
-                Player = Player(__instance),
-                Mount = Mount(__instance)
+                Player = BendTimeDrivenPropertyCompensation.GetPlayer(__instance),
+                Mount = BendTimeDrivenPropertyCompensation.GetMount(__instance)
             };
         }
 
@@ -111,6 +132,8 @@ namespace Voidstep
             BendTimeDrivenPropertyCompensation.RefreshNative(__state.Player);
             if (!ReferenceEquals(__state.Mount, __state.Player))
                 BendTimeDrivenPropertyCompensation.RefreshNative(__state.Mount);
+            BendTimeDrivenPropertyCompensation.ResetDiagnostics();
+            BendTimePostCalculatedDrivenPropertiesPatch.ResetCache();
         }
     }
 
@@ -118,7 +141,7 @@ namespace Voidstep
     {
         private static readonly VoidstepLogger Logger = new VoidstepLogger();
 
-        // These are cached field-access delegates, not stored Agent references.
+        // Centralized cached field-access delegates. They are delegates, not stored Agent roots.
         private static AccessTools.FieldRef<TimeControlService, Agent> Player =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
         private static AccessTools.FieldRef<TimeControlService, Agent> Mount =
@@ -184,6 +207,16 @@ namespace Voidstep
 
         private static bool _refreshFailureLogged;
 
+        internal static Agent GetPlayer(TimeControlService time)
+        {
+            return time == null ? null : Player(time);
+        }
+
+        internal static Agent GetMount(TimeControlService time)
+        {
+            return time == null ? null : Mount(time);
+        }
+
         internal static void Apply(TimeControlService time, Agent agent, AgentDrivenProperties driven)
         {
             if (time == null || agent == null || driven == null || !time.Active ||
@@ -197,13 +230,13 @@ namespace Voidstep
                 return;
 
             var compensation = Math.Min(8f, 1f / factor);
-            if (ReferenceEquals(agent, Player(time)))
+            if (ReferenceEquals(agent, GetPlayer(time)))
             {
                 ApplyPlayer(time, driven, compensation);
                 return;
             }
 
-            if (ReferenceEquals(agent, Mount(time)))
+            if (ReferenceEquals(agent, GetMount(time)))
                 ApplyMount(time, driven, compensation);
         }
 
@@ -215,6 +248,7 @@ namespace Voidstep
             try
             {
                 agent.UpdateAgentProperties();
+                _refreshFailureLogged = false;
             }
             catch (Exception ex)
             {
@@ -223,6 +257,11 @@ namespace Voidstep
                 _refreshFailureLogged = true;
                 Logger.Debug("Bend Time could not refresh compensated native driven properties: " + ex.Message);
             }
+        }
+
+        internal static void ResetDiagnostics()
+        {
+            _refreshFailureLogged = false;
         }
 
         private static void ApplyPlayer(TimeControlService time, AgentDrivenProperties driven, float compensation)
