@@ -21,15 +21,9 @@
             <TextWidget WidthSizePolicy="Fixed" SuggestedWidth="250" HeightSizePolicy="StretchToParent"
                         Brush="Clan.TabControl.Text" Brush.FontSize="23" Brush.TextHorizontalAlignment="Center"
                         Brush.TextVerticalAlignment="Center" Text="@MeleeText"/>
-            <ButtonWidget DoNotPassEventsToChildren="true" WidthSizePolicy="Fixed" SuggestedWidth="210"
-                          HeightSizePolicy="Fixed" SuggestedHeight="48" VerticalAlignment="Center"
-                          Brush="Header.Tab.Center" Command.Click="ExecuteToggleProgression" UpdateChildrenStates="true">
-              <Children>
-                <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent"
-                            Brush="Clan.TabControl.Text" Brush.FontSize="17" Brush.TextHorizontalAlignment="Center"
-                            Brush.TextVerticalAlignment="Center" Text="@ProgressionText"/>
-              </Children>
-            </ButtonWidget>
+            <TextWidget WidthSizePolicy="Fixed" SuggestedWidth="210" HeightSizePolicy="StretchToParent"
+                        Brush="Clan.TabControl.Text" Brush.FontSize="17" Brush.TextHorizontalAlignment="Center"
+                        Brush.TextVerticalAlignment="Center" Text="@ProgressionText"/>
           </Children>
         </ListPanel>
 
