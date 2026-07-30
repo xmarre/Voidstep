@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.2.1
+VOIDSTEP — ARCANE MELEE ABILITIES v1.2.2
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional integration: The Old Realms 1.16
 
@@ -33,12 +33,16 @@ Mastery progression is optional and disabled by default.
 Enable it under MCM > Voidstep — Mastery Progression > Progression.
 The system provides 99 mastery ranks and 19 skills across Core, Mobility, Force, Dominion, Reservoir and Convergence branches.
 Successful ability use awards bounded mastery XP. Each mastery rank grants one skill point.
-Foundation skills unlock the six abilities. Branch investment now directly increases actual ability mechanics: Blink and Voidstep teleport distance; Cleave radius, sweep, damage, knockback and target capacity; Windblast cone, range, force and damage; Bend Time strength and duration; Domino reach, links and propagation; and Dark Vision range and refresh speed.
-Energy-cost and cooldown reductions remain secondary support bonuses rather than the primary progression reward.
+Foundation skills unlock the six abilities.
+Void Affinity unlocks Voidstep Cleave and increases its teleport range, radius, sweep, damage, knockback and target capacity.
+Rift Step unlocks Blink and increases its teleport range.
+The Force branch increases Windblast cone, range, force and damage and strengthens Bend Time duration and slowdown.
+The Dominion branch increases Domino range, links and propagated damage and increases Dark Vision range and refresh speed.
+The Reservoir branch increases Void Energy capacity and regeneration and reduces ability costs and cooldowns.
+Convergence skills strengthen every ability and increase target capacity.
 Momentum preservation, sealed-wall traversal, complete suspension, cooldown-only mode, unlimited energy and unlimited Cleave targets require advanced masteries.
-Existing v1.2.0 skill investments remain compatible because the saved skill IDs are unchanged and now map to the stronger effects.
-The final Avatar of the Void capstone is fully reachable within the rank-99 point budget.
-Disabling progression immediately restores unrestricted use of the normal Voidstep MCM configuration.
+Existing mastery XP and skill investments remain compatible.
+Disabling progression restores unrestricted use of the normal Voidstep MCM configuration.
 
 Open the mastery tree using the Voidstep Mastery button on the native Character screen or Ctrl+Shift+V on the campaign map.
 The Character-screen button uses a deferred state transition and does not push the mastery UI until Bannerlord has returned to a settled campaign map.
