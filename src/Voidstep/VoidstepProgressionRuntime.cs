@@ -88,22 +88,26 @@ namespace Voidstep
 
         internal bool AllowMomentumPreservation(bool configured)
         {
-            return !Enabled || (configured && Level(VoidstepSkillId.MomentumWeave) > 0);
+            if (!Enabled) return configured;
+            return configured && Level(VoidstepSkillId.MomentumWeave) > 0;
         }
 
         internal bool AllowCompleteSuspension(bool configured)
         {
-            return !Enabled || (configured && Level(VoidstepSkillId.Chronomancer) >= 10);
+            if (!Enabled) return configured;
+            return configured && Level(VoidstepSkillId.Chronomancer) >= 10;
         }
 
         internal bool AllowCooldownOnlyMode(bool configured)
         {
-            return !Enabled || (configured && Level(VoidstepSkillId.UnboundPower) >= 5);
+            if (!Enabled) return configured;
+            return configured && Level(VoidstepSkillId.UnboundPower) >= 5;
         }
 
         internal bool AllowUnlimitedEnergy(bool configured)
         {
-            return !Enabled || (configured && Level(VoidstepSkillId.UnboundPower) >= 10);
+            if (!Enabled) return configured;
+            return configured && Level(VoidstepSkillId.UnboundPower) >= 10;
         }
     }
 }
