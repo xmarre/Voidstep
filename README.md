@@ -42,7 +42,7 @@ While enabled:
 - each mastery rank grants one skill point, up to rank 99;
 - the tree contains Core, Mobility, Force, Dominion, Reservoir and Convergence branches;
 - rank 1 in the corresponding foundation skill unlocks each of the six abilities;
-- **Blink and Voidstep Cleave gain real teleport-range progression** through Rift Step, Rift Reach and Void Dancer;
+- **Blink gains real teleport-range progression** through Rift Step, Rift Reach and Void Dancer; **Voidstep Cleave's teleport range** grows through Void Affinity, Rift Reach and Void Dancer;
 - Cleave also gains radius, sweep angle, damage, knockback, knockdown reliability and target capacity;
 - Windblast gains cone angle, range, force and damage;
 - Bend Time gains duration and slowdown strength;
