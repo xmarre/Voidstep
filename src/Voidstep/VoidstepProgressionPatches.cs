@@ -32,6 +32,7 @@ namespace Voidstep
     {
         private static void Prefix()
         {
+            VoidstepProgressionBoundarySynchronizer.SynchronizeAll();
             VoidstepProgressionRuntimeScope.Enter();
         }
 
@@ -62,6 +63,7 @@ namespace Voidstep
     {
         private static bool Prefix(AbilityManager __instance, AbilityId ability, ref bool __result)
         {
+            VoidstepProgressionBoundarySynchronizer.SynchronizeUnlock(ability);
             VoidstepProgressionRuntimeScope.Enter();
 
             if (ability == AbilityId.DarkVision && __instance.IsDarkVisionActive)
