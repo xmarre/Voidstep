@@ -10,8 +10,19 @@ catalog_path = root / "src" / "Voidstep" / "VoidstepProgressionCatalog.cs"
 runtime_path = root / "src" / "Voidstep" / "VoidstepProgressionRuntime.cs"
 mission_path = root / "src" / "Voidstep" / "VoidstepMissionBehavior.cs"
 submodule_path = root / "src" / "Voidstep" / "VoidstepSubModule.cs"
+standalone_path = root / "src" / "Voidstep" / "StandaloneAbilityWheel.cs"
+wheel_suppression_path = root / "src" / "Voidstep" / "AbilityWheelInputSuppressionPatch.cs"
 
-for path in (fix_path, patch_path, catalog_path, runtime_path, mission_path, submodule_path):
+for path in (
+    fix_path,
+    patch_path,
+    catalog_path,
+    runtime_path,
+    mission_path,
+    submodule_path,
+    standalone_path,
+    wheel_suppression_path,
+):
     if not path.is_file():
         print("FAIL missing mastery unlock file:", path.relative_to(root))
         sys.exit(1)
@@ -22,6 +33,27 @@ catalog = catalog_path.read_text(encoding="utf-8")
 runtime = runtime_path.read_text(encoding="utf-8")
 mission = mission_path.read_text(encoding="utf-8")
 submodule = submodule_path.read_text(encoding="utf-8")
+standalone = standalone_path.read_text(encoding="utf-8")
+wheel_suppression = wheel_suppression_path.read_text(encoding="utf-8")
+
+
+def extract_named_block(source, declaration):
+    start = source.find(declaration)
+    if start < 0:
+        return None
+    opening = source.find("{", start + len(declaration))
+    if opening < 0:
+        return None
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+    return None
+
 
 description_definitions = re.findall(
     r'D\(VoidstepSkillId\.[A-Za-z]+,\s*"[^"]+",\s*"[^"]+",\s*"[^"]+",.*?\n\s*"([^"]+)"',
@@ -29,25 +61,41 @@ description_definitions = re.findall(
     flags=re.DOTALL,
 )
 
+context_class = extract_named_block(
+    patches,
+    "internal static class ProgressionAbilityContextScopePatch",
+)
+activation_class = extract_named_block(
+    patches,
+    "internal static class ProgressionAbilityActivationPatch",
+)
 context_sync = "VoidstepProgressionBoundarySynchronizer.SynchronizeAll();"
 activation_sync = "VoidstepProgressionBoundarySynchronizer.SynchronizeUnlock(ability);"
+scope_enter = "VoidstepProgressionRuntimeScope.Enter();"
 profile_gate = "VoidstepProgressionService.Profile.CanUse(ability, out reason)"
 
 checks = {
     "mission construction synchronizes before entering the settings scope": (
-        "internal static class ProgressionAbilityContextScopePatch" in patches
-        and context_sync in patches
-        and patches.index(context_sync) < patches.index("VoidstepProgressionRuntimeScope.Enter();")
+        context_class is not None
+        and context_sync in context_class
+        and scope_enter in context_class
+        and context_class.index(context_sync) < context_class.index(scope_enter)
         and "foreach (var skill in VoidstepSkillCatalog.All)" in fix
         and "profile.Level(skill.Id) == behavior.GetSkillLevel(skill.Id)" in fix
     ),
     "activation synchronizes the requested unlock immediately before the gate": (
-        "internal static class ProgressionAbilityActivationPatch" in patches
-        and activation_sync in patches
-        and profile_gate in patches
-        and patches.index(activation_sync) < patches.index(profile_gate)
+        activation_class is not None
+        and activation_sync in activation_class
+        and profile_gate in activation_class
+        and activation_class.index(activation_sync) < activation_class.index(profile_gate)
         and "var required = VoidstepSkillCatalog.RequiredSkill(ability);" in fix
         and "profile.Level(required) != behavior.GetSkillLevel(required)" in fix
+    ),
+    "shared enabled-state synchronization is centralized": (
+        "private static bool TryGetEnabledState(" in fix
+        and fix.count("TryGetEnabledState(out behavior, out profile)") == 2
+        and fix.count("if (profile.Enabled != behavior.Enabled)") == 1
+        and fix.count("behavior = VoidstepProgressionService.Current;") == 1
     ),
     "no independent Harmony ordering dependency remains": (
         "HarmonyPatch" not in fix
@@ -56,7 +104,7 @@ checks = {
         and "ProgressionActivationBoundarySynchronizationPatch" not in fix
     ),
     "profile rebuild occurs only when live state differs": (
-        fix.count("VoidstepProgressionService.NotifyChanged();") == 4
+        fix.count("VoidstepProgressionService.NotifyChanged();") == 3
         and "if (profile.Enabled != behavior.Enabled)" in fix
         and "if (profile.Level(required) != behavior.GetSkillLevel(required))" in fix
     ),
@@ -80,6 +128,28 @@ checks = {
     "temporary description mutation path is absent": (
         "VoidstepMasteryDescriptions" not in fix
         and "ProgressionMasteryDescriptionPatch" not in fix
+    ),
+    "standalone wheel remains display-only and owns no mission input": (
+        "display-only Gauntlet layer" in standalone
+        and all(
+            token not in standalone
+            for token in (
+                "IsFocusLayer",
+                "ConfigureInputRestrictions",
+                "SetInputRestrictions",
+                "TrySetFocus",
+                "TryLoseFocus",
+                "InputUsageMask",
+            )
+        )
+        and all(
+            token not in wheel_suppression
+            for token in (
+                "MouseScrollUp",
+                "MouseScrollDown",
+                "MouseScrollAxis",
+            )
+        )
     ),
     "runtime version literals match v1.2.2": (
         "Voidstep v1.2.2 active" in mission
