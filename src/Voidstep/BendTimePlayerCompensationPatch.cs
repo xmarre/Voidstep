@@ -62,16 +62,18 @@ namespace Voidstep
     [HarmonyPatch(typeof(TimeControlService), "ApplyPlayerCompensation")]
     internal static class BendTimeNativeDrivenPropertyRefreshPatch
     {
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Player =
+        // These are cached field-access delegates, not stored Agent references.
+        private static AccessTools.FieldRef<TimeControlService, Agent> Player =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Mount =
+        private static AccessTools.FieldRef<TimeControlService, Agent> Mount =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_mount");
 
         private static void Postfix(TimeControlService __instance)
         {
-            BendTimeDrivenPropertyCompensation.RefreshNative(Player(__instance));
+            var player = Player(__instance);
+            BendTimeDrivenPropertyCompensation.RefreshNative(player);
             var mount = Mount(__instance);
-            if (!ReferenceEquals(mount, Player(__instance)))
+            if (!ReferenceEquals(mount, player))
                 BendTimeDrivenPropertyCompensation.RefreshNative(mount);
         }
     }
@@ -83,9 +85,10 @@ namespace Voidstep
     [HarmonyPatch(typeof(TimeControlService), "CompleteLocalState")]
     internal static class BendTimeNativeDrivenPropertyCleanupPatch
     {
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Player =
+        // These are cached field-access delegates, not stored Agent references.
+        private static AccessTools.FieldRef<TimeControlService, Agent> Player =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Mount =
+        private static AccessTools.FieldRef<TimeControlService, Agent> Mount =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_mount");
 
         private struct RefreshState
@@ -115,9 +118,10 @@ namespace Voidstep
     {
         private static readonly VoidstepLogger Logger = new VoidstepLogger();
 
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Player =
+        // These are cached field-access delegates, not stored Agent references.
+        private static AccessTools.FieldRef<TimeControlService, Agent> Player =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Mount =
+        private static AccessTools.FieldRef<TimeControlService, Agent> Mount =
             AccessTools.FieldRefAccess<TimeControlService, Agent>("_mount");
         private static readonly AccessTools.FieldRef<TimeControlService, float> Factor =
             AccessTools.FieldRefAccess<TimeControlService, float>("_factor");
