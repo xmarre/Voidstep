@@ -86,6 +86,12 @@ checks = {
         and "=>" not in patches
         and "VoidstepProgressionRuntimeScope.Active" in patches
     ),
+    "mastery level resolver is cached off repeated getter paths": (
+        "private readonly Func<VoidstepSkillId, int> _levelResolver;" in profile
+        and "_levelResolver = Level;" in profile
+        and ", Level)" not in profile
+        and profile.count("_levelResolver") >= 20
+    ),
     "cast previews use the same mastery-scaled settings as execution": (
         "private void RefreshPreview(Agent player)" in selection
         and "VoidstepProgressionRuntimeScope.Enter();" in selection
