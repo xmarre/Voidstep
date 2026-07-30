@@ -74,6 +74,16 @@ prefab_bindings = (
     "ExecuteRespec",
     "ExecuteToggleProgression",
 )
+reachable_capstone_tokens = (
+    "R(VoidstepSkillId.BendTheHour, 5)",
+    "R(VoidstepSkillId.UmbralSight, 5)",
+    "R(VoidstepSkillId.RapidRecovery, 5)",
+    "R(VoidstepSkillId.VoidDancer, 1)",
+    "R(VoidstepSkillId.Chronomancer, 1)",
+    "R(VoidstepSkillId.SharedAgony, 5)",
+    "R(VoidstepSkillId.SovereignGaze, 1)",
+    'D(VoidstepSkillId.AvatarOfTheVoid, "Avatar of the Void", "Convergence", "✺", 10, 80, 225, 2',
+)
 
 checks = {
     "campaign persistence is save scoped": (
@@ -113,22 +123,28 @@ checks = {
         and "return true;" in profile
         and "VoidstepProgressionProfile.Disabled" in behavior
     ),
-    "runtime setting interception is scope bounded": (
+    "runtime setting interception is scope bounded and allocation free": (
         "[ThreadStatic]" in patches
         and "VoidstepProgressionRuntimeScope.Active" in patches
-        and "Interlocked.Exchange" in patches
+        and "VoidstepProgressionRuntimeScope.Enter();" in patches
+        and "VoidstepProgressionRuntimeScope.Exit();" in patches
+        and "new Lease" not in patches
         and "ProgressionAbilityTickScopePatch" in patches
         and "ProgressionAbilityContextScopePatch" in patches
     ),
-    "runtime scope exits on exceptions": patches.count("private static Exception Finalizer") >= 3,
-    "xp awards are bounded and mission lifetime scoped": (
+    "runtime scope exits exactly through three finalizers": patches.count("private static Exception Finalizer") == 3,
+    "xp awards are bounded and weak mission lifetime scoped": (
         "ConditionalWeakTable<object, AwardState>" in patches
+        and "CreateValueCallback StateFactory" in patches
+        and "States.GetValue(owner, StateFactory)" in patches
         and "minimumIntervalSeconds" in patches
         and "SuccessfulHits" in patches
         and all(name in patches for name in ("ConfirmBlink", "CastWindblast", "CastBendTime", "CastDomino", "CastDarkVision"))
     ),
     "mastery catalogue contains nineteen skills": catalog.count("D(VoidstepSkillId.") == 19,
     "mastery catalogue contains all branches": all(token in catalog for token in branch_tokens),
+    "final capstone is reachable inside the rank-99 budget": all(token in catalog for token in reachable_capstone_tokens)
+        and 78 + 10 <= 99,
     "progression has a separate MCM entry": (
         'Id => "Voidstep_Progression_v1"' in settings
         and "Enable Mastery Progression" in settings
