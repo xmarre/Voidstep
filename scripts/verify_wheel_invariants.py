@@ -135,20 +135,27 @@ checks = {
         'SetCurrentActionSpeed' not in tor_stance and
         'LookDirection =' not in tor_stance,
 
-    'Blink and Cleave consume one inert teleport boundary':
+    'Blink and Cleave use one scoped native teleport boundary':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
         'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
-        'displacement suppressed to protect Agent orientation' in teleport and
+        'AccessTools.Field(typeof(MBAPI), "IMBAgent")' in teleport and
+        'NativeSetPositionMethod.Invoke(api, arguments);' in teleport and
         'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in teleport,
 
-    'teleport never writes position frame or orientation':
+    'teleport avoids frame and orientation writes':
         'SetInitialFrame' not in teleport and
         'TeleportToPosition' not in teleport and
-        'IMBAgent' not in teleport and
-        'SetPosition' not in teleport and
+        'SetScriptedPosition' not in teleport and
         'LookDirection =' not in teleport and
         'SetMovementDirection' not in teleport and
-        'SetEventControlFlags' not in teleport,
+        'SetEventControlFlags' not in teleport and
+        'SetActionChannel' not in teleport,
+
+    'mounted teleport preserves rider offset':
+        'riderOffset = actorPosition - mountPosition;' in teleport and
+        'riderTarget = destination + riderOffset;' in teleport and
+        'SetNativePosition(mount, mountTarget)' in teleport and
+        'SetNativePosition(actor, riderTarget)' in teleport,
 
     'no global Agent Harmony target exists':
         '[HarmonyPatch(typeof(Agent)' not in all_runtime and
@@ -192,4 +199,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} focused wheel, TOR session and inert-teleport invariants.')
+print(f'Validated {len(checks)} focused wheel, TOR session and native-teleport invariants.')
