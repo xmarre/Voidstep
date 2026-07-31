@@ -193,9 +193,8 @@ namespace Voidstep
 
                 if (restoreMovementDirection)
                 {
-                    // SetMovementDirection uses Bannerlord's native XY direction vector. Do not
-                    // reconstruct it from MovementDirectionAsAngle: that angle convention is
-                    // offset by 90 degrees from the vector convention in 1.3.15.
+                    // Use Bannerlord's native XY direction vector directly. Reconstructing this
+                    // from the angular property applies a 90-degree axis offset in 1.3.15.
                     var movement = new Vec2(body.x, body.y);
                     if (movement.Normalize() < 0.001f)
                         movement = Vec2.Forward;
