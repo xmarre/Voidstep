@@ -3,173 +3,78 @@ using System.Runtime.CompilerServices;
 using HarmonyLib;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
-using Voidstep.Core;
 
 namespace Voidstep
 {
     /// <summary>
-    /// Captures the rendered body direction around a position-only teleport. The normal path never
-    /// writes any direction. A narrowly gated correction is issued only if Bannerlord flips the body
-    /// by more than 100 degrees while the player's look direction stayed within 60 degrees.
+    /// Owns one exact native position-and-facing frame after Blink or Voidstep. SetInitialFrame
+    /// updates position and body direction atomically; a short mission-scoped reconciliation
+    /// window corrects native controller rollback without globally patching Agent presentation.
+    /// Ownership ends immediately when the camera is deliberately turned away.
     /// </summary>
-    internal static class PostTeleportOrientationGuard
+    internal static class CameraFacingTeleportOwnership
     {
-        private const float GuardSeconds = 0.24f;
-        private const float PositionThresholdSquared = 0.01f;
-        private const float BodyFlipDotThreshold = -0.17f;
-        private const float StableLookDotThreshold = 0.50f;
+        private const float HoldSeconds = 0.55f;
+        private const float ReapplyDotThreshold = 0.985f;
+        private const float CameraReleaseDotThreshold = 0.82f;
 
-        private static readonly ConditionalWeakTable<AbilityManager, State> States =
-            new ConditionalWeakTable<AbilityManager, State>();
+        private static readonly ConditionalWeakTable<Mission, State> States =
+            new ConditionalWeakTable<Mission, State>();
 
         private sealed class State
         {
             internal int ActorIndex = -1;
             internal int MountIndex = -1;
             internal Vec3 Facing = Vec3.Forward;
-            internal Vec3 Look = Vec3.Forward;
-            internal Vec3 MountFacing = Vec3.Forward;
-            internal Vec3 TickPosition = Vec3.Invalid;
-            internal Vec3 TickFacing = Vec3.Forward;
-            internal Vec3 TickLook = Vec3.Forward;
-            internal Vec3 TickMountFacing = Vec3.Forward;
-            internal int TickMountIndex = -1;
-            internal bool ObserveCleaveTick;
             internal float ExpiresAt;
             internal bool Armed;
             internal string Source;
             internal VoidstepLogger Logger;
+            internal int Corrections;
         }
 
-        internal static Snapshot Capture(Agent actor)
-        {
-            var mount = actor?.MountAgent;
-            return new Snapshot(
-                actor?.Index ?? -1,
-                BodyAlignedCleaveRuntime.GetBodyFacing(actor),
-                Normalize(actor != null ? actor.LookDirection : Vec3.Forward),
-                mount != null && mount.IsActive() ? mount.Index : -1,
-                mount != null && mount.IsActive()
-                    ? BodyAlignedCleaveRuntime.GetBodyFacing(mount)
-                    : Vec3.Forward,
-                actor != null ? actor.Position : Vec3.Invalid);
-        }
-
-        internal static void Arm(
-            AbilityManager manager,
+        internal static void Teleport(
+            Mission mission,
             Agent actor,
-            Snapshot snapshot,
+            Vec3 position,
+            Vec3 facing,
             string source,
             VoidstepLogger logger)
         {
-            if (manager == null || actor == null || !actor.IsActive() || snapshot.ActorIndex != actor.Index)
+            if (mission == null || actor == null || !actor.IsActive())
                 return;
 
-            var state = States.GetOrCreateValue(manager);
-            state.ActorIndex = snapshot.ActorIndex;
-            state.MountIndex = snapshot.MountIndex;
-            state.Facing = snapshot.Facing;
-            state.Look = snapshot.Look;
-            state.MountFacing = snapshot.MountFacing;
-            state.ExpiresAt = MBCommon.GetApplicationTime() + GuardSeconds;
-            state.Armed = true;
-            state.Source = source;
-            state.Logger = logger;
-
-            var bodyAfter = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
-            var lookAfter = Normalize(actor.LookDirection);
+            facing = Normalize(facing);
+            SetExactFrame(actor, position, facing);
+            Arm(mission, actor, facing, source, logger);
             logger?.Debug(
-                source + " position-only teleport armed orientation guard; " +
-                "bodyBefore=" + Format(snapshot.Facing) + ", bodyAfter=" + Format(bodyAfter) +
-                ", lookBefore=" + Format(snapshot.Look) + ", lookAfter=" + Format(lookAfter) + ".");
+                source + " applied atomic native teleport frame; actor=" + actor.Index +
+                ", facing=" + Format(facing) + ".");
         }
 
-        internal static void BeforeManagerTick(AbilityManager manager, AbilityContext context)
+        internal static void AlignCurrent(
+            Mission mission,
+            Agent actor,
+            Vec3 facing,
+            string source,
+            VoidstepLogger logger)
         {
-            if (manager == null || context?.Player == null ||
-                !manager.IsBusy || manager.ActiveAbility != AbilityId.VoidstepCleave)
+            if (mission == null || actor == null || !actor.IsActive())
                 return;
 
-            var actor = context.Player;
-            var state = States.GetOrCreateValue(manager);
-            var snapshot = Capture(actor);
-            state.TickPosition = snapshot.Position;
-            state.TickFacing = snapshot.Facing;
-            state.TickLook = snapshot.Look;
-            state.TickMountIndex = snapshot.MountIndex;
-            state.TickMountFacing = snapshot.MountFacing;
-            state.ObserveCleaveTick = true;
-            state.Logger = context.Logger;
+            facing = Normalize(facing);
+            SetExactFrame(actor, GetTeleportBasePosition(actor), facing);
+            Arm(mission, actor, facing, source, logger);
         }
 
-        internal static void AfterManagerTick(AbilityManager manager, AbilityContext context)
+        internal static void Tick(Mission mission)
         {
-            if (manager == null || context?.Player == null)
+            if (mission == null || !States.TryGetValue(mission, out var state) || !state.Armed)
                 return;
 
-            var actor = context.Player;
-            var state = States.GetOrCreateValue(manager);
-            if (state.ObserveCleaveTick)
-            {
-                state.ObserveCleaveTick = false;
-                if (state.TickPosition.IsValid &&
-                    (actor.Position - state.TickPosition).LengthSquared > PositionThresholdSquared)
-                {
-                    Arm(
-                        manager,
-                        actor,
-                        new Snapshot(
-                            actor.Index,
-                            state.TickFacing,
-                            state.TickLook,
-                            state.TickMountIndex,
-                            state.TickMountFacing,
-                            state.TickPosition),
-                        "Voidstep Cleave",
-                        state.Logger);
-                }
-            }
-
-            Tick(manager, actor);
-        }
-
-        private static void Tick(AbilityManager manager, Agent actor)
-        {
-            var state = States.GetOrCreateValue(manager);
-            if (!state.Armed)
-                return;
+            var actor = mission.MainAgent;
             if (actor == null || !actor.IsActive() || actor.Index != state.ActorIndex)
             {
-                state.Armed = false;
-                return;
-            }
-
-            var body = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
-            var look = Normalize(actor.LookDirection);
-            var bodyDot = Vec3.DotProduct(state.Facing, body);
-            var lookDot = Vec3.DotProduct(state.Look, look);
-
-            if (bodyDot < BodyFlipDotThreshold && lookDot > StableLookDotThreshold)
-            {
-                // Restore the exact pre-teleport body heading through the native movement-direction
-                // channel. Unlike the old code, this never writes zero and never changes LookDirection.
-                var restore = state.Facing.AsVec2;
-                actor.SetMovementDirection(in restore);
-
-                var mount = actor.MountAgent;
-                if (mount != null && mount.IsActive() && mount.Index == state.MountIndex)
-                {
-                    var restoreMount = state.MountFacing.AsVec2;
-                    mount.SetMovementDirection(in restoreMount);
-                }
-
-                var bodyDegrees = Math.Acos(Math.Max(-1f, Math.Min(1f, bodyDot))) * 180.0 / Math.PI;
-                var lookDegrees = Math.Acos(Math.Max(-1f, Math.Min(1f, lookDot))) * 180.0 / Math.PI;
-                state.Logger?.Debug(
-                    state.Source + " corrected an independent post-teleport body flip; " +
-                    "bodyDelta=" + bodyDegrees.ToString("0.0") + "deg, " +
-                    "lookDelta=" + lookDegrees.ToString("0.0") + "deg, " +
-                    "restored=" + Format(state.Facing) + ".");
                 state.Armed = false;
                 return;
             }
@@ -177,10 +82,99 @@ namespace Voidstep
             if (MBCommon.GetApplicationTime() >= state.ExpiresAt)
             {
                 state.Logger?.Debug(
-                    state.Source + " post-teleport orientation remained stable; " +
-                    "body=" + Format(body) + ", look=" + Format(look) + ".");
+                    state.Source + " native teleport-frame ownership released after " +
+                    state.Corrections + " correction(s).");
                 state.Armed = false;
+                return;
             }
+
+            var cameraFacing = CameraAuthoritativeCastRuntime.GetCameraFacing(mission, actor);
+            if (Vec3.DotProduct(state.Facing, cameraFacing) < CameraReleaseDotThreshold)
+            {
+                state.Logger?.Debug(
+                    state.Source + " native teleport-frame ownership released for deliberate camera turn.");
+                state.Armed = false;
+                return;
+            }
+
+            var mount = actor.MountAgent;
+            if (state.MountIndex >= 0 &&
+                (mount == null || !mount.IsActive() || mount.Index != state.MountIndex))
+            {
+                state.Armed = false;
+                return;
+            }
+
+            var bodyOwner = mount != null && mount.IsActive() ? mount : actor;
+            var bodyFacing = BodyAlignedCleaveRuntime.GetBodyFacing(bodyOwner);
+            var lookFacing = Normalize(actor.LookDirection);
+            if (Vec3.DotProduct(state.Facing, bodyFacing) >= ReapplyDotThreshold &&
+                Vec3.DotProduct(state.Facing, lookFacing) >= ReapplyDotThreshold)
+                return;
+
+            SetExactFrame(actor, GetTeleportBasePosition(actor), state.Facing);
+            state.Corrections++;
+            if (state.Corrections == 1)
+            {
+                state.Logger?.Debug(
+                    state.Source + " corrected native post-teleport frame rollback; facing=" +
+                    Format(state.Facing) + ".");
+            }
+        }
+
+        internal static void Clear(Mission mission)
+        {
+            if (mission == null)
+                return;
+            if (States.TryGetValue(mission, out var state))
+                state.Armed = false;
+            States.Remove(mission);
+        }
+
+        private static void Arm(
+            Mission mission,
+            Agent actor,
+            Vec3 facing,
+            string source,
+            VoidstepLogger logger)
+        {
+            var mount = actor.MountAgent;
+            var state = States.GetOrCreateValue(mission);
+            state.ActorIndex = actor.Index;
+            state.MountIndex = mount != null && mount.IsActive() ? mount.Index : -1;
+            state.Facing = facing;
+            state.ExpiresAt = MBCommon.GetApplicationTime() + HoldSeconds;
+            state.Armed = true;
+            state.Source = source;
+            state.Logger = logger;
+            state.Corrections = 0;
+        }
+
+        private static void SetExactFrame(Agent actor, Vec3 basePosition, Vec3 facing)
+        {
+            var direction = facing.AsVec2;
+            var mount = actor.MountAgent;
+            if (mount != null && mount.IsActive())
+            {
+                var mountPosition = basePosition;
+                mount.SetInitialFrame(in mountPosition, in direction, true);
+                mount.LookDirection = facing;
+
+                var riderPosition = basePosition + Vec3.Up * 0.4f;
+                actor.SetInitialFrame(in riderPosition, in direction, true);
+                actor.LookDirection = facing;
+                return;
+            }
+
+            var actorPosition = basePosition;
+            actor.SetInitialFrame(in actorPosition, in direction, true);
+            actor.LookDirection = facing;
+        }
+
+        private static Vec3 GetTeleportBasePosition(Agent actor)
+        {
+            var mount = actor?.MountAgent;
+            return mount != null && mount.IsActive() ? mount.Position : actor.Position;
         }
 
         private static Vec3 Normalize(Vec3 value)
@@ -192,40 +186,35 @@ namespace Voidstep
         }
 
         private static string Format(Vec3 value) =>
-            "(" + value.x.ToString("0.00") + ", " + value.y.ToString("0.00") + ", " + value.z.ToString("0.00") + ")";
+            "(" + value.x.ToString("0.00") + ", " + value.y.ToString("0.00") +
+            ", " + value.z.ToString("0.00") + ")";
+    }
 
+    /// <summary>
+    /// Compatibility target retained for the branch-local patch that disables the obsolete
+    /// pre-teleport guard. It intentionally owns no state and performs no direction mutation.
+    /// </summary>
+    internal static class PostTeleportOrientationGuard
+    {
         internal readonly struct Snapshot
         {
-            internal Snapshot(
-                int actorIndex,
-                Vec3 facing,
-                Vec3 look,
-                int mountIndex,
-                Vec3 mountFacing,
-                Vec3 position)
-            {
-                ActorIndex = actorIndex;
-                Facing = facing;
-                Look = look;
-                MountIndex = mountIndex;
-                MountFacing = mountFacing;
-                Position = position;
-            }
+        }
 
-            internal int ActorIndex { get; }
-            internal Vec3 Facing { get; }
-            internal Vec3 Look { get; }
-            internal int MountIndex { get; }
-            internal Vec3 MountFacing { get; }
-            internal Vec3 Position { get; }
+        internal static void Arm(
+            AbilityManager manager,
+            Agent actor,
+            Snapshot snapshot,
+            string source,
+            VoidstepLogger logger)
+        {
         }
     }
 
     [HarmonyPatch(typeof(AbilityManager), "TeleportActor")]
     internal static class PositionOnlySharedTeleportPatch
     {
+        [HarmonyPriority(Priority.First)]
         private static bool Prefix(
-            AbilityManager __instance,
             Agent actor,
             Vec3 position,
             AbilityContext ____context)
@@ -233,27 +222,42 @@ namespace Voidstep
             if (actor == null || !actor.IsActive())
                 return false;
 
-            var snapshot = PostTeleportOrientationGuard.Capture(actor);
-            var mount = actor.MountAgent;
-            if (mount != null && mount.IsActive())
-            {
-                mount.TeleportToPosition(position);
-                actor.TeleportToPosition(position + Vec3.Up * 0.4f);
-            }
-            else
-            {
-                actor.TeleportToPosition(position);
-            }
-
-            // The normal teleport path performs position changes only. It does not assign an
-            // input vector, submit a movement direction, change look state, play an action,
-            // or perform any scripted-movement or facing mutation.
-            PostTeleportOrientationGuard.Arm(
-                __instance,
+            var mission = ____context?.Mission;
+            var facing = CameraAuthoritativeCastRuntime.GetCameraFacing(mission, actor);
+            CameraFacingTeleportOwnership.Teleport(
+                mission,
                 actor,
-                snapshot,
+                position,
+                facing,
                 "Blink",
                 ____context?.Logger);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Existing Blink/Cleave postfixes route through AlignToCamera. Replace that one-shot
+    /// LookDirection/SetMovementDirection implementation with exact native frame ownership.
+    /// </summary>
+    [HarmonyPatch(
+        typeof(CameraAuthoritativeCastRuntime),
+        nameof(CameraAuthoritativeCastRuntime.AlignToCamera))]
+    internal static class CameraAlignmentUsesExactNativeFramePatch
+    {
+        [HarmonyPriority(Priority.First)]
+        private static bool Prefix(
+            Agent actor,
+            Vec3 facing,
+            string source,
+            VoidstepLogger logger)
+        {
+            var mission = Mission.Current;
+            CameraFacingTeleportOwnership.AlignCurrent(
+                mission,
+                actor,
+                facing,
+                source,
+                logger);
             return false;
         }
     }
@@ -261,10 +265,19 @@ namespace Voidstep
     [HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.Tick))]
     internal static class PostTeleportOrientationGuardTickPatch
     {
-        private static void Prefix(AbilityManager __instance, AbilityContext ____context) =>
-            PostTeleportOrientationGuard.BeforeManagerTick(__instance, ____context);
+        [HarmonyPriority(Priority.Last)]
+        private static void Postfix(AbilityContext ____context)
+        {
+            CameraFacingTeleportOwnership.Tick(____context?.Mission);
+        }
+    }
 
-        private static void Postfix(AbilityManager __instance, AbilityContext ____context) =>
-            PostTeleportOrientationGuard.AfterManagerTick(__instance, ____context);
+    [HarmonyPatch(typeof(AbilityManager), nameof(AbilityManager.Cleanup))]
+    internal static class CameraFacingTeleportCleanupPatch
+    {
+        private static void Postfix(AbilityContext ____context)
+        {
+            CameraFacingTeleportOwnership.Clear(____context?.Mission);
+        }
     }
 }
