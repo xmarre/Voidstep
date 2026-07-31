@@ -299,7 +299,8 @@ namespace Voidstep
 
         internal static void Scale(ref float dt)
         {
-            if (_owner == null || !_owner.TryGetTarget(out var service) || !service.Active)
+            TimeControlService service = null;
+            if (_owner == null || !_owner.TryGetTarget(out service) || !service.Active)
             {
                 Clear(service);
                 return;
