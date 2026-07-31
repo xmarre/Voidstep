@@ -138,6 +138,23 @@ namespace Voidstep
             }
         }
 
+        public override void OnPreDisplayMissionTick(float dt)
+        {
+            base.OnPreDisplayMissionTick(dt);
+            if (_cleaned || _manager == null)
+                return;
+
+            try
+            {
+                TimeControl?.LateTick();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Bend Time late mission enforcement failed safely.", ex);
+                try { TimeControl?.Release(); } catch { }
+            }
+        }
+
         private void RefreshBindings(float dt)
         {
             _bindingRefreshRemaining -= dt;
