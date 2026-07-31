@@ -1,4 +1,3 @@
-using System;
 using HarmonyLib;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -6,10 +5,9 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Teleporting owns position only. TOR's projected cursor can select a destination that is
-    /// unrelated or even opposite to the camera/body facing vector, so writing any orientation at
-    /// the teleport boundary can produce a 180/360-degree correction. Native body, look, action and
-    /// mount orientation are therefore left completely untouched.
+    /// Compatibility boundary retained for older branch-local callers. Teleport ownership now
+    /// preserves the actor's existing native body frame and never derives yaw from camera, cursor
+    /// or travel direction.
     /// </summary>
     internal static class CameraFacingTeleportOwnership
     {
@@ -21,31 +19,13 @@ namespace Voidstep
             string source,
             VoidstepLogger logger)
         {
-            if (!OwnsLiveMainAgent(mission, actor))
-                return;
-
-            var beforeBody = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
-            var beforeLook = Normalize(actor.LookDirection);
-            var mount = actor.MountAgent;
-            var mounted = mount != null && mount.IsActive();
-
-            if (mounted)
-            {
-                mount.TeleportToPosition(position);
-                actor.TeleportToPosition(position + Vec3.Up * 0.4f);
-            }
-            else
-            {
-                actor.TeleportToPosition(position);
-            }
-
-            var afterBody = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
-            var afterLook = Normalize(actor.LookDirection);
-            logger?.Debug(
-                source + " applied position-only teleport; actor=" + actor.Index +
-                ", bodyDelta=" + AngleDegrees(beforeBody, afterBody).ToString("0.0") +
-                "deg, lookDelta=" + AngleDegrees(beforeLook, afterLook).ToString("0.0") +
-                "deg, mounted=" + mounted + ".");
+            PreservedFrameTeleportRuntime.Teleport(
+                mission,
+                actor,
+                position,
+                true,
+                source,
+                logger);
         }
 
         internal static void AlignCurrent(
@@ -55,8 +35,7 @@ namespace Voidstep
             string source,
             VoidstepLogger logger)
         {
-            // Deliberately empty. Post-teleport camera/body alignment was the remaining source of
-            // intermittent turns because cursor-projected destinations do not own camera facing.
+            // Deliberately empty. A destination or camera vector never owns post-teleport yaw.
         }
 
         internal static void Tick(Mission mission)
@@ -65,29 +44,6 @@ namespace Voidstep
 
         internal static void Clear(Mission mission)
         {
-        }
-
-        private static bool OwnsLiveMainAgent(Mission mission, Agent actor)
-        {
-            return mission != null && actor != null && actor.IsActive() &&
-                   ReferenceEquals(mission.MainAgent, actor) &&
-                   ReferenceEquals(Mission.Current, mission);
-        }
-
-        private static Vec3 Normalize(Vec3 value)
-        {
-            value.z = 0f;
-            if (value.Normalize() < 0.001f)
-                value = Vec3.Forward;
-            return value;
-        }
-
-        private static double AngleDegrees(Vec3 left, Vec3 right)
-        {
-            left = Normalize(left);
-            right = Normalize(right);
-            var dot = Math.Max(-1f, Math.Min(1f, Vec3.DotProduct(left, right)));
-            return Math.Acos(dot) * 180.0 / Math.PI;
         }
     }
 
@@ -108,7 +64,7 @@ namespace Voidstep
     }
 
     [HarmonyPatch(typeof(AbilityManager), "TeleportActor")]
-    internal static class PositionOnlySharedTeleportPatch
+    internal static class PreservedFrameSharedTeleportPatch
     {
         [HarmonyPriority(Priority.First)]
         private static bool Prefix(
@@ -117,24 +73,13 @@ namespace Voidstep
             bool preserveMomentum,
             AbilityContext ____context)
         {
-            if (actor == null || !actor.IsActive())
-                return false;
-
-            CameraFacingTeleportOwnership.Teleport(
+            PreservedFrameTeleportRuntime.Teleport(
                 ____context?.Mission,
                 actor,
                 position,
-                Vec3.Zero,
+                preserveMomentum,
                 "Blink",
                 ____context?.Logger);
-
-            if (!preserveMomentum)
-            {
-                actor.MovementInputVector = Vec2.Zero;
-                var mount = actor.MountAgent;
-                if (mount != null && mount.IsActive())
-                    mount.MovementInputVector = Vec2.Zero;
-            }
             return false;
         }
     }
@@ -147,7 +92,7 @@ namespace Voidstep
         [HarmonyPriority(Priority.First)]
         private static bool Prefix()
         {
-            // Suppress every legacy post-teleport orientation write.
+            // Suppress every legacy post-teleport camera-derived orientation write.
             return false;
         }
     }
