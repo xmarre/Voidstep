@@ -23,6 +23,8 @@ namespace Voidstep
 
         private static readonly AccessTools.FieldRef<TorAbilityWheelAdapter, AbilitySelectionController> Selection =
             AccessTools.FieldRefAccess<TorAbilityWheelAdapter, AbilitySelectionController>("_selection");
+        private static readonly AccessTools.FieldRef<AbilitySelectionController, Mission> SelectionMission =
+            AccessTools.FieldRefAccess<AbilitySelectionController, Mission>("_mission");
         private static readonly AccessTools.FieldRef<TorAbilityWheelAdapter, object> Logic =
             AccessTools.FieldRefAccess<TorAbilityWheelAdapter, object>("_logic");
         private static readonly AccessTools.FieldRef<TorAbilityWheelAdapter, bool> TargetingOwned =
@@ -70,7 +72,7 @@ namespace Voidstep
                 }
 
                 _installed = true;
-                Logger.Info("Installed one-shot TOR targeting and weapon-state restoration for every Voidstep proxy ability.");
+                Logger.Info("Installed one-shot TOR targeting, stance and weapon-state restoration for every Voidstep proxy ability.");
             }
             catch (Exception ex)
             {
@@ -99,23 +101,24 @@ namespace Voidstep
                 state.Ability = selectedAbility.Value;
             }
 
+            var mission = selection == null ? null : SelectionMission(selection);
+            var actor = mission?.MainAgent;
+
             if (!state.TargetingReleased)
             {
                 if (!__instance.OwnsTargeting)
                     return;
 
-                // TOR's DisableAbilityMode does not clear act_spellcasting_idle from channel 1.
-                // Remove the proxy-owned stance before closing state 2 so neither Blink nor
-                // Cleave inherits a turn/stuck action into the actual Voidstep cast.
-                TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation();
+                TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation(actor);
                 __instance.CloseTargetingMode();
+                TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation(actor);
                 state.TargetingReleased = true;
             }
             else if (__instance.OwnsTargeting)
             {
                 // TOR can expose its previous targeting state for one additional tick.
-                // Clear only Voidstep's stale ownership mirror; never repeat native cleanup.
                 TargetingOwned(__instance) = false;
+                TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation(actor);
             }
 
             if (!state.WeaponStateRestored)
