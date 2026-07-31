@@ -14,6 +14,8 @@ time_control = read('src/Voidstep/TimeControlService.cs')
 native_time = read('src/Voidstep/BendTimeNativeEnforcement.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
 post_cast = read('src/Voidstep/PostCastOrientationOwnershipFix.cs')
+preserved_teleport = read('src/Voidstep/PreservedFrameTeleportRuntime.cs')
+tor_selection_latch = read('src/Voidstep/TorProxySelectionAttemptLatch.cs')
 ground_aim = read('src/Voidstep/AuthoritativeGroundAimAndPlayerTimeFix.cs')
 runtime_corrections = read('src/Voidstep/RuntimeGameplayCorrections.cs')
 domino_repair = read('src/Voidstep/DominoPlayerSourceRepairPatch.cs')
@@ -84,21 +86,49 @@ checks = {
         '[HarmonyPatch(typeof(Mission), "AddMissileSingleUsageAux")]' in time_control and
         'service?.ScaleMissile(shooterAgent, ref speed);' in time_control,
 
-    'teleport is strictly position-only':
-        'actor.TeleportToPosition(position)' in post_cast and
-        'mount.TeleportToPosition(position)' in post_cast and
-        'SetInitialFrame' not in post_cast and
-        'LookDirection =' not in post_cast and
-        'SetMovementDirection' not in post_cast,
+    'Blink and Cleave share one preserved-frame translator':
+        'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
+        '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
+        'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in preserved_teleport and
+        'PreservedFrameTeleportRuntime.Teleport(' in preserved_teleport and
+        'return false;' in preserved_teleport,
+
+    'mounted teleport keeps native body directions':
+        'CaptureNativeFrameDirection(actor)' in preserved_teleport and
+        'CaptureNativeFrameDirection(mount)' in preserved_teleport and
+        'mount.SetInitialFrame(in mountTarget, in mountDirection, true);' in preserved_teleport and
+        'actor.SetInitialFrame(in riderTarget, in actorDirection, true);' in preserved_teleport,
+
+    'mounted teleport keeps rider offset and independent look':
+        'riderOffset = actorPosition - mountPosition;' in preserved_teleport and
+        'riderTarget = destination + riderOffset;' in preserved_teleport and
+        'mount.LookDirection = mountLook;' in preserved_teleport and
+        'actor.LookDirection = actorLook;' in preserved_teleport and
+        'riderOffsetError=' in preserved_teleport,
+
+    'teleport never derives yaw from destination or camera':
+        'agent.Frame.rotation.f' in preserved_teleport and
+        'GetCameraFacing' not in preserved_teleport and
+        'GetAimDirection' not in preserved_teleport and
+        'destination - actor.Position' not in preserved_teleport and
+        'SetMovementDirection' not in preserved_teleport,
+
+    'teleport is one-shot and current-main-agent scoped':
+        'ReferenceEquals(Mission.Current, mission)' in preserved_teleport and
+        'ReferenceEquals(mission.MainAgent, actor)' in preserved_teleport and
+        'PreservedFrameTeleportRuntime.Teleport(' not in post_cast.split('internal static void Tick(Mission mission)', 1)[1].split('internal static void Clear', 1)[0],
 
     'legacy camera-facing writes are disabled':
         'CameraAlignmentUsesExactNativeFramePatch' in post_cast and
-        'Suppress every legacy post-teleport orientation write.' in post_cast and
+        'Suppress every legacy post-teleport camera-derived orientation write.' in post_cast and
         'Deliberately empty.' in post_cast,
 
-    'position-only teleport remains current-main-agent scoped':
-        'ReferenceEquals(mission.MainAgent, actor)' in post_cast and
-        'ReferenceEquals(Mission.Current, mission)' in post_cast,
+    'TOR failed proxy selection cannot retry every tick':
+        'ConditionalWeakTable<TorAbilityWheelAdapter, State>' in tor_selection_latch and
+        'torState != 2' in tor_selection_latch and
+        'state.Attempted && state.Ability == ability' in tor_selection_latch and
+        'ReferenceEquals(state.Proxy, proxy)' in tor_selection_latch and
+        'return false;' in tor_selection_latch,
 
     'native projected cast marker remains authoritative':
         'GetProjectedMousePositionOnGround' in ground_aim and
@@ -153,4 +183,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} native-time, position-only teleport, Domino, TOR and Cleave regressions.')
+print(f'Validated {len(checks)} native-time, preserved-frame teleport, Domino, TOR and Cleave regressions.')
