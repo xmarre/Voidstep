@@ -116,6 +116,7 @@ cleave = read('CleaveSweepController.cs')
 ability_manager = read('AbilityManager.cs')
 blink = read('BlinkController.cs')
 camera_cast = read('CameraAuthoritativeCastPatches.cs')
+teleport_code = code_files.get('PreservedFrameTeleportRuntime.cs', '')
 
 checks = {
     'mission scoped behavior':
@@ -164,21 +165,44 @@ checks = {
         '[HarmonyPatch(typeof(Mission), "AddMissileSingleUsageAux")]' in time_control and
         'service?.ScaleMissile(shooterAgent, ref speed);' in time_control,
 
-    'teleport displacement is explicitly suppressed':
+    'Blink and Cleave share one real position translator':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
         'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
-        'displacement suppressed to protect Agent orientation' in teleport and
-        'return true;' in teleport,
+        'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in teleport and
+        'PreservedFrameTeleportRuntime.Teleport(' in teleport and
+        'return false;' in teleport,
 
-    'teleport performs no Agent mutation':
-        'SetInitialFrame' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'TeleportToPosition' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'IMBAgent' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'SetPosition' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'LookDirection =' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'SetMovementDirection' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'MovementInputVector' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
-        'SetActionChannel' not in code_files.get('PreservedFrameTeleportRuntime.cs', ''),
+    'teleport uses Bannerlord native position core':
+        'AccessTools.Field(typeof(MBAPI), "IMBAgent")' in teleport and
+        '"SetPosition"' in teleport and
+        'typeof(UIntPtr)' in teleport and
+        'typeof(Vec3).MakeByRefType()' in teleport and
+        'NativeSetPositionMethod.Invoke(api, arguments);' in teleport,
+
+    'teleport avoids initialization and convenience wrappers':
+        'SetInitialFrame' not in teleport_code and
+        'TeleportToPosition' not in teleport_code and
+        'SetScriptedPosition' not in teleport_code,
+
+    'mounted teleport preserves rider offset':
+        'riderOffset = actorPosition - mountPosition;' in teleport and
+        'riderTarget = destination + riderOffset;' in teleport and
+        'SetNativePosition(mount, mountTarget)' in teleport and
+        'SetNativePosition(actor, riderTarget)' in teleport and
+        'riderOffsetError=' in teleport,
+
+    'teleport submits no orientation state':
+        'LookDirection =' not in teleport_code and
+        'SetMovementDirection' not in teleport_code and
+        'SetEventControlFlags' not in teleport_code and
+        'SetActionChannel' not in teleport_code and
+        'GetCameraFacing' not in teleport_code,
+
+    'teleport preserves callbacks and bounded momentum cleanup':
+        'NotifyTeleported(mount);' in teleport and
+        'NotifyTeleported(actor);' in teleport and
+        'components[i]?.OnAgentTeleported();' in teleport and
+        'actor.MovementInputVector = Vec2.Zero;' in teleport,
 
     'teleport is current-main-agent scoped':
         'ReferenceEquals(Mission.Current, mission)' in teleport and
@@ -261,4 +285,4 @@ if 'Voidstep owns no Agent facing' in failed:
 if failed:
     print('Failed invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-owned time and no-Agent-mutation invariants.')
+print(f'Validated {len(checks)} mission-owned time and scoped native position-only teleport invariants.')
