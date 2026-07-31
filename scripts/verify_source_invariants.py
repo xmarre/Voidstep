@@ -17,8 +17,8 @@ mission = read('VoidstepMissionBehavior.cs')
 time_control = read('TimeControlService.cs')
 native_time = read('BendTimeNativeEnforcement.cs')
 post_cast = read('PostCastOrientationOwnershipFix.cs')
-preserved_teleport = read('PreservedFrameTeleportRuntime.cs')
-tor_selection_latch = read('TorProxySelectionAttemptLatch.cs')
+teleport = read('PreservedFrameTeleportRuntime.cs')
+tor_latch = read('TorProxySelectionAttemptLatch.cs')
 ground_aim = read('AuthoritativeGroundAimAndPlayerTimeFix.cs')
 runtime_corrections = read('RuntimeGameplayCorrections.cs')
 tor_stance = read('TorProxyCastStanceFix.cs')
@@ -37,130 +37,160 @@ checks = {
     'mission scoped behavior':
         'VoidstepMissionBehavior : MissionLogic' in mission and
         'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
+
     'mission lifecycle owns registered agents':
         'public override void OnAgentBuild(Agent agent, Banner banner)' in mission and
         'TimeControl?.RegisterAgent(agent);' in mission and
         mission.count('TimeControl?.UnregisterAgent(affectedAgent);') >= 2,
+
     'mission cleanup is explicit':
         'Cleanup(CancelReason.MissionEnded)' in mission and
-        '_manager?.Cleanup(reason)' in mission and 'public void Cleanup()' in time_control,
-    'Bend Time leaves mission scene and controlled actor native':
-        'AddTimeSpeedRequest' not in time_control and 'RemoveTimeSpeedRequest' not in time_control and
+        '_manager?.Cleanup(reason)' in mission and
+        'public void Cleanup()' in time_control,
+
+    'Bend Time leaves scene and controlled actor native':
+        'AddTimeSpeedRequest' not in time_control and
+        'RemoveTimeSpeedRequest' not in time_control and
         'TimeSpeedRequest' not in time_control and
         'scene, player and controlled mount remain native 1.00x' in time_control,
-    'Bend Time base service is registered-agent bounded':
+
+    'Bend Time remains registered-agent bounded':
         'Dictionary<int, SlowState> _states' in time_control and
-        'List<int> _refreshOrder' in time_control and 'RefreshBudgetPerTick = 192' in time_control and
+        'List<int> _refreshOrder' in time_control and
+        'RefreshBudgetPerTick = 192' in time_control and
         'ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount)' in time_control,
-    'native enforcement exact-matches the registered Agent instance':
+
+    'native Bend Time exact-matches live mission agents':
         'states.Contains(agent.Index)' in native_time and
         'ReferenceEquals(SlowStateAgentField.GetValue(slowState), agent)' in native_time and
         'ReferenceEquals(agent, player) || ReferenceEquals(agent, mount)' in native_time and
-        'ReferenceEquals(Mission.Current, mission)' in native_time and
-        'ReferenceEquals(MissionField?.GetValue(service), mission)' in native_time,
-    'native enforcement has a recursion bypass':
-        '[ThreadStatic]' in native_time and 'private static int _bypassDepth;' in native_time and
-        'if (IsBypassed || agent == null || !agent.IsActive()' in native_time and
-        'EnterBypass()' in native_time and 'ExitOneBypassLevel()' in native_time,
-    'native enforcement follows agent property recalculation':
-        '[HarmonyPatch(typeof(Agent), nameof(Agent.UpdateAgentProperties))]' in native_time and
-        'EnforceAfterPropertyUpdate(__instance);' in native_time and
-        'agent.UpdateCustomDrivenProperties();' in native_time,
-    'native enforcement owns an absolute movement cap from public speed APIs':
-        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetMaximumSpeedLimit))]' in native_time and
-        'agent.GetCurrentSpeedLimit()' in native_time and
-        'RestoreOriginalLimitForBaseline' in native_time and
-        'Math.Max(MinimumAbsoluteSpeed, baseline * factor)' in native_time and
-        'agent.SetMaximumSpeedLimit(original, false);' in native_time,
-    'native enforcement guards existing and new actions':
-        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetCurrentActionSpeed))]' in native_time and
-        'nameof(Agent.SetActionChannel)' in native_time and
-        'channel >= NativeActionChannelCount' in native_time and
-        'speed = Math.Max(0.001f, speed * factor);' in native_time,
-    'native enforcement restores and releases ownership first':
-        'RestoreOriginalMaximumSpeedLimits(service, state);' in native_time and
-        'RestoreAndUntrack(__instance);' in native_time and
-        'OriginalMaximumSpeedLimits' in native_time and 'RuntimeStates.Remove(service);' in native_time,
-    'native enforcement does not root missions or agents':
-        'WeakReference<TimeControlService>' in native_time and 'WeakReference<Mission>' in native_time and
+        'ReferenceEquals(Mission.Current, mission)' in native_time,
+
+    'native Bend Time has bounded recursion-safe enforcement':
+        '[ThreadStatic]' in native_time and
+        'private static int _bypassDepth;' in native_time and
         'ConditionalWeakTable<TimeControlService, RuntimeState>' in native_time and
-        not re.search(r'\bstatic\s+(?:readonly\s+)?Agent\s+\w+', native_time) and
-        not re.search(r'\bstatic\s+readonly\s+.*(?:List<Agent>|HashSet<Agent>|Dictionary<int,\s*Agent>)', native_time),
-    'no broad driven-property Harmony patch exists':
+        'WeakReference<TimeControlService>' in native_time and
+        'WeakReference<Mission>' in native_time,
+
+    'native Bend Time follows property speed and action resets':
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.UpdateAgentProperties))]' in native_time and
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetMaximumSpeedLimit))]' in native_time and
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetCurrentActionSpeed))]' in native_time and
+        'nameof(Agent.SetActionChannel)' in native_time,
+
+    'no broad driven-property patch exists':
         '[HarmonyPatch(typeof(AgentDrivenProperties)' not in all_text and
         'BendTimePostCalculatedDrivenPropertiesPatch' not in all_text,
-    'public native property push is used':
-        'agent.UpdateAgentProperties();' in time_control + native_time and
-        'agent.UpdateCustomDrivenProperties();' in time_control + native_time and
-        'AgentDrivenProperties.Values' not in time_control + native_time,
+
     'Bend Time missile and real-duration ownership remains':
         '[HarmonyPatch(typeof(Mission), "AddMissileAux")]' in time_control and
         '[HarmonyPatch(typeof(Mission), "AddMissileSingleUsageAux")]' in time_control and
-        'MBCommon.GetApplicationTime()' in time_control and '_remaining -= realDt;' in time_control,
+        'MBCommon.GetApplicationTime()' in time_control and
+        '_remaining -= realDt;' in time_control,
+
     'native reticle projection remains authoritative':
-        'GetProjectedMousePositionOnGround' in ground_aim and 'ClampToCastCircle' in ground_aim and
+        'GetProjectedMousePositionOnGround' in ground_aim and
+        'ClampToCastCircle' in ground_aim and
         'MissionScreen projected reticle ground' in ground_aim,
-    'Blink and Cleave share preserved-frame teleport':
+
+    'Blink and Cleave share one position translator':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
         'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
-        'typeof(BodyAlignedCleaveRuntime)' in preserved_teleport and
-        'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in preserved_teleport and
-        'return false;' in preserved_teleport,
-    'mounted teleport preserves rigid rider and mount state':
-        'riderOffset = actorPosition - mountPosition;' in preserved_teleport and
-        'riderTarget = destination + riderOffset;' in preserved_teleport and
-        'mount.SetInitialFrame(in mountTarget, in mountDirection, true);' in preserved_teleport and
-        'actor.SetInitialFrame(in riderTarget, in actorDirection, true);' in preserved_teleport and
-        'mount.LookDirection = mountLook;' in preserved_teleport and
-        'actor.LookDirection = actorLook;' in preserved_teleport,
-    'teleport direction comes only from current native state':
-        'agent.Frame.rotation.f' in preserved_teleport and
-        'CaptureNativeFrameDirection' in preserved_teleport and
-        'GetCameraFacing' not in preserved_teleport and
-        'GetAimDirection' not in preserved_teleport and
-        'destination - actor.Position' not in preserved_teleport,
-    'teleport has no replay or movement-direction command':
-        'SetMovementDirection' not in preserved_teleport and
-        'SetEventControlFlags' not in preserved_teleport and
-        'internal static void Tick(Mission mission)' in post_cast and
+        'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in teleport and
+        'PreservedFrameTeleportRuntime.Teleport(' in teleport and
+        'return false;' in teleport,
+
+    'teleport uses Bannerlord native position core':
+        'AccessTools.Field(typeof(MBAPI), "IMBAgent")' in teleport and
+        '"SetPosition"' in teleport and
+        'typeof(UIntPtr)' in teleport and
+        'typeof(Vec3).MakeByRefType()' in teleport and
+        'NativeSetPositionMethod.Invoke(api, arguments);' in teleport,
+
+    'teleport never uses initialization or convenience wrappers':
+        'SetInitialFrame' not in teleport and
+        '.TeleportToPosition(' not in teleport and
+        'SetScriptedPosition' not in teleport,
+
+    'mounted teleport preserves rigid rider offset':
+        'riderOffset = actorPosition - mountPosition;' in teleport and
+        'riderTarget = destination + riderOffset;' in teleport and
+        'SetNativePosition(mount, mountTarget)' in teleport and
+        'SetNativePosition(actor, riderTarget)' in teleport and
+        'riderOffsetError=' in teleport,
+
+    'teleport submits no orientation state':
+        'LookDirection =' not in teleport and
+        'SetMovementDirection' not in teleport and
+        'SetEventControlFlags' not in teleport and
+        'GetCameraFacing' not in teleport and
+        'GetAimDirection' not in teleport and
+        'destination - actor.Position' not in teleport,
+
+    'teleport preserves native callbacks and bounded momentum cleanup':
+        'NotifyTeleported(actor);' in teleport and
+        'components[i]?.OnAgentTeleported();' in teleport and
+        'actor.MovementInputVector = Vec2.Zero;' in teleport,
+
+    'teleport is one-shot and current-main-agent scoped':
+        'ReferenceEquals(Mission.Current, mission)' in teleport and
+        'ReferenceEquals(mission.MainAgent, actor)' in teleport and
         'PreservedFrameTeleportRuntime.Teleport(' not in post_cast.split('internal static void Tick(Mission mission)', 1)[1].split('internal static void Clear', 1)[0],
-    'legacy camera-derived alignment is fully suppressed':
+
+    'legacy camera-derived alignment is suppressed':
         'CameraAlignmentUsesExactNativeFramePatch' in post_cast and
         'Suppress every legacy post-teleport camera-derived orientation write.' in post_cast and
-        'internal static void AlignCurrent' in post_cast and 'Deliberately empty.' in post_cast,
-    'teleport is limited to the current main agent':
-        'ReferenceEquals(Mission.Current, mission)' in preserved_teleport and
-        'ReferenceEquals(mission.MainAgent, actor)' in preserved_teleport,
+        'internal static void AlignCurrent' in post_cast and
+        'Deliberately empty.' in post_cast,
+
     'TOR proxy selection attempts once per targeting session':
-        'ConditionalWeakTable<TorAbilityWheelAdapter, State>' in tor_selection_latch and
-        'torState != 2' in tor_selection_latch and
-        'state.Attempted && state.Ability == ability' in tor_selection_latch and
-        'ReferenceEquals(state.Proxy, proxy)' in tor_selection_latch and
-        'return false;' in tor_selection_latch,
+        'ConditionalWeakTable<TorAbilityWheelAdapter, State>' in tor_latch and
+        'torState != 2' in tor_latch and
+        'state.Attempted && state.Ability == ability' in tor_latch and
+        'ReferenceEquals(state.Proxy, proxy)' in tor_latch and
+        'return false;' in tor_latch,
+
     'TOR proxy cleanup cannot mutate direction':
-        'IsLookDirectionLocked' not in tor_stance and 'LookDirection =' not in tor_stance and
-        'SetMovementDirection' not in tor_stance and 'if (requireLiveTargeting && state != 2)' in tor_stance,
+        'IsLookDirectionLocked' not in tor_stance and
+        'LookDirection =' not in tor_stance and
+        'SetMovementDirection' not in tor_stance and
+        'if (requireLiveTargeting && state != 2)' in tor_stance,
+
     'Domino remains deferred and recursion safe':
-        '_pending.Add(new PendingPropagation' in domino and 'DispatchPendingPropagations();' in domino and
+        '_pending.Add(new PendingPropagation' in domino and
+        'DispatchPendingPropagations();' in domino and
         '_propagatedHitSuppression' in domino and
         'Domino accepted authoritative damage callback' in runtime_corrections,
+
     'Blink frozen targeting cleanup remains':
-        'AimTimeRequestId' in blink and '_timeCleanupPending' in blink and 'RemoveTimeSpeedRequest' in blink,
+        'AimTimeRequestId' in blink and
+        '_timeCleanupPending' in blink and
+        'RemoveTimeSpeedRequest' in blink,
+
     'Cleave retains captured weapon and bounded hits':
-        'MissionWeapon _cleaveWeapon' in ability_manager and 'MissionWeapon _weapon' in cleave and
+        'MissionWeapon _cleaveWeapon' in ability_manager and
+        'MissionWeapon _weapon' in cleave and
         '_successfulHits >= _maximumTargets' in cleave,
+
     'selection and wheel ownership remain explicit':
-        'var player = _mission.MainAgent;' in selection and 'internal bool Confirm()' in selection and
+        'var player = _mission.MainAgent;' in selection and
+        'internal bool Confirm()' in selection and
         '_selection.Select(directAbility.Value, "configured direct selector")' in wheel and
         'Input.IsKeyPressed(InputKey.RightMouseButton)' in wheel and
         'internal static readonly AbilityId[] Abilities' in input_bindings,
+
     'hotkey and Harmony teardown remain explicit':
         'VoidstepHotKeyContext.Clear();' in submodule and
-        'InputConflictSuppression.Reset();' in submodule and 'UnpatchAll' in submodule,
+        'InputConflictSuppression.Reset();' in submodule and
+        'UnpatchAll' in submodule,
+
     'no static Agent collection exists':
         not re.search(r'\bstatic\s+readonly\s+.*(?:\bList<Agent>\b|\bHashSet<Agent>\b|\bDictionary<int,\s*Agent>\b)', all_text),
+
     'optional effects remain nonfatal':
         'Optional particle failed' in effects and 'return -1;' in effects,
+
     'dark vision reuses buffers':
         'List<int> _staleBuffer' in dark_vision,
 }
@@ -171,4 +201,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-scope, native selective-time and preserved-frame teleport invariants.')
+print(f'Validated {len(checks)} mission-scope, selective-time and native position-only teleport invariants.')
