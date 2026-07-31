@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
-using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 
 namespace Voidstep
@@ -193,43 +192,29 @@ namespace Voidstep
 
             try
             {
-                var preservedLook = Normalize(actor.LookDirection);
-                var mount = actor.MountAgent;
-                var preservedMountLook = mount != null && mount.IsActive()
-                    ? Normalize(mount.LookDirection)
-                    : Vec3.Zero;
-
                 var current = actor.GetCurrentAction(1);
-                if (current == SpellcastingIdle)
+                var cleared = current == SpellcastingIdle;
+                if (cleared)
                 {
                     actor.SetCurrentActionSpeed(1, 1f);
                     actor.SetActionChannel(1, ActionIndexCache.act_none);
                 }
 
+                // Unlock TOR's presentation ownership, but do not write LookDirection here.
+                // A LookDirection assignment is itself a native turn request and was one of
+                // the failed approaches to this defect.
                 actor.IsLookDirectionLocked = false;
-                actor.LookDirection = preservedLook;
+                var mount = actor.MountAgent;
                 if (mount != null && mount.IsActive())
-                {
                     mount.IsLookDirectionLocked = false;
-                    mount.LookDirection = preservedMountLook;
-                }
 
                 Logger.Debug(
-                    $"TOR proxy cast stance released {stage}; actor={actor.Index}, " +
-                    $"clearedIdle={current == SpellcastingIdle}, facing={Format(preservedLook)}.");
+                    $"TOR proxy cast stance released {stage}; actor={actor.Index}, clearedIdle={cleared}.");
             }
             catch (Exception ex)
             {
                 Logger.Debug("TOR proxy action-channel cleanup failed safely: " + Unwrap(ex).Message);
             }
-        }
-
-        private static Vec3 Normalize(Vec3 direction)
-        {
-            direction.z = 0f;
-            if (direction.Normalize() < 0.001f)
-                direction = Vec3.Forward;
-            return direction;
         }
 
         private static FieldInfo RequireField(Type type, string name)
@@ -259,9 +244,6 @@ namespace Voidstep
                 exception = invocation.InnerException;
             return exception;
         }
-
-        private static string Format(Vec3 value) =>
-            $"({value.x:0.00}, {value.y:0.00}, {value.z:0.00})";
     }
 
     [HarmonyPatch(typeof(AbilitySelectionController), nameof(AbilitySelectionController.Confirm))]
