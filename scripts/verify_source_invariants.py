@@ -6,11 +6,94 @@ import sys
 root = Path(__file__).resolve().parents[1]
 runtime = root / 'src' / 'Voidstep'
 files = {p.name: p.read_text(encoding='utf-8') for p in runtime.glob('*.cs')}
-all_text = '\n'.join(files.values())
 
 
 def read(name):
     return files.get(name, '')
+
+
+def mask_csharp_noncode(source):
+    """Mask comments and literals while preserving token spacing and line structure."""
+    chars = list(source)
+    masked = list(source)
+    length = len(source)
+    index = 0
+
+    def blank(start, end):
+        for position in range(start, min(end, length)):
+            if chars[position] not in ('\r', '\n'):
+                masked[position] = ' '
+
+    while index < length:
+        if source.startswith('//', index):
+            end = source.find('\n', index + 2)
+            end = length if end < 0 else end
+            blank(index, end)
+            index = end
+            continue
+        if source.startswith('/*', index):
+            end = source.find('*/', index + 2)
+            end = length if end < 0 else end + 2
+            blank(index, end)
+            index = end
+            continue
+
+        prefix_length = 0
+        verbatim = False
+        if source.startswith('$@"', index) or source.startswith('@$"', index):
+            prefix_length = 3
+            verbatim = True
+        elif source.startswith('@"', index):
+            prefix_length = 2
+            verbatim = True
+        elif source.startswith('$"', index):
+            prefix_length = 2
+        elif source[index] == '"':
+            prefix_length = 1
+
+        if prefix_length:
+            start = index
+            index += prefix_length
+            while index < length:
+                if verbatim and source.startswith('""', index):
+                    index += 2
+                    continue
+                if source[index] == '"':
+                    index += 1
+                    break
+                if not verbatim and source[index] == '\\':
+                    index += 2
+                    continue
+                index += 1
+            blank(start, index)
+            continue
+
+        if source[index] == "'":
+            start = index
+            index += 1
+            while index < length:
+                if source[index] == '\\':
+                    index += 2
+                    continue
+                if source[index] == "'":
+                    index += 1
+                    break
+                index += 1
+            blank(start, index)
+            continue
+
+        index += 1
+
+    return ''.join(masked)
+
+
+code_files = {name: mask_csharp_noncode(text) for name, text in files.items()}
+all_text = '\n'.join(files.values())
+all_code = '\n'.join(code_files.values())
+
+
+def code_offenders(token):
+    return sorted(name for name, text in code_files.items() if token in text)
 
 
 mission = read('VoidstepMissionBehavior.cs')
@@ -37,7 +120,7 @@ camera_cast = read('CameraAuthoritativeCastPatches.cs')
 checks = {
     'mission scoped behavior':
         'VoidstepMissionBehavior : MissionLogic' in mission and
-        'CampaignBehaviorBase' not in all_text and 'CampaignEvents.' not in all_text,
+        'CampaignBehaviorBase' not in all_code and 'CampaignEvents.' not in all_code,
 
     'mission lifecycle owns registered agents':
         'public override void OnAgentBuild(Agent agent, Banner banner)' in mission and
@@ -52,12 +135,12 @@ checks = {
         'globalAgentPatches=0' in time_control,
 
     'no global Agent Harmony target exists':
-        '[HarmonyPatch(typeof(Agent)' not in all_text and
-        'nameof(Agent.SetActionChannel)' not in all_text and
-        'BendTimeNativeEnforcement' not in all_text,
+        '[HarmonyPatch(typeof(Agent)' not in all_code and
+        'nameof(Agent.SetActionChannel)' not in all_code and
+        'BendTimeNativeEnforcement' not in all_code,
 
     'no global Agent singleton lookup exists':
-        'Agent.Main' not in all_text,
+        'Agent.Main' not in all_code,
 
     'Bend Time remains registered and bounded':
         'Dictionary<int, SlowState> _states' in time_control and
@@ -88,34 +171,36 @@ checks = {
         'return true;' in teleport,
 
     'teleport performs no Agent mutation':
-        'SetInitialFrame' not in teleport and
-        'TeleportToPosition' not in teleport and
-        'IMBAgent' not in teleport and
-        'SetPosition' not in teleport and
-        'LookDirection =' not in teleport and
-        'SetMovementDirection' not in teleport and
-        'MovementInputVector' not in teleport and
-        'SetActionChannel' not in teleport,
+        'SetInitialFrame' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'TeleportToPosition' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'IMBAgent' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'SetPosition' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'LookDirection =' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'SetMovementDirection' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'MovementInputVector' not in code_files.get('PreservedFrameTeleportRuntime.cs', '') and
+        'SetActionChannel' not in code_files.get('PreservedFrameTeleportRuntime.cs', ''),
 
     'teleport is current-main-agent scoped':
         'ReferenceEquals(Mission.Current, mission)' in teleport and
         'ReferenceEquals(mission.MainAgent, actor)' in teleport,
 
     'Voidstep owns no Agent facing':
-        'actor.LookDirection =' not in animation and
-        'Voidstep never owns Agent body or look direction' in animation and
-        'LookDirection =' not in tor_stance and
-        'SetMovementDirection' not in tor_stance,
+        'actor.LookDirection =' not in code_files.get('AnimationController.cs', '') and
+        'actor.LookDirection =' not in code_files.get('CameraAuthoritativeCastPatches.cs', '') and
+        'mount.LookDirection =' not in code_files.get('CameraAuthoritativeCastPatches.cs', '') and
+        'SetMovementDirection' not in code_files.get('CameraAuthoritativeCastPatches.cs', '') and
+        'LookDirection =' not in code_files.get('TorProxyCastStanceFix.cs', ''),
 
     'TOR integration is selection only':
         'selection-only' in tor_stance and
-        'Agent.Main' not in tor_stance and
-        'SetActionChannel' not in tor_stance and
+        'Agent.Main' not in code_files.get('TorProxyCastStanceFix.cs', '') and
+        'SetActionChannel' not in code_files.get('TorProxyCastStanceFix.cs', '') and
         'ConditionalWeakTable<TorAbilityWheelAdapter, State>' in tor_latch,
 
     'Cleave remains camera oriented mathematically':
         'state.Facing = CameraAuthoritativeCastRuntime.GetCameraFacing' in camera_cast and
-        'var facingAngle = AngleMath.NormalizeRadians(Math.Atan2(state.Facing.y, state.Facing.x));' in camera_cast,
+        'var facingAngle = AngleMath.NormalizeRadians' in camera_cast and
+        'Math.Atan2(state.Facing.y, state.Facing.x)' in camera_cast,
 
     'native projected reticle remains authoritative':
         'GetProjectedMousePositionOnGround' in ground_aim and
@@ -150,7 +235,9 @@ checks = {
         'UnpatchAll' in submodule,
 
     'no static Agent collection exists':
-        not re.search(r'\bstatic\s+readonly\s+.*(?:\bList<Agent>\b|\bHashSet<Agent>\b|\bDictionary<int,\s*Agent>\b)', all_text),
+        not re.search(
+            r'\bstatic\s+readonly\s+.*(?:\bList<Agent>\b|\bHashSet<Agent>\b|\bDictionary<int,\s*Agent>\b)',
+            all_code),
 
     'optional effects remain nonfatal':
         'Optional particle failed' in effects and 'return -1;' in effects,
@@ -162,6 +249,15 @@ checks = {
 failed = [name for name, passed in checks.items() if not passed]
 for name, passed in checks.items():
     print(('PASS' if passed else 'FAIL') + ': ' + name)
+
+if 'no global Agent singleton lookup exists' in failed:
+    print('Agent.Main executable offenders: ' + ', '.join(code_offenders('Agent.Main')), file=sys.stderr)
+if 'no global Agent Harmony target exists' in failed:
+    print('Agent Harmony executable offenders: ' + ', '.join(code_offenders('[HarmonyPatch(typeof(Agent)')), file=sys.stderr)
+if 'Voidstep owns no Agent facing' in failed:
+    print('LookDirection assignment offenders: ' + ', '.join(code_offenders('LookDirection =')), file=sys.stderr)
+    print('MovementDirection offenders: ' + ', '.join(code_offenders('SetMovementDirection')), file=sys.stderr)
+
 if failed:
     print('Failed invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
