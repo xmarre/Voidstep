@@ -7,16 +7,16 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Owns one exact native position-and-facing frame after Blink or Voidstep. SetInitialFrame
-    /// updates position and body direction atomically; a short mission-scoped reconciliation
-    /// window corrects native controller rollback without globally patching Agent presentation.
-    /// Ownership ends immediately when the camera is deliberately turned away.
+    /// Applies one exact native position-and-facing frame per teleport. The previous 0.55-second
+    /// reconciliation loop repeatedly resubmitted SetInitialFrame whenever normal animation changed
+    /// body yaw, producing visible full rotations. This implementation never reapplies a teleport
+    /// frame from Tick and deduplicates the immediate postfix alignment for Blink.
     /// </summary>
     internal static class CameraFacingTeleportOwnership
     {
-        private const float HoldSeconds = 0.55f;
-        private const float ReapplyDotThreshold = 0.985f;
-        private const float CameraReleaseDotThreshold = 0.82f;
+        private const float DuplicateWindowSeconds = 0.08f;
+        private const float DuplicatePositionToleranceSquared = 0.04f;
+        private const float DuplicateFacingDot = 0.995f;
 
         private static readonly ConditionalWeakTable<Mission, State> States =
             new ConditionalWeakTable<Mission, State>();
@@ -24,13 +24,10 @@ namespace Voidstep
         private sealed class State
         {
             internal int ActorIndex = -1;
-            internal int MountIndex = -1;
+            internal Vec3 Position = Vec3.Invalid;
             internal Vec3 Facing = Vec3.Forward;
-            internal float ExpiresAt;
-            internal bool Armed;
+            internal float AppliedAt;
             internal string Source;
-            internal VoidstepLogger Logger;
-            internal int Corrections;
         }
 
         internal static void Teleport(
@@ -41,14 +38,14 @@ namespace Voidstep
             string source,
             VoidstepLogger logger)
         {
-            if (mission == null || actor == null || !actor.IsActive())
+            if (!OwnsLiveMainAgent(mission, actor))
                 return;
 
             facing = Normalize(facing);
             SetExactFrame(actor, position, facing);
-            Arm(mission, actor, facing, source, logger);
+            Remember(mission, actor, position, facing, source);
             logger?.Debug(
-                source + " applied atomic native teleport frame; actor=" + actor.Index +
+                source + " applied one atomic native teleport frame; actor=" + actor.Index +
                 ", facing=" + Format(facing) + ".");
         }
 
@@ -59,95 +56,72 @@ namespace Voidstep
             string source,
             VoidstepLogger logger)
         {
-            if (mission == null || actor == null || !actor.IsActive())
+            if (!OwnsLiveMainAgent(mission, actor))
                 return;
 
             facing = Normalize(facing);
-            SetExactFrame(actor, GetTeleportBasePosition(actor), facing);
-            Arm(mission, actor, facing, source, logger);
+            var position = GetTeleportBasePosition(actor);
+            if (IsImmediateDuplicate(mission, actor, position, facing))
+                return;
+
+            SetExactFrame(actor, position, facing);
+            Remember(mission, actor, position, facing, source);
+            logger?.Debug(
+                source + " applied one post-teleport native facing frame; actor=" + actor.Index +
+                ", facing=" + Format(facing) + ".");
         }
 
+        // Deliberately no frame reconciliation here. Normal body/action updates after teleport must
+        // remain native; replaying SetInitialFrame from Tick was the source of repeated 360-degree turns.
         internal static void Tick(Mission mission)
         {
-            if (mission == null || !States.TryGetValue(mission, out var state) || !state.Armed)
-                return;
-
-            var actor = mission.MainAgent;
-            if (actor == null || !actor.IsActive() || actor.Index != state.ActorIndex)
-            {
-                state.Armed = false;
-                return;
-            }
-
-            if (MBCommon.GetApplicationTime() >= state.ExpiresAt)
-            {
-                state.Logger?.Debug(
-                    state.Source + " native teleport-frame ownership released after " +
-                    state.Corrections + " correction(s).");
-                state.Armed = false;
-                return;
-            }
-
-            var cameraFacing = CameraAuthoritativeCastRuntime.GetCameraFacing(mission, actor);
-            if (Vec3.DotProduct(state.Facing, cameraFacing) < CameraReleaseDotThreshold)
-            {
-                state.Logger?.Debug(
-                    state.Source + " native teleport-frame ownership released for deliberate camera turn.");
-                state.Armed = false;
-                return;
-            }
-
-            var mount = actor.MountAgent;
-            if (state.MountIndex >= 0 &&
-                (mount == null || !mount.IsActive() || mount.Index != state.MountIndex))
-            {
-                state.Armed = false;
-                return;
-            }
-
-            var bodyOwner = mount != null && mount.IsActive() ? mount : actor;
-            var bodyFacing = BodyAlignedCleaveRuntime.GetBodyFacing(bodyOwner);
-            var lookFacing = Normalize(actor.LookDirection);
-            if (Vec3.DotProduct(state.Facing, bodyFacing) >= ReapplyDotThreshold &&
-                Vec3.DotProduct(state.Facing, lookFacing) >= ReapplyDotThreshold)
-                return;
-
-            SetExactFrame(actor, GetTeleportBasePosition(actor), state.Facing);
-            state.Corrections++;
-            if (state.Corrections == 1)
-            {
-                state.Logger?.Debug(
-                    state.Source + " corrected native post-teleport frame rollback; facing=" +
-                    Format(state.Facing) + ".");
-            }
         }
 
         internal static void Clear(Mission mission)
         {
-            if (mission == null)
-                return;
-            if (States.TryGetValue(mission, out var state))
-                state.Armed = false;
-            States.Remove(mission);
+            if (mission != null)
+                States.Remove(mission);
         }
 
-        private static void Arm(
+        private static bool OwnsLiveMainAgent(Mission mission, Agent actor)
+        {
+            return mission != null && actor != null && actor.IsActive() &&
+                   ReferenceEquals(mission.MainAgent, actor) &&
+                   ReferenceEquals(Mission.Current, mission);
+        }
+
+        private static bool IsImmediateDuplicate(
             Mission mission,
             Agent actor,
-            Vec3 facing,
-            string source,
-            VoidstepLogger logger)
+            Vec3 position,
+            Vec3 facing)
         {
-            var mount = actor.MountAgent;
+            if (mission == null || !States.TryGetValue(mission, out var state) ||
+                state.ActorIndex != actor.Index)
+                return false;
+
+            if (MBCommon.GetApplicationTime() - state.AppliedAt > DuplicateWindowSeconds)
+                return false;
+
+            var delta = position - state.Position;
+            delta.z = 0f;
+            return delta.LengthSquared <= DuplicatePositionToleranceSquared &&
+                   Vec3.DotProduct(state.Facing, facing) >= DuplicateFacingDot;
+        }
+
+        private static void Remember(
+            Mission mission,
+            Agent actor,
+            Vec3 position,
+            Vec3 facing,
+            string source)
+        {
             var state = States.GetOrCreateValue(mission);
             state.ActorIndex = actor.Index;
-            state.MountIndex = mount != null && mount.IsActive() ? mount.Index : -1;
+            state.Position = position;
             state.Facing = facing;
-            state.ExpiresAt = MBCommon.GetApplicationTime() + HoldSeconds;
-            state.Armed = true;
+            state.AppliedAt = MBCommon.GetApplicationTime();
             state.Source = source;
-            state.Logger = logger;
-            state.Corrections = 0;
         }
 
         private static void SetExactFrame(Agent actor, Vec3 basePosition, Vec3 facing)
@@ -235,10 +209,6 @@ namespace Voidstep
         }
     }
 
-    /// <summary>
-    /// Existing Blink/Cleave postfixes route through AlignToCamera. Replace that one-shot
-    /// LookDirection/SetMovementDirection implementation with exact native frame ownership.
-    /// </summary>
     [HarmonyPatch(
         typeof(CameraAuthoritativeCastRuntime),
         nameof(CameraAuthoritativeCastRuntime.AlignToCamera))]
@@ -251,9 +221,8 @@ namespace Voidstep
             string source,
             VoidstepLogger logger)
         {
-            var mission = Mission.Current;
             CameraFacingTeleportOwnership.AlignCurrent(
-                mission,
+                Mission.Current,
                 actor,
                 facing,
                 source,
