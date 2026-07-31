@@ -49,12 +49,18 @@ namespace Voidstep
         [ThreadStatic]
         private static int _bypassDepth;
 
-        private sealed class RuntimeState
+        internal sealed class RuntimeState
         {
             internal readonly Dictionary<int, float> BaselineMaximumSpeeds =
                 new Dictionary<int, float>();
+            internal readonly Dictionary<int, float> OriginalMaximumSpeedLimits =
+                new Dictionary<int, float>();
             internal bool ArmedLogWritten;
             internal bool FailureLogged;
+
+            public RuntimeState()
+            {
+            }
         }
 
         internal static bool IsBypassed => _bypassDepth > 0;
@@ -63,6 +69,12 @@ namespace Voidstep
         {
             _bypassDepth++;
             return new BypassScope();
+        }
+
+        internal static void ExitOneBypassLevel()
+        {
+            if (_bypassDepth > 0)
+                _bypassDepth--;
         }
 
         internal static void Track(TimeControlService service)
@@ -78,6 +90,7 @@ namespace Voidstep
             _activeMission = new WeakReference<Mission>(mission);
             var state = RuntimeStates.GetOrCreateValue(service);
             state.BaselineMaximumSpeeds.Clear();
+            state.OriginalMaximumSpeedLimits.Clear();
             state.FailureLogged = false;
 
             var enforced = RefreshAllEligible(service, state);
@@ -92,22 +105,24 @@ namespace Voidstep
             }
         }
 
-        internal static void Untrack(TimeControlService service)
+        internal static void RestoreAndUntrack(TimeControlService service)
         {
+            if (service != null && RuntimeStates.TryGetValue(service, out var state))
+            {
+                RestoreOriginalMaximumSpeedLimits(service, state);
+                state.BaselineMaximumSpeeds.Clear();
+                state.OriginalMaximumSpeedLimits.Clear();
+                state.FailureLogged = false;
+                state.ArmedLogWritten = false;
+                RuntimeStates.Remove(service);
+            }
+
             TimeControlService active;
             if (_activeService != null && _activeService.TryGetTarget(out active) &&
                 ReferenceEquals(active, service))
             {
                 _activeService = null;
                 _activeMission = null;
-            }
-
-            if (service != null && RuntimeStates.TryGetValue(service, out var state))
-            {
-                state.BaselineMaximumSpeeds.Clear();
-                state.FailureLogged = false;
-                state.ArmedLogWritten = false;
-                RuntimeStates.Remove(service);
             }
         }
 
@@ -157,7 +172,51 @@ namespace Voidstep
             return true;
         }
 
-        internal static void RefreshAndEnforce(Agent agent)
+        internal static void CaptureBeforeServiceApply(TimeControlService service, object slowState)
+        {
+            if (service == null || slowState == null || SlowStateAgentField == null)
+                return;
+
+            var agent = SlowStateAgentField.GetValue(slowState) as Agent;
+            TimeControlService resolved;
+            RuntimeState state;
+            float factor;
+            if (!TryGetEligible(agent, out resolved, out factor, out state) ||
+                !ReferenceEquals(resolved, service))
+            {
+                return;
+            }
+
+            CaptureOriginalMaximumSpeedLimit(agent, state);
+        }
+
+        internal static bool RefreshAndEnforce(Agent agent)
+        {
+            TimeControlService service;
+            RuntimeState state;
+            float factor;
+            if (!TryGetEligible(agent, out service, out factor, out state))
+                return false;
+
+            try
+            {
+                using (EnterBypass())
+                {
+                    CaptureOriginalMaximumSpeedLimit(agent, state);
+                    agent.UpdateAgentProperties();
+                    EnforceCurrentBaselineCore(agent, factor, state);
+                }
+                state.FailureLogged = false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogFailureOnce(service, state, agent, ex);
+                return false;
+            }
+        }
+
+        internal static void EnforceAfterPropertyUpdate(Agent agent)
         {
             TimeControlService service;
             RuntimeState state;
@@ -169,12 +228,8 @@ namespace Voidstep
             {
                 using (EnterBypass())
                 {
-                    agent.UpdateAgentProperties();
-                    CaptureBaselineMaximumSpeed(agent, state);
-                    ScaleDrivenProperties(agent.AgentDrivenProperties, factor);
-                    agent.UpdateCustomDrivenProperties();
-                    ApplyAbsoluteMovementCap(agent, factor, state);
-                    ApplyCurrentActionSpeeds(agent, factor);
+                    CaptureOriginalMaximumSpeedLimit(agent, state);
+                    EnforceCurrentBaselineCore(agent, factor, state);
                 }
                 state.FailureLogged = false;
             }
@@ -199,22 +254,7 @@ namespace Voidstep
                 return;
             }
 
-            try
-            {
-                using (EnterBypass())
-                {
-                    CaptureBaselineMaximumSpeed(agent, state);
-                    ScaleDrivenProperties(agent.AgentDrivenProperties, factor);
-                    agent.UpdateCustomDrivenProperties();
-                    ApplyAbsoluteMovementCap(agent, factor, state);
-                    ApplyCurrentActionSpeeds(agent, factor);
-                }
-                state.FailureLogged = false;
-            }
-            catch (Exception ex)
-            {
-                LogFailureOnce(service, state, agent, ex);
-            }
+            RefreshAndEnforce(agent);
         }
 
         internal static void ReassertMaximumSpeed(Agent agent)
@@ -256,7 +296,6 @@ namespace Voidstep
             if (states == null)
                 return 0;
 
-            var enforced = 0;
             var snapshot = new List<Agent>(states.Count);
             foreach (DictionaryEntry entry in states)
             {
@@ -268,37 +307,36 @@ namespace Voidstep
                     snapshot.Add(agent);
             }
 
+            var enforced = 0;
             for (var i = 0; i < snapshot.Count; i++)
             {
-                var agent = snapshot[i];
-                TimeControlService resolved;
-                RuntimeState resolvedState;
-                float factor;
-                if (!TryGetEligible(agent, out resolved, out factor, out resolvedState) ||
-                    !ReferenceEquals(resolved, service))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    using (EnterBypass())
-                    {
-                        agent.UpdateAgentProperties();
-                        CaptureBaselineMaximumSpeed(agent, state);
-                        ScaleDrivenProperties(agent.AgentDrivenProperties, factor);
-                        agent.UpdateCustomDrivenProperties();
-                        ApplyAbsoluteMovementCap(agent, factor, state);
-                        ApplyCurrentActionSpeeds(agent, factor);
-                    }
+                if (RefreshAndEnforce(snapshot[i]))
                     enforced++;
-                }
-                catch (Exception ex)
-                {
-                    LogFailureOnce(service, state, agent, ex);
-                }
             }
             return enforced;
+        }
+
+        private static void EnforceCurrentBaselineCore(
+            Agent agent,
+            float factor,
+            RuntimeState state)
+        {
+            CaptureBaselineMaximumSpeed(agent, state);
+            ScaleDrivenProperties(agent.AgentDrivenProperties, factor);
+            agent.UpdateCustomDrivenProperties();
+            ApplyAbsoluteMovementCap(agent, factor, state);
+            ApplyCurrentActionSpeeds(agent, factor);
+        }
+
+        private static void CaptureOriginalMaximumSpeedLimit(Agent agent, RuntimeState state)
+        {
+            if (agent == null || state == null ||
+                state.OriginalMaximumSpeedLimits.ContainsKey(agent.Index))
+            {
+                return;
+            }
+
+            state.OriginalMaximumSpeedLimits[agent.Index] = agent.GetMaximumSpeedLimit();
         }
 
         private static void CaptureBaselineMaximumSpeed(Agent agent, RuntimeState state)
@@ -337,6 +375,32 @@ namespace Voidstep
         {
             for (var channel = 0; channel < NativeActionChannelCount; channel++)
                 agent.SetCurrentActionSpeed(channel, factor);
+        }
+
+        private static void RestoreOriginalMaximumSpeedLimits(
+            TimeControlService service,
+            RuntimeState state)
+        {
+            var states = StatesField?.GetValue(service) as IDictionary;
+            if (states == null)
+                return;
+
+            using (EnterBypass())
+            {
+                foreach (DictionaryEntry entry in states)
+                {
+                    var slowState = entry.Value;
+                    var agent = slowState == null || SlowStateAgentField == null
+                        ? null
+                        : SlowStateAgentField.GetValue(slowState) as Agent;
+                    if (agent == null || !agent.IsActive())
+                        continue;
+
+                    float original;
+                    if (state.OriginalMaximumSpeedLimits.TryGetValue(agent.Index, out original))
+                        agent.SetMaximumSpeedLimit(original, false);
+                }
+            }
         }
 
         private static void ScaleDrivenProperties(AgentDrivenProperties driven, float factor)
@@ -403,8 +467,7 @@ namespace Voidstep
         {
             public void Dispose()
             {
-                if (_bypassDepth > 0)
-                    _bypassDepth--;
+                ExitOneBypassLevel();
             }
         }
     }
@@ -425,7 +488,7 @@ namespace Voidstep
         [HarmonyPriority(Priority.First)]
         private static void Prefix(TimeControlService __instance)
         {
-            BendTimeNativeEnforcementRuntime.Untrack(__instance);
+            BendTimeNativeEnforcementRuntime.RestoreAndUntrack(__instance);
         }
     }
 
@@ -437,8 +500,9 @@ namespace Voidstep
             return AccessTools.Method(typeof(TimeControlService), "Apply");
         }
 
-        private static void Prefix()
+        private static void Prefix(TimeControlService __instance, object __0)
         {
+            BendTimeNativeEnforcementRuntime.CaptureBeforeServiceApply(__instance, __0);
             BendTimeNativeEnforcementRuntime.EnterBypass();
         }
 
@@ -447,14 +511,6 @@ namespace Voidstep
             object __0,
             Exception __exception)
         {
-            if (BendTimeNativeEnforcementRuntime.IsBypassed)
-            {
-                // Match the Prefix without allocating a disposable per registered agent.
-                using (BendTimeNativeEnforcementRuntime.EnterBypass())
-                {
-                }
-            }
-            // The empty scope above returns one level; explicitly return the original Prefix level.
             BendTimeNativeEnforcementRuntime.ExitOneBypassLevel();
             if (__exception == null)
                 BendTimeNativeEnforcementRuntime.EnforceAfterServiceApply(__instance, __0);
@@ -468,7 +524,7 @@ namespace Voidstep
         [HarmonyPriority(Priority.Last)]
         private static void Postfix(Agent __instance)
         {
-            BendTimeNativeEnforcementRuntime.RefreshAndEnforce(__instance);
+            BendTimeNativeEnforcementRuntime.EnforceAfterPropertyUpdate(__instance);
         }
     }
 
