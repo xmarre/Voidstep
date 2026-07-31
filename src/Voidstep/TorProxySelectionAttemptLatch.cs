@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
+using Voidstep.Core;
 
 namespace Voidstep
 {
