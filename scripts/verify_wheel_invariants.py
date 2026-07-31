@@ -139,13 +139,13 @@ checks = {
         'SetInitialFrame(in mountPosition, in direction, true)' in post_cast and
         'TeleportToPosition' not in post_cast,
 
-    'post-teleport correction is bounded and camera releasable':
+    'post-teleport frame is one-shot and duplicate guarded':
         'ConditionalWeakTable<Mission, State>' in post_cast and
-        'HoldSeconds = 0.55f' in post_cast and
-        'ReapplyDotThreshold = 0.985f' in post_cast and
-        'CameraReleaseDotThreshold = 0.82f' in post_cast and
-        'native teleport-frame ownership released for deliberate camera turn' in post_cast and
-        'MBCommon.GetApplicationTime() >= state.ExpiresAt' in post_cast,
+        'DuplicateWindowSeconds = 0.08f' in post_cast and
+        'DuplicateFacingDot = 0.995f' in post_cast and
+        'IsImmediateDuplicate' in post_cast and
+        'SetExactFrame(' not in post_cast.split('internal static void Tick(Mission mission)', 1)[1].split('internal static void Clear', 1)[0] and
+        'repeated 360-degree turns' in post_cast,
 
     'post-teleport correction submits no movement controls':
         '.SetMovementDirection(' not in post_cast and
