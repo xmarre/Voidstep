@@ -88,7 +88,6 @@ def mask_csharp_noncode(source):
 
 
 code_files = {name: mask_csharp_noncode(text) for name, text in files.items()}
-all_text = '\n'.join(files.values())
 all_code = '\n'.join(code_files.values())
 
 
@@ -117,6 +116,7 @@ ability_manager = read('AbilityManager.cs')
 blink = read('BlinkController.cs')
 camera_cast = read('CameraAuthoritativeCastPatches.cs')
 teleport_code = code_files.get('PreservedFrameTeleportRuntime.cs', '')
+tor_stance_code = code_files.get('TorProxyCastStanceFix.cs', '')
 
 checks = {
     'mission scoped behavior':
@@ -184,11 +184,11 @@ checks = {
         'TeleportToPosition' not in teleport_code and
         'SetScriptedPosition' not in teleport_code,
 
-    'mounted teleport preserves rider offset':
+    'mounted teleport uses the attachment once':
         'riderOffset = actorPosition - mountPosition;' in teleport and
-        'riderTarget = destination + riderOffset;' in teleport and
+        'mountTarget = destination - riderOffset;' in teleport and
         'SetNativePosition(mount, mountTarget)' in teleport and
-        'SetNativePosition(actor, riderTarget)' in teleport and
+        'SetNativePosition(actor, riderTarget)' not in teleport and
         'riderOffsetError=' in teleport,
 
     'teleport submits no orientation state':
@@ -198,11 +198,11 @@ checks = {
         'SetActionChannel' not in teleport_code and
         'GetCameraFacing' not in teleport_code,
 
-    'teleport preserves callbacks and bounded momentum cleanup':
+    'teleport preserves callbacks without movement input writes':
         'NotifyTeleported(mount);' in teleport and
         'NotifyTeleported(actor);' in teleport and
         'components[i]?.OnAgentTeleported();' in teleport and
-        'actor.MovementInputVector = Vec2.Zero;' in teleport,
+        'MovementInputVector' not in teleport_code,
 
     'teleport is current-main-agent scoped':
         'ReferenceEquals(Mission.Current, mission)' in teleport and
@@ -213,12 +213,15 @@ checks = {
         'actor.LookDirection =' not in code_files.get('CameraAuthoritativeCastPatches.cs', '') and
         'mount.LookDirection =' not in code_files.get('CameraAuthoritativeCastPatches.cs', '') and
         'SetMovementDirection' not in code_files.get('CameraAuthoritativeCastPatches.cs', '') and
-        'LookDirection =' not in code_files.get('TorProxyCastStanceFix.cs', ''),
+        'LookDirection =' not in tor_stance_code,
 
-    'TOR integration is selection only':
-        'selection-only' in tor_stance and
-        'Agent.Main' not in code_files.get('TorProxyCastStanceFix.cs', '') and
-        'SetActionChannel' not in code_files.get('TorProxyCastStanceFix.cs', '') and
+    'TOR action cleanup is mission and proxy scoped':
+        'Agent.Main' not in tor_stance_code and
+        '[HarmonyPatch(typeof(Agent)' not in tor_stance_code and
+        'var mission = Mission.Current;' in tor_stance and
+        'ReferenceEquals(mission.MainAgent, actor)' in tor_stance and
+        'coordinator.IsTorProxy(currentAbility)' in tor_stance and
+        'actor.SetActionChannel(1, ActionIndexCache.act_none);' in tor_stance and
         'ConditionalWeakTable<TorAbilityWheelAdapter, State>' in tor_latch,
 
     'Cleave remains camera oriented mathematically':
@@ -285,4 +288,4 @@ if 'Voidstep owns no Agent facing' in failed:
 if failed:
     print('Failed invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-owned time and scoped native position-only teleport invariants.')
+print(f'Validated {len(checks)} mission-owned time, attachment-only teleport and scoped TOR cleanup invariants.')
