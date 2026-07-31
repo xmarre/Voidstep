@@ -19,6 +19,7 @@ standalone = read('src/Voidstep/StandaloneAbilityWheel.cs')
 wheel_suppression = read('src/Voidstep/AbilityWheelInputSuppressionPatch.cs')
 tor = read('src/Voidstep/TorAbilityWheelAdapter.cs')
 tor_stance = read('src/Voidstep/TorProxyCastStanceFix.cs')
+post_cast = read('src/Voidstep/PostCastOrientationOwnershipFix.cs')
 selection = read('src/Voidstep/AbilitySelectionController.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
 mission_input = read('src/Voidstep/MissionOrderInputSuppression.cs')
@@ -27,6 +28,7 @@ bindings = read('src/Voidstep/VoidstepInputBindings.cs')
 project = read('src/Voidstep/Voidstep.csproj')
 prefab = read('module/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml')
 tor_compact = compact(tor)
+post_cast_compact = compact(post_cast)
 
 ability_order = (
     'AbilityId.VoidstepCleave',
@@ -114,18 +116,18 @@ checks = {
         'ParseEnumValue("TOR_Core.AbilitySystem.AbilityTargetType", "WorldPosition")',
         'ParseEnumValue("TOR_Core.AbilitySystem.Crosshairs.CrosshairType", "Pointer")',
         'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")')) and 'Enum.ToObject' not in tor,
-    'TOR proxy animation loop is suppressed only for owned proxies':
+    'TOR proxy animation handling is bounded to live state two':
         'nameof(BeforeTorHandleAnimations)' in tor_stance and
-        'coordinator.IsTorProxy(currentAbility)' in tor_stance and
-        'if (!TryGetCurrentVoidstepProxy(__instance, out var actor))' in tor_stance and
-        'return true;' in tor_stance and
-        'return false;' in tor_stance,
-    'TOR proxy targeting state survives stance suppression':
-        'NeutralizeProxyFlags(__instance, false);' in tor_stance and
-        tor_stance.count('NeutralizeProxyFlags(__instance, false);') >= 2 and
-        'if (clearTargetingState && _currentStateField != null' in tor_stance and
-        '_currentStateField.SetValue(logic, 0);' in tor_stance,
+        'TryGetCurrentVoidstepProxy(__instance, true, out var actor)' in tor_stance and
+        'var state = Convert.ToInt32(_currentStateField.GetValue(logic));' in tor_stance and
+        'if (requireLiveTargeting && state != 2)' in tor_stance and
+        'return true;' in tor_stance,
+    'TOR cached proxy identity cannot mutate state after targeting closes':
+        'TryGetCurrentVoidstepProxy(__instance, false, out var actor)' in tor_stance and
+        '_currentStateField.SetValue' not in tor_stance and
+        'NeutralizeProxyFlags(__instance);' in tor_stance,
     'TOR spellcasting idle is cleared before Voidstep activation':
+        'ResolveIdleAnimation(logicType)' in tor_stance and
         'ActionIndexCache.Create("act_spellcasting_idle")' in tor_stance and
         'actor.GetCurrentAction(1)' in tor_stance and
         'actor.SetCurrentActionSpeed(1, 1f);' in tor_stance and
@@ -133,14 +135,27 @@ checks = {
         '[HarmonyPatch(typeof(AbilitySelectionController), nameof(AbilitySelectionController.Confirm))]' in tor_stance and
         'TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation();' in tor_stance,
     'TOR proxy flags cannot retain sheath or cast ownership':
-        '_shouldPlayIdleCastStanceAnimField?.SetValue(logic, false);' in tor_stance and
-        '_shouldSheathWeaponField?.SetValue(logic, false);' in tor_stance and
-        '_disableCombatActionsAfterCastField?.SetValue(logic, false);' in tor_stance,
-    'TOR proxy cleanup unlocks look control without submitting a turn':
-        'actor.IsLookDirectionLocked = false;' in tor_stance and
-        'mount.IsLookDirectionLocked = false;' in tor_stance and
-        'actor.LookDirection =' not in tor_stance and
-        'mount.LookDirection =' not in tor_stance,
+        '_shouldPlayIdleCastStanceAnimField.SetValue(logic, false);' in tor_stance and
+        '_shouldSheathWeaponField.SetValue(logic, false);' in tor_stance and
+        '_disableCombatActionsAfterCastField.SetValue(logic, false);' in tor_stance,
+    'TOR proxy cleanup never mutates look control or direction':
+        'IsLookDirectionLocked' not in tor_stance and
+        'LookDirection =' not in tor_stance and
+        'SetMovementDirection' not in tor_stance,
+    'shared Blink teleport is position only on the normal path':
+        '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
+        post_cast_compact.count('TeleportToPosition') >= 3 and
+        'MovementInputVector' not in post_cast and
+        'LookDirection =' not in post_cast and
+        'IsLookDirectionLocked' not in post_cast and
+        'scripted-movement or facing mutation' in post_cast,
+    'post-teleport correction is conditional and preserves camera direction':
+        'BodyFlipDotThreshold = -0.17f;' in post_cast and
+        'StableLookDotThreshold = 0.50f;' in post_cast and
+        'if (bodyDot < BodyFlipDotThreshold && lookDot > StableLookDotThreshold)' in post_cast and
+        'actor.SetMovementDirection(in restore);' in post_cast and
+        'LookDirection =' not in post_cast and
+        'ConditionalWeakTable<AbilityManager, State>' in post_cast,
     'right mouse confirmation is read through bypass': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and 'InputConflictSuppression.EnterBypass()' in coordinator,
     'right mouse is suppressed through release': all(token in coordinator for token in (
         '_suppressRightMouseUntilRelease = true;',
