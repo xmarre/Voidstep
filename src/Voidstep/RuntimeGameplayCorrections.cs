@@ -9,9 +9,8 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Resolves the cast marker from the complete camera ray instead of ending the ray at the
-    /// maximum ability radius. Camera yaw selects the point around the player and camera pitch
-    /// selects its distance. The result is finally clamped to the circular cast radius.
+    /// Safe fallback for camera modes where the native mission-screen ground projection is not
+    /// available. The complete camera ray is evaluated before the result is clamped to range.
     /// </summary>
     internal static class VariableDistanceCameraAimRuntime
     {
@@ -61,9 +60,7 @@ namespace Voidstep
                         out entity,
                         0.05f,
                         BodyFlags.CommonCollisionExcludeFlagsForAgent))
-                {
                     break;
-                }
 
                 if (!IsDynamicTeleportTransparent(entity))
                 {
@@ -77,9 +74,6 @@ namespace Voidstep
                 rayStart = point + remaining * 0.18f;
             }
 
-            // Some Bannerlord camera modes expose a ray that does not collide with terrain.
-            // In that case map pitch continuously onto the radius: level aim is maximum range,
-            // while looking down moves the marker towards the player.
             var planar = direction;
             planar.z = 0f;
             if (planar.Normalize() < 0.001f)
@@ -129,7 +123,8 @@ namespace Voidstep
             try
             {
                 var flags = entity.BodyFlag | entity.PhysicsDescBodyFlag;
-                return (flags & (BodyFlags.AgentOnly | BodyFlags.MissileOnly | BodyFlags.DroppedItem)) != 0;
+                return (flags &
+                        (BodyFlags.AgentOnly | BodyFlags.MissileOnly | BodyFlags.DroppedItem)) != 0;
             }
             catch
             {
@@ -160,9 +155,9 @@ namespace Voidstep
     }
 
     /// <summary>
-    /// The ordinary mission callback occasionally supplies a null/non-player affector and can
-    /// expose the finalized damage only through AttackCollisionData. Retry Domino exactly once
-    /// when the original handler queued nothing, using Blow.OwnerId and the finalized damage.
+    /// Bannerlord can expose finalized damage only through AttackCollisionData and can supply a
+    /// missing/non-player affector. Retry Domino exactly once when the original callback queued
+    /// nothing, using Blow.OwnerId and the finalized damage value.
     /// </summary>
     [HarmonyPatch(typeof(VoidstepMissionBehavior), nameof(VoidstepMissionBehavior.OnAgentHit))]
     internal static class DominoAuthoritativeDamageCallbackPatch
@@ -246,114 +241,5 @@ namespace Voidstep
                 return 0;
             }
         }
-    }
-
-    /// <summary>
-    /// Mission time speed also scales the main-agent controller's own pre-tick. Driven-property
-    /// and action-speed multipliers cannot compensate input/controller time that was already
-    /// reduced. Scale that one player-owned delta back while leaving the rest of the mission on
-    /// the requested Bend Time factor.
-    /// </summary>
-    internal static class BendTimeMainAgentTickRuntime
-    {
-        private static WeakReference<TimeControlService> _owner;
-        private static int _playerIndex = -1;
-        private static float _compensation = 1f;
-        private static bool _logged;
-
-        internal static void Update(
-            TimeControlService service,
-            Agent player,
-            float factor,
-            VoidstepLogger logger)
-        {
-            if (service == null || !service.Active || player == null || !player.IsActive() ||
-                factor <= 0.001f || factor >= 0.999f)
-            {
-                Clear(service);
-                return;
-            }
-
-            _owner = new WeakReference<TimeControlService>(service);
-            _playerIndex = player.Index;
-            _compensation = Math.Min(8f, 1f / factor);
-            if (!_logged)
-            {
-                _logged = true;
-                logger?.Debug(
-                    "Bend Time main-agent controller delta exemption armed=" +
-                    _compensation.ToString("0.00") + "x.");
-            }
-        }
-
-        internal static void Clear(TimeControlService service)
-        {
-            if (_owner != null && _owner.TryGetTarget(out var current) &&
-                service != null && !ReferenceEquals(current, service))
-                return;
-            _owner = null;
-            _playerIndex = -1;
-            _compensation = 1f;
-            _logged = false;
-        }
-
-        internal static void Scale(ref float dt)
-        {
-            TimeControlService service = null;
-            if (_owner == null || !_owner.TryGetTarget(out service) || !service.Active)
-            {
-                Clear(service);
-                return;
-            }
-
-            var player = Mission.Current?.MainAgent;
-            if (player == null || !player.IsActive() || player.Index != _playerIndex)
-                return;
-            dt = Math.Max(0f, dt) * _compensation;
-        }
-    }
-
-    [HarmonyPatch(typeof(TimeControlService), nameof(TimeControlService.Tick))]
-    internal static class BendTimeMainAgentRuntimeUpdatePatch
-    {
-        private static void Postfix(
-            TimeControlService __instance,
-            float ____factor,
-            Agent ____player,
-            VoidstepLogger ____logger)
-        {
-            BendTimeMainAgentTickRuntime.Update(
-                __instance,
-                ____player,
-                ____factor,
-                ____logger);
-        }
-    }
-
-    [HarmonyPatch(typeof(TimeControlService), "RestoreCompensation")]
-    internal static class BendTimeMainAgentRuntimeCleanupPatch
-    {
-        private static void Postfix(TimeControlService __instance) =>
-            BendTimeMainAgentTickRuntime.Clear(__instance);
-    }
-
-    [HarmonyPatch]
-    internal static class MissionMainAgentControllerDeltaPatch
-    {
-        private const string ControllerTypeName =
-            "TaleWorlds.MountAndBlade.View.MissionViews.MissionMainAgentController";
-
-        private static MethodBase TargetMethod()
-        {
-            var type = AccessTools.TypeByName(ControllerTypeName);
-            return type == null
-                ? null
-                : AccessTools.Method(type, "OnPreMissionTick", new[] { typeof(float) });
-        }
-
-        private static bool Prepare() => TargetMethod() != null;
-
-        private static void Prefix(ref float dt) =>
-            BendTimeMainAgentTickRuntime.Scale(ref dt);
     }
 }
