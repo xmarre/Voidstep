@@ -5,11 +5,10 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Safe fallback while Bannerlord's mounted teleport APIs are unsuitable.
-    /// Runtime testing proved that Agent.TeleportToPosition, Agent.SetInitialFrame and the
-    /// internal IMBAgent.SetPosition path can all rotate the rider or mount. This boundary
-    /// therefore consumes the cast without mutating Agent position, frame, body direction,
-    /// look direction, movement input or action state.
+    /// Safe fallback while Bannerlord's mounted displacement APIs are unsuitable.
+    /// Runtime testing proved that every attempted runtime movement boundary could rotate the
+    /// rider or mount. This boundary therefore consumes the cast without mutating Agent position,
+    /// frame, body direction, look direction, movement input or action state.
     /// </summary>
     internal static class PreservedFrameTeleportRuntime
     {
