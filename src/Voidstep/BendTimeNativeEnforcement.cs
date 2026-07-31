@@ -10,35 +10,28 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Bannerlord performs agent/property/action updates after mission behaviours have ticked.
-    /// Writes made only from TimeControlService.Tick can therefore be accepted in managed code and
-    /// still be overwritten before native simulation uses them. This runtime reasserts selective
-    /// Bend Time only at those native reset boundaries and only for exact registered non-player
-    /// agents owned by the active mission service.
+    /// Reasserts selective Bend Time after Bannerlord's later native agent/property/action resets.
+    /// Every hook is gated by the exact registered SlowState Agent instance of the active mission;
+    /// the player, controlled mount and non-mission presentation agents can never qualify.
     /// </summary>
     internal static class BendTimeNativeEnforcementRuntime
     {
         private const int NativeActionChannelCount = 2;
         private const float MinimumAbsoluteSpeed = 0.05f;
 
-        private static readonly FieldInfo ActiveField =
-            AccessTools.Field(typeof(TimeControlService), "_active");
-        private static readonly FieldInfo FactorField =
-            AccessTools.Field(typeof(TimeControlService), "_factor");
-        private static readonly FieldInfo MissionField =
-            AccessTools.Field(typeof(TimeControlService), "_mission");
-        private static readonly FieldInfo PlayerField =
-            AccessTools.Field(typeof(TimeControlService), "_player");
-        private static readonly FieldInfo MountField =
-            AccessTools.Field(typeof(TimeControlService), "_mount");
-        private static readonly FieldInfo StatesField =
-            AccessTools.Field(typeof(TimeControlService), "_states");
-        private static readonly FieldInfo LoggerField =
-            AccessTools.Field(typeof(TimeControlService), "_logger");
+        private static readonly FieldInfo ActiveField = AccessTools.Field(typeof(TimeControlService), "_active");
+        private static readonly FieldInfo FactorField = AccessTools.Field(typeof(TimeControlService), "_factor");
+        private static readonly FieldInfo MissionField = AccessTools.Field(typeof(TimeControlService), "_mission");
+        private static readonly FieldInfo PlayerField = AccessTools.Field(typeof(TimeControlService), "_player");
+        private static readonly FieldInfo MountField = AccessTools.Field(typeof(TimeControlService), "_mount");
+        private static readonly FieldInfo StatesField = AccessTools.Field(typeof(TimeControlService), "_states");
+        private static readonly FieldInfo LoggerField = AccessTools.Field(typeof(TimeControlService), "_logger");
         private static readonly Type SlowStateType =
             typeof(TimeControlService).GetNestedType("SlowState", BindingFlags.NonPublic);
         private static readonly FieldInfo SlowStateAgentField =
             SlowStateType == null ? null : AccessTools.Field(SlowStateType, "Agent");
+        private static readonly FieldInfo SlowStateOriginalLimitField =
+            SlowStateType == null ? null : AccessTools.Field(SlowStateType, "OriginalMaximumSpeedLimit");
 
         private static readonly ConditionalWeakTable<TimeControlService, RuntimeState> RuntimeStates =
             new ConditionalWeakTable<TimeControlService, RuntimeState>();
@@ -51,10 +44,8 @@ namespace Voidstep
 
         internal sealed class RuntimeState
         {
-            internal readonly Dictionary<int, float> BaselineMaximumSpeeds =
-                new Dictionary<int, float>();
-            internal readonly Dictionary<int, float> OriginalMaximumSpeedLimits =
-                new Dictionary<int, float>();
+            internal readonly Dictionary<int, float> BaselineMaximumSpeeds = new Dictionary<int, float>();
+            internal readonly Dictionary<int, float> OriginalMaximumSpeedLimits = new Dictionary<int, float>();
             internal bool ArmedLogWritten;
             internal bool FailureLogged;
 
@@ -98,8 +89,7 @@ namespace Voidstep
             {
                 state.ArmedLogWritten = true;
                 GetLogger(service)?.Debug(
-                    "Bend Time native enforcement armed factor=" +
-                    ReadFactor(service).ToString("0.00") +
+                    "Bend Time native enforcement armed factor=" + ReadFactor(service).ToString("0.00") +
                     ", enforcedAgents=" + enforced +
                     "; absolute movement caps, driven-property refresh and action-speed guards are active.");
             }
@@ -133,8 +123,8 @@ namespace Voidstep
             out RuntimeState state)
         {
             service = null;
-            state = null;
             factor = 1f;
+            state = null;
             if (IsBypassed || agent == null || !agent.IsActive() || agent.Index < 0)
                 return false;
 
@@ -153,16 +143,9 @@ namespace Voidstep
             if (ReferenceEquals(agent, player) || ReferenceEquals(agent, mount))
                 return false;
 
-            var states = StatesField?.GetValue(service) as IDictionary;
-            if (states == null || !states.Contains(agent.Index))
+            object slowState;
+            if (!TryGetExactSlowState(service, agent, out slowState))
                 return false;
-
-            var slowState = states[agent.Index];
-            if (slowState == null || SlowStateAgentField == null ||
-                !ReferenceEquals(SlowStateAgentField.GetValue(slowState), agent))
-            {
-                return false;
-            }
 
             factor = ReadFactor(service);
             if (factor <= 0f || factor >= 0.999f)
@@ -187,7 +170,7 @@ namespace Voidstep
                 return;
             }
 
-            CaptureOriginalMaximumSpeedLimit(agent, state);
+            CaptureOriginalMaximumSpeedLimit(agent, slowState, state, false);
         }
 
         internal static bool RefreshAndEnforce(Agent agent)
@@ -198,11 +181,14 @@ namespace Voidstep
             if (!TryGetEligible(agent, out service, out factor, out state))
                 return false;
 
+            object slowState;
+            TryGetExactSlowState(service, agent, out slowState);
             try
             {
                 using (EnterBypass())
                 {
-                    CaptureOriginalMaximumSpeedLimit(agent, state);
+                    CaptureOriginalMaximumSpeedLimit(agent, slowState, state, true);
+                    RestoreOriginalLimitForBaseline(agent, state);
                     agent.UpdateAgentProperties();
                     EnforceCurrentBaselineCore(agent, factor, state);
                 }
@@ -224,11 +210,13 @@ namespace Voidstep
             if (!TryGetEligible(agent, out service, out factor, out state))
                 return;
 
+            object slowState;
+            TryGetExactSlowState(service, agent, out slowState);
             try
             {
                 using (EnterBypass())
                 {
-                    CaptureOriginalMaximumSpeedLimit(agent, state);
+                    CaptureOriginalMaximumSpeedLimit(agent, slowState, state, true);
                     EnforceCurrentBaselineCore(agent, factor, state);
                 }
                 state.FailureLogged = false;
@@ -243,18 +231,7 @@ namespace Voidstep
         {
             if (service == null || slowState == null || SlowStateAgentField == null)
                 return;
-
-            var agent = SlowStateAgentField.GetValue(slowState) as Agent;
-            TimeControlService resolved;
-            RuntimeState state;
-            float factor;
-            if (!TryGetEligible(agent, out resolved, out factor, out state) ||
-                !ReferenceEquals(resolved, service))
-            {
-                return;
-            }
-
-            RefreshAndEnforce(agent);
+            RefreshAndEnforce(SlowStateAgentField.GetValue(slowState) as Agent);
         }
 
         internal static void ReassertMaximumSpeed(Agent agent)
@@ -303,8 +280,11 @@ namespace Voidstep
                 var agent = slowState == null || SlowStateAgentField == null
                     ? null
                     : SlowStateAgentField.GetValue(slowState) as Agent;
-                if (agent != null)
-                    snapshot.Add(agent);
+                if (agent == null)
+                    continue;
+
+                CaptureOriginalMaximumSpeedLimit(agent, slowState, state, true);
+                snapshot.Add(agent);
             }
 
             var enforced = 0;
@@ -316,11 +296,9 @@ namespace Voidstep
             return enforced;
         }
 
-        private static void EnforceCurrentBaselineCore(
-            Agent agent,
-            float factor,
-            RuntimeState state)
+        private static void EnforceCurrentBaselineCore(Agent agent, float factor, RuntimeState state)
         {
+            RestoreOriginalLimitForBaseline(agent, state);
             CaptureBaselineMaximumSpeed(agent, state);
             ScaleDrivenProperties(agent.AgentDrivenProperties, factor);
             agent.UpdateCustomDrivenProperties();
@@ -328,7 +306,26 @@ namespace Voidstep
             ApplyCurrentActionSpeeds(agent, factor);
         }
 
-        private static void CaptureOriginalMaximumSpeedLimit(Agent agent, RuntimeState state)
+        private static bool TryGetExactSlowState(
+            TimeControlService service,
+            Agent agent,
+            out object slowState)
+        {
+            slowState = null;
+            var states = StatesField?.GetValue(service) as IDictionary;
+            if (states == null || agent == null || !states.Contains(agent.Index))
+                return false;
+
+            slowState = states[agent.Index];
+            return slowState != null && SlowStateAgentField != null &&
+                   ReferenceEquals(SlowStateAgentField.GetValue(slowState), agent);
+        }
+
+        private static void CaptureOriginalMaximumSpeedLimit(
+            Agent agent,
+            object slowState,
+            RuntimeState state,
+            bool preferServiceSnapshot)
         {
             if (agent == null || state == null ||
                 state.OriginalMaximumSpeedLimits.ContainsKey(agent.Index))
@@ -336,39 +333,42 @@ namespace Voidstep
                 return;
             }
 
-            state.OriginalMaximumSpeedLimits[agent.Index] = agent.GetMaximumSpeedLimit();
+            var original = agent.GetMaximumSpeedLimit();
+            if (preferServiceSnapshot && slowState != null && SlowStateOriginalLimitField != null)
+            {
+                try { original = (float)SlowStateOriginalLimitField.GetValue(slowState); }
+                catch { }
+            }
+            state.OriginalMaximumSpeedLimits[agent.Index] = original;
+        }
+
+        private static void RestoreOriginalLimitForBaseline(Agent agent, RuntimeState state)
+        {
+            float original;
+            if (state.OriginalMaximumSpeedLimits.TryGetValue(agent.Index, out original))
+                agent.SetMaximumSpeedLimit(original, false);
         }
 
         private static void CaptureBaselineMaximumSpeed(Agent agent, RuntimeState state)
         {
-            if (agent == null || state == null)
-                return;
-
-            var baseline = agent.MaximumForwardUnlimitedSpeed;
-            if (float.IsNaN(baseline) || float.IsInfinity(baseline) || baseline <= 0.001f)
-                baseline = agent.GetCurrentSpeedLimit();
+            var baseline = agent.GetCurrentSpeedLimit();
             if (float.IsNaN(baseline) || float.IsInfinity(baseline) || baseline <= 0.001f)
                 baseline = 0.5f;
             state.BaselineMaximumSpeeds[agent.Index] = baseline;
         }
 
-        private static void ApplyAbsoluteMovementCap(
-            Agent agent,
-            float factor,
-            RuntimeState state)
+        private static void ApplyAbsoluteMovementCap(Agent agent, float factor, RuntimeState state)
         {
             float baseline;
-            if (!state.BaselineMaximumSpeeds.TryGetValue(agent.Index, out baseline) ||
-                baseline <= 0.001f)
+            if (!state.BaselineMaximumSpeeds.TryGetValue(agent.Index, out baseline) || baseline <= 0.001f)
             {
+                RestoreOriginalLimitForBaseline(agent, state);
                 CaptureBaselineMaximumSpeed(agent, state);
                 if (!state.BaselineMaximumSpeeds.TryGetValue(agent.Index, out baseline))
                     baseline = 0.5f;
             }
 
-            agent.SetMaximumSpeedLimit(
-                Math.Max(MinimumAbsoluteSpeed, baseline * factor),
-                false);
+            agent.SetMaximumSpeedLimit(Math.Max(MinimumAbsoluteSpeed, baseline * factor), false);
         }
 
         private static void ApplyCurrentActionSpeeds(Agent agent, float factor)
@@ -377,9 +377,7 @@ namespace Voidstep
                 agent.SetCurrentActionSpeed(channel, factor);
         }
 
-        private static void RestoreOriginalMaximumSpeedLimits(
-            TimeControlService service,
-            RuntimeState state)
+        private static void RestoreOriginalMaximumSpeedLimits(TimeControlService service, RuntimeState state)
         {
             var states = StatesField?.GetValue(service) as IDictionary;
             if (states == null)
@@ -506,10 +504,7 @@ namespace Voidstep
             BendTimeNativeEnforcementRuntime.EnterBypass();
         }
 
-        private static Exception Finalizer(
-            TimeControlService __instance,
-            object __0,
-            Exception __exception)
+        private static Exception Finalizer(TimeControlService __instance, object __0, Exception __exception)
         {
             BendTimeNativeEnforcementRuntime.ExitOneBypassLevel();
             if (__exception == null)
