@@ -147,8 +147,9 @@ namespace Voidstep
         private static void Restore(Snapshot snapshot, Agent actor)
         {
             var mount = actor.MountAgent;
+            Agent capturedMount = null;
             var mounted = snapshot.Mount != null &&
-                          snapshot.Mount.TryGetTarget(out var capturedMount) &&
+                          snapshot.Mount.TryGetTarget(out capturedMount) &&
                           capturedMount != null && capturedMount.IsActive() &&
                           ReferenceEquals(mount, capturedMount);
 
