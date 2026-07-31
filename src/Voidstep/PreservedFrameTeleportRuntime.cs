@@ -130,14 +130,14 @@ namespace Voidstep
             logger.Debug(message + ".");
         }
 
-        private static Vec3 CaptureNativeFrameDirection(Agent agent)
+        private static Vec2 CaptureNativeFrameDirection(Agent agent)
         {
             if (agent != null)
             {
                 try
                 {
-                    var direction = agent.Frame.rotation.f;
-                    direction.z = 0f;
+                    var forward = agent.Frame.rotation.f;
+                    var direction = new Vec2(forward.x, forward.y);
                     if (direction.Normalize() >= 0.001f)
                         return direction;
                 }
@@ -146,11 +146,11 @@ namespace Voidstep
                 }
 
                 var body = BodyAlignedCleaveRuntime.GetBodyFacing(agent);
-                body.z = 0f;
-                if (body.Normalize() >= 0.001f)
-                    return body;
+                var fallback = new Vec2(body.x, body.y);
+                if (fallback.Normalize() >= 0.001f)
+                    return fallback;
             }
-            return Vec3.Forward;
+            return new Vec2(0f, 1f);
         }
 
         private static Vec3 CaptureLookDirection(Agent agent)
