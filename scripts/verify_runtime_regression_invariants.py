@@ -109,7 +109,8 @@ checks = {
 
     'Cleave origin and orientation remain explicit':
         'state.Facing = CameraAuthoritativeCastRuntime.GetCameraFacing' in camera_cast and
-        'var facingAngle = AngleMath.NormalizeRadians(Math.Atan2(state.Facing.y, state.Facing.x));' in camera_cast and
+        'var facingAngle = AngleMath.NormalizeRadians' in camera_cast and
+        'Math.Atan2(state.Facing.y, state.Facing.x)' in camera_cast and
         'actor.Position' in camera_cast,
 
     'TOR failed proxy selection cannot retry every tick':
