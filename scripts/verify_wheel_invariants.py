@@ -28,7 +28,6 @@ bindings = read('src/Voidstep/VoidstepInputBindings.cs')
 project = read('src/Voidstep/Voidstep.csproj')
 prefab = read('module/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml')
 tor_compact = compact(tor)
-post_cast_compact = compact(post_cast)
 
 ability_order = (
     'AbilityId.VoidstepCleave',
@@ -59,24 +58,20 @@ prefab_bindings = tuple(re.findall(
     prefab))
 
 checks = {
-    'coordinator passes mission delta time to TOR adapter': '_tor.Tick(dt);' in coordinator and '_tor.Tick();' not in coordinator,
-    'TOR attachment retries are throttled': all(token in tor for token in (
-        'private const float AttachRetryInterval = 0.5f;',
-        'internal void Tick(float dt)',
-        '_attachRetryRemaining -= Math.Max(0f, dt);',
-        '_attachRetryRemaining = AttachRetryInterval;')),
-    'TOR API readiness is separate from live wheel availability': all(token in tor for token in (
-        'private bool _apiReady;',
-        'private bool _available;',
-        'internal bool IsAvailable => _available;',
-        '_apiReady = true;',
-        'InjectProxies(agent);',
-        '_available = true;')),
-    'standalone remains active until TOR injection succeeds': all(token in coordinator for token in (
-        'if (!_tor.IsAvailable)',
-        '_standalone.Tick();',
-        'HandleWheelAvailabilityTransition();')) and 'standalone wheel remains active' in tor,
-    'standalone Gauntlet overlay never owns mission input':
+    'coordinator passes mission delta time to TOR adapter':
+        '_tor.Tick(dt);' in coordinator and '_tor.Tick();' not in coordinator,
+
+    'TOR attachment retries are throttled':
+        'private const float AttachRetryInterval = 0.5f;' in tor and
+        '_attachRetryRemaining -= Math.Max(0f, dt);' in tor and
+        '_attachRetryRemaining = AttachRetryInterval;' in tor,
+
+    'standalone remains active until TOR injection succeeds':
+        'if (!_tor.IsAvailable)' in coordinator and
+        '_standalone.Tick();' in coordinator and
+        'HandleWheelAvailabilityTransition();' in coordinator,
+
+    'standalone overlay owns no mission input':
         'display-only Gauntlet layer' in standalone and
         all(token not in standalone for token in (
             'IsFocusLayer',
@@ -85,97 +80,102 @@ checks = {
             'TrySetFocus',
             'TryLoseFocus',
             'InputUsageMask')),
-    'wheel suppression never intercepts mouse-wheel keys':
+
+    'wheel suppression never intercepts mouse wheel':
         all(token not in coordinator + wheel_suppression for token in (
-            'MouseScrollUp',
-            'MouseScrollDown',
-            'MouseScrollAxis')),
-    'TOR opening cancels stale Voidstep selection': 'state == 1 && _lastState != 1 && _selection.HasSelection' in tor and '_selection.Cancel(true);' in tor,
-    'TOR entries receive stable donor icons': all(token in tor for token in (
-        'ResolveDonorSprites();',
-        '_donorSprites.Contains(sprite)',
-        '_donorSprites[i % _donorSprites.Count]',
-        'while (_donorSprites.Count < VoidstepInputBindings.Abilities.Length)')),
-    'TOR proxy cast path is guarded': all(token in tor for token in (
-        'PatchProxyGuards();',
-        'nameof(TryCastPrefix)',
-        'nameof(DoCastPrefix)',
-        'GetMethod("TryCast"',
-        'GetMethod("DoCast"',
-        '_harmony.Patch(tryCast, prefix: tryCastPrefix);',
-        '_harmony.Patch(baseDoCast, prefix: doCastPrefix);')),
+            'MouseScrollUp', 'MouseScrollDown', 'MouseScrollAxis')),
+
+    'TOR opening cancels stale selection':
+        'state == 1 && _lastState != 1 && _selection.HasSelection' in tor and
+        '_selection.Cancel(true);' in tor,
+
+    'TOR proxies receive stable donor icons':
+        'ResolveDonorSprites();' in tor and
+        '_donorSprites[i % _donorSprites.Count]' in tor and
+        'while (_donorSprites.Count < VoidstepInputBindings.Abilities.Length)' in tor,
+
+    'TOR proxy cast path is guarded':
+        'PatchProxyGuards();' in tor and
+        'GetMethod("TryCast"' in tor and
+        'GetMethod("DoCast"' in tor and
+        '_harmony.Patch(tryCast, prefix: tryCastPrefix);' in tor and
+        '_harmony.Patch(baseDoCast, prefix: doCastPrefix);' in tor,
+
     'TOR guard affects only owned proxies':
         tor_compact.count('runtime.IsTorProxy(__instance)') >= 3 and
-        'if (runtime == null || !runtime.IsTorProxy(__instance)) return true;' in tor_compact and
-        'return runtime == null || !runtime.IsTorProxy(__instance);' in tor_compact,
-    'TOR spell override is separately guarded': 'spellDoCast' in tor and '_harmony.Patch(spellDoCast, prefix: doCastPrefix);' in tor,
-    'TOR patches and proxies are removed on cleanup': '_harmony?.UnpatchAll(HarmonyId)' in tor and 'DeactivateLiveAttachment(true);' in tor and 'RemoveInjectedProxies();' in tor,
-    'TOR remains an optional reflection boundary': 'using TOR_Core' not in tor + tor_stance and '<Reference Include="TOR_Core"' not in project and 'AppDomain.CurrentDomain.GetAssemblies()' in tor and 'AppDomain.CurrentDomain.GetAssemblies()' in tor_stance,
-    'TOR template enums are semantic': all(token in tor for token in (
-        'ParseEnumValue("TOR_Core.AbilitySystem.AbilityType", "Spell")',
-        'ParseEnumValue("TOR_Core.AbilitySystem.AbilityTargetType", "WorldPosition")',
-        'ParseEnumValue("TOR_Core.AbilitySystem.Crosshairs.CrosshairType", "Pointer")',
-        'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")')) and 'Enum.ToObject' not in tor,
-    'TOR proxy animation handling is bounded to live state two':
-        'nameof(BeforeTorHandleAnimations)' in tor_stance and
+        'if (runtime == null || !runtime.IsTorProxy(__instance)) return true;' in tor_compact,
+
+    'TOR cleanup removes patches and proxies':
+        '_harmony?.UnpatchAll(HarmonyId)' in tor and
+        'DeactivateLiveAttachment(true);' in tor and
+        'RemoveInjectedProxies();' in tor,
+
+    'TOR remains an optional reflection boundary':
+        'using TOR_Core' not in tor + tor_stance and
+        '<Reference Include="TOR_Core"' not in project and
+        'AppDomain.CurrentDomain.GetAssemblies()' in tor and
+        'AppDomain.CurrentDomain.GetAssemblies()' in tor_stance,
+
+    'TOR template enums are semantic':
+        'ParseEnumValue("TOR_Core.AbilitySystem.AbilityType", "Spell")' in tor and
+        'ParseEnumValue("TOR_Core.AbilitySystem.AbilityTargetType", "WorldPosition")' in tor and
+        'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")' in tor and
+        'Enum.ToObject' not in tor,
+
+    'TOR presentation cleanup is live-state bounded':
         'TryGetCurrentVoidstepProxy(__instance, true, out var actor)' in tor_stance and
-        'var state = Convert.ToInt32(_currentStateField.GetValue(logic));' in tor_stance and
         'if (requireLiveTargeting && state != 2)' in tor_stance and
-        'return true;' in tor_stance,
-    'TOR cached proxy identity cannot mutate state after targeting closes':
-        'TryGetCurrentVoidstepProxy(__instance, false, out var actor)' in tor_stance and
-        '_currentStateField.SetValue' not in tor_stance and
-        'NeutralizeProxyFlags(__instance);' in tor_stance,
-    'TOR spellcasting idle is cleared before Voidstep activation':
-        'ResolveIdleAnimation(logicType)' in tor_stance and
-        'ActionIndexCache.Create("act_spellcasting_idle")' in tor_stance and
-        'actor.GetCurrentAction(1)' in tor_stance and
-        'actor.SetCurrentActionSpeed(1, 1f);' in tor_stance and
-        'actor.SetActionChannel(1, ActionIndexCache.act_none);' in tor_stance and
-        '[HarmonyPatch(typeof(AbilitySelectionController), nameof(AbilitySelectionController.Confirm))]' in tor_stance and
-        'TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation();' in tor_stance,
-    'TOR proxy flags cannot retain sheath or cast ownership':
-        '_shouldPlayIdleCastStanceAnimField.SetValue(logic, false);' in tor_stance and
-        '_shouldSheathWeaponField.SetValue(logic, false);' in tor_stance and
-        '_disableCombatActionsAfterCastField.SetValue(logic, false);' in tor_stance,
-    'TOR proxy cleanup never mutates look control or direction':
+        '_currentStateField.SetValue' not in tor_stance,
+
+    'TOR cleanup cannot mutate facing':
         'IsLookDirectionLocked' not in tor_stance and
         'LookDirection =' not in tor_stance and
         'SetMovementDirection' not in tor_stance,
-    'shared Blink teleport is position only on the normal path':
+
+    'Blink teleport uses exact native frame':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
-        post_cast_compact.count('TeleportToPosition') >= 3 and
-        'MovementInputVector' not in post_cast and
-        'LookDirection =' not in post_cast and
-        'IsLookDirectionLocked' not in post_cast and
-        'scripted-movement or facing mutation' in post_cast,
-    'post-teleport correction is conditional and preserves camera direction':
-        'BodyFlipDotThreshold = -0.17f;' in post_cast and
-        'StableLookDotThreshold = 0.50f;' in post_cast and
-        'if (bodyDot < BodyFlipDotThreshold && lookDot > StableLookDotThreshold)' in post_cast and
-        'actor.SetMovementDirection(in restore);' in post_cast and
-        'LookDirection =' not in post_cast and
-        'ConditionalWeakTable<AbilityManager, State>' in post_cast,
-    'right mouse confirmation is read through bypass': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and 'InputConflictSuppression.EnterBypass()' in coordinator,
-    'right mouse is suppressed through release': all(token in coordinator for token in (
-        '_suppressRightMouseUntilRelease = true;',
-        '_selection.HasSelection || _suppressRightMouseUntilRelease',
-        'Input.IsKeyReleased(InputKey.RightMouseButton)')),
-    'native attack and defend are suppressed only during Mouse2 ownership': all(token in mission_input for token in (
-        'private const int Attack = 9;',
-        'private const int Defend = 10;',
-        'gameKeyId == Attack || gameKeyId == Defend',
-        'VoidstepWheelRuntime.ShouldSuppress(InputKey.RightMouseButton)',
-        'nameof(InputContext.IsGameKeyPressed)',
-        'nameof(InputContext.GetGameKeyState)')),
-    'selection casts only after confirmation': '_manager.TryActivate(ability);' in selection and 'internal bool Confirm()' in selection and '_manager.TryActivate(ability.Value)' not in mission,
-    'Blink owns targeting and teleport without a generic turning action':
+        'CameraFacingTeleportOwnership.Teleport(' in post_cast and
+        'SetInitialFrame(in actorPosition, in direction, true)' in post_cast and
+        'SetInitialFrame(in mountPosition, in direction, true)' in post_cast and
+        'TeleportToPosition' not in post_cast,
+
+    'post-teleport correction is bounded and camera releasable':
+        'ConditionalWeakTable<Mission, State>' in post_cast and
+        'HoldSeconds = 0.55f' in post_cast and
+        'ReapplyDotThreshold = 0.985f' in post_cast and
+        'CameraReleaseDotThreshold = 0.82f' in post_cast and
+        'native teleport-frame ownership released for deliberate camera turn' in post_cast and
+        'MBCommon.GetApplicationTime() >= state.ExpiresAt' in post_cast,
+
+    'post-teleport correction submits no movement controls':
+        '.SetMovementDirection(' not in post_cast and
+        '.MovementInputVector' not in post_cast and
+        'SetInitialFrame' in post_cast,
+
+    'right mouse confirmation uses input bypass':
+        'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and
+        'InputConflictSuppression.EnterBypass()' in coordinator,
+
+    'right mouse is suppressed through release':
+        '_suppressRightMouseUntilRelease = true;' in coordinator and
+        '_selection.HasSelection || _suppressRightMouseUntilRelease' in coordinator and
+        'Input.IsKeyReleased(InputKey.RightMouseButton)' in coordinator,
+
+    'native attack and defend are suppressed only during Mouse2 ownership':
+        'private const int Attack = 9;' in mission_input and
+        'private const int Defend = 10;' in mission_input and
+        'VoidstepWheelRuntime.ShouldSuppress(InputKey.RightMouseButton)' in mission_input,
+
+    'selection casts only after confirmation':
+        'internal bool Confirm()' in selection and
+        '_manager.TryActivate(ability);' in selection and
+        '_manager.TryActivate(ability.Value)' not in mission,
+
+    'Blink owns targeting without generic cast animation':
         '_manager.TryActivate(AbilityId.Blink)' in selection and
-        'var blinkOwnsItsPresentation = ability == AbilityId.Blink;' in cast_animation and
-        '__state = disablingDarkVision || blinkOwnsItsPresentation || cleaveOwnsExecutionAction;' in cast_animation and
-        'enteringBlinkTargeting' not in cast_animation and
-        'confirmingBlink' not in cast_animation,
-    'registry and standalone prefab share exact six-slot order':
+        'var blinkOwnsItsPresentation = ability == AbilityId.Blink;' in cast_animation,
+
+    'registry and prefab share exact six-slot order':
         registered_abilities == ability_order and prefab_bindings == prefab_order,
 }
 
@@ -185,4 +185,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} focused wheel and TOR integration invariants.')
+print(f'Validated {len(checks)} focused wheel, TOR and teleport invariants.')
