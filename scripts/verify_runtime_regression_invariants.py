@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 
 root = Path(__file__).resolve().parents[1]
 
 
 def read(relative):
-    return (root / relative).read_text(encoding='utf-8')
+    path = root / relative
+    return path.read_text(encoding='utf-8') if path.exists() else ''
+
+
+def exists(relative):
+    return (root / relative).exists()
 
 
 def mask_csharp_noncode(source):
-    """Mask C# comments and literals while preserving token spacing and newlines."""
     chars = list(source)
     masked = list(source)
     length = len(source)
@@ -84,164 +89,156 @@ def mask_csharp_noncode(source):
     return ''.join(masked)
 
 
-bend_time = read('src/Voidstep/BendTimePlayerCompensationPatch.cs')
-max_speed = read('src/Voidstep/BendTimeMaximumSpeedOwnership.cs')
+time_control = read('src/Voidstep/TimeControlService.cs')
+mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
+post_cast = read('src/Voidstep/PostCastOrientationOwnershipFix.cs')
+ground_aim = read('src/Voidstep/AuthoritativeGroundAimAndPlayerTimeFix.cs')
+runtime_corrections = read('src/Voidstep/RuntimeGameplayCorrections.cs')
 domino_repair = read('src/Voidstep/DominoPlayerSourceRepairPatch.cs')
 domino = read('src/Voidstep/DominoLinkService.cs')
 tor_weapon = read('src/Voidstep/TorCleaveWeaponStateRepair.cs')
 tor_presentation = read('src/Voidstep/TorVoidstepPresentation.cs')
 tor_radial = read('src/Voidstep/TorRadialMenuRefreshPatch.cs')
+tor_stance = read('src/Voidstep/TorProxyCastStanceFix.cs')
 ability_manager = read('src/Voidstep/AbilityManager.cs')
 cleave = read('src/Voidstep/CleaveSweepController.cs')
 cast_animation = read('src/Voidstep/AbilityCastAnimationPatch.cs')
 blink = read('src/Voidstep/BlinkController.cs')
 facing_guard = read('src/Voidstep/CleaveFacingGuardPatches.cs')
-
-bend_time_code = mask_csharp_noncode(bend_time)
-max_speed_code = mask_csharp_noncode(max_speed)
-domino_repair_code = mask_csharp_noncode(domino_repair)
-tor_weapon_code = mask_csharp_noncode(tor_weapon)
-ability_manager_code = mask_csharp_noncode(ability_manager)
-cleave_code = mask_csharp_noncode(cleave)
+all_runtime = '\n'.join(
+    path.read_text(encoding='utf-8')
+    for path in (root / 'src' / 'Voidstep').glob('*.cs'))
+all_runtime_code = mask_csharp_noncode(all_runtime)
 facing_guard_code = mask_csharp_noncode(facing_guard)
 
-teleport_capture = ability_manager.find('var actorFacing = CaptureHorizontalFacing(actor);')
-teleport_actor = ability_manager.find('actor.TeleportToPosition(position)')
-teleport_restore = ability_manager.find('_animation.SetActorFacing(actor, actorFacing);')
-mount_restore = ability_manager.find('_animation.SetActorFacing(mount, mountFacing);')
-
 checks = {
+    'obsolete global Bend Time hook files are removed':
+        not exists('src/Voidstep/BendTimePlayerCompensationPatch.cs') and
+        not exists('src/Voidstep/BendTimeMaximumSpeedOwnership.cs') and
+        not exists('src/Voidstep/BendTimeMainAgentControllerInstaller.cs'),
+
+    'Bend Time leaves scene and player at native time':
+        'AddTimeSpeedRequest' not in time_control and
+        'RemoveTimeSpeedRequest' not in time_control and
+        'TimeSpeedRequest' not in time_control and
+        'scene and controlled player remain native 1.00x' in time_control,
+
+    'Bend Time player and current mount are never slowed':
+        'ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount)' in time_control and
+        'if (_active && !IsExempt(agent))' in time_control and
+        'if (!_active || speed <= 0f || IsExempt(shooter))' in time_control,
+
+    'Bend Time non-player state is mission owned':
+        'Dictionary<int, SlowState> _states' in time_control and
+        'List<int> _refreshOrder' in time_control and
+        'public override void OnAgentBuild(Agent agent, Banner banner)' in mission and
+        'TimeControl?.RegisterAgent(agent);' in mission and
+        mission.count('TimeControl?.UnregisterAgent(affectedAgent);') >= 2,
+
+    'Bend Time avoids per-tick full mission scans':
+        'RefreshBudgetPerTick = 128' in time_control and
+        'RefreshBudgetedAgents();' in time_control and
+        'AllAgents' not in time_control.split('public void Tick(float dt)', 1)[1].split('public void RegisterAgent', 1)[0],
+
+    'Bend Time restores only values it still owns':
+        'OriginalValues' in time_control and
+        'AppliedValues' in time_control and
+        'Approximately(current[i], state.AppliedValues[i])' in time_control and
+        'current[i] = state.OriginalValues[i];' in time_control,
+
+    'Bend Time action ownership is limited to native channels zero and one':
+        'NativeActionChannelCount = 2' in time_control and
+        'channel < NativeActionChannelCount' in time_control and
+        'agent.SetCurrentActionSpeed(channel, _factor);' in time_control and
+        'agent.SetCurrentActionSpeed(channel, 1f);' in time_control,
+
+    'Bend Time slows non-player missiles only at mission launch points':
+        '[HarmonyPatch(typeof(Mission), "AddMissileAux")]' in time_control and
+        '[HarmonyPatch(typeof(Mission), "AddMissileSingleUsageAux")]' in time_control and
+        'service?.ScaleMissile(shooterAgent, ref speed);' in time_control,
+
+    'no broad Agent presentation or action Harmony patch remains':
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetCurrentActionSpeed))]' not in all_runtime and
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetActionChannel))]' not in all_runtime and
+        '[HarmonyPatch(typeof(AgentDrivenProperties)' not in all_runtime and
+        'BendTimePostCalculatedDrivenPropertiesPatch' not in all_runtime,
+
+    'teleport position and camera facing are submitted atomically':
+        'CameraFacingTeleportOwnership.Teleport(' in post_cast and
+        'SetInitialFrame(in mountPosition, in direction, true)' in post_cast and
+        'SetInitialFrame(in riderPosition, in direction, true)' in post_cast and
+        'SetInitialFrame(in actorPosition, in direction, true)' in post_cast and
+        'TeleportToPosition' not in post_cast,
+
+    'post-teleport rollback correction is bounded and mission scoped':
+        'ConditionalWeakTable<Mission, State>' in post_cast and
+        'HoldSeconds = 0.55f' in post_cast and
+        'MBCommon.GetApplicationTime() >= state.ExpiresAt' in post_cast and
+        'CameraReleaseDotThreshold = 0.82f' in post_cast and
+        'released for deliberate camera turn' in post_cast,
+
+    'post-teleport correction never injects movement controls':
+        '.SetMovementDirection(' not in post_cast and
+        '.MovementInputVector' not in post_cast and
+        '.SetEventControlFlags(' not in post_cast,
+
+    'post-teleport ownership cannot affect character preview agents':
+        'var actor = mission.MainAgent;' in post_cast and
+        'actor.Index != state.ActorIndex' in post_cast and
+        'CameraFacingTeleportOwnership.Clear' in post_cast and
+        'ConditionalWeakTable<Mission, State>' in post_cast,
+
+    'native projected cast marker remains authoritative':
+        'GetProjectedMousePositionOnGround' in ground_aim and
+        'ClampToCastCircle' in ground_aim and
+        'MissionScreen projected reticle ground' in ground_aim,
+
     'every TOR Voidstep proxy releases native targeting ownership':
         'var selectedAbility = selection?.SelectedAbility;' in tor_weapon and
         'state.TargetingReleased = true;' in tor_weapon and
-        '__instance.CloseTargetingMode();' in tor_weapon and
-        'selectedAbility.Value != AbilityId.VoidstepCleave' not in tor_weapon_code and
-        'selectedAbility.Value == AbilityId.VoidstepCleave' not in tor_weapon_code,
+        '__instance.CloseTargetingMode();' in tor_weapon,
+
     'TOR weapon restoration retries independently from targeting release':
         'if (!state.WeaponStateRestored)' in tor_weapon and
         'state.WeaponStateRestored = RestoreTorWeaponState(' in tor_weapon and
-        'return false;' in tor_weapon and
         'retrying on a later tick' in tor_weapon,
-    'Bend Time compensation runs after game-model stat calculation':
-        'typeof(AgentDrivenProperties)' in bend_time and
-        '"UpdateDrivenProperties"' in bend_time and
-        '[HarmonyPriority(Priority.Last)]' in bend_time and
-        'Agent __0' in bend_time and
-        'private static bool Prepare()' in bend_time and
-        'BendTimeDrivenPropertyCompensation.Apply(time, agent, __instance);' in bend_time,
-    'Bend Time driven-property lookup is weakly mission cached':
-        'WeakReference<Mission>' in bend_time and
-        'WeakReference<TimeControlService>' in bend_time and
-        'ResolveTime(mission)' in bend_time and
-        'GetMissionBehavior<VoidstepMissionBehavior>()' in bend_time,
-    'Bend Time republishes normal stats after local cleanup':
-        '[HarmonyPatch(typeof(TimeControlService), "CompleteLocalState")]' in bend_time and
-        'RefreshNative(__state.Player)' in bend_time and
-        'RefreshNative(__state.Mount)' in bend_time and
-        'ResetDiagnostics();' in bend_time,
-    'Bend Time native maximum speed restores synchronously in multiplier mode':
-        '[HarmonyPatch(typeof(TimeControlService), "CompleteLocalState")]' in max_speed and
-        max_speed.count('SetMaximumSpeedLimit(state.Original') == 2 and
-        max_speed.count('SetMaximumSpeedLimit(state.OriginalPlayerLimit, true)') == 1 and
-        max_speed.count('SetMaximumSpeedLimit(state.OriginalMountLimit, true)') == 1 and
-        'SetMaximumSpeedLimit(state.OriginalPlayerLimit, false)' not in max_speed_code and
-        'SetMaximumSpeedLimit(state.OriginalMountLimit, false)' not in max_speed_code,
-    'Bend Time covers movement combat ranged and mount properties':
-        all(token in bend_time for token in (
-            'MaxSpeedMultiplier',
-            'CombatMaxSpeedMultiplier',
-            'TopSpeedReachDuration',
-            'SwingSpeedMultiplier',
-            'ThrustOrRangedReadySpeedMultiplier',
-            'ReloadSpeed',
-            'BipedalRangedReadySpeedMultiplier',
-            'BipedalRangedReloadSpeedMultiplier',
-            'MountSpeed',
-            'MountManeuver',
-            'MountDashAccelerationMultiplier')),
-    'Domino repairs only missing or inactive affectors':
-        'if (__1 != null && __1.IsActive())' in domino_repair and
-        '__2.OwnerId < 0' in domino_repair and
+
+    'TOR presentation diagnostics do not root finished missions':
+        'WeakReference<Mission>' in tor_presentation and
+        'WeakReference<Mission>' in tor_radial,
+
+    'TOR proxy presentation cannot mutate facing':
+        'IsLookDirectionLocked' not in tor_stance and
+        'LookDirection =' not in tor_stance and
+        'SetMovementDirection' not in tor_stance,
+
+    'Domino repairs missing player source without weakening recursion guards':
         'mission.FindAgentWithIndex(__2.OwnerId)' in domino_repair and
-        'ReferenceEquals(owner, player)' in domino_repair and
-        'ReferenceEquals(owner, mount)' in domino_repair and
         '__1 = owner;' in domino_repair and
-        'affectorAgent = owner;' not in domino_repair_code,
-    'Domino source repair preserves explicit recursion suppression':
         '_propagatedHitSuppression' in domino and
         'ConsumePropagatedHitSuppression' in domino and
-        'RemoveUnconsumedPropagatedHitSuppression' in domino,
-    'TOR presentation and radial diagnostics do not root finished missions':
-        'WeakReference<Mission>' in tor_presentation and
-        'WeakReference<Mission>' in tor_radial and
-        'private static Mission _lastLoggedMission' not in tor_presentation and
-        'private static Mission _lastMission' not in tor_radial,
-    'TOR radial not-ready states remain non-exceptional':
-        'private static bool ForceAdapterReattach' in tor_radial and
-        'coordinator is not live yet' in tor_radial and
-        'adapter is not live yet' in tor_radial and
-        'return false;' in tor_radial,
-    'Blink and Cleave own their presentation without generic turning cast actions':
+        'Domino accepted authoritative damage callback' in runtime_corrections,
+
+    'Blink and Cleave own presentation without generic cast turning':
         'var blinkOwnsItsPresentation = ability == AbilityId.Blink;' in cast_animation and
         'var cleaveOwnsExecutionAction = ability == AbilityId.VoidstepCleave;' in cast_animation and
         '__state = disablingDarkVision || blinkOwnsItsPresentation || cleaveOwnsExecutionAction;' in cast_animation,
-    'teleport preserves actor and mount facing after native position and movement mutation':
-        teleport_capture >= 0 and teleport_actor > teleport_capture and
-        mount_restore > teleport_actor and teleport_restore > mount_restore and
-        'var mountFacing = mount != null && mount.IsActive() ? CaptureHorizontalFacing(mount) : Vec3.Zero;' in ability_manager and
-        '_animation.SetActorFacing(actor, actorFacing);' in ability_manager,
-    'Cleave snapshots mechanical settings before wind-up':
+
+    'Cleave snapshots mechanics before wind-up':
         'var snapshot = CleaveExecutionSnapshot.Capture(player, settings);' in ability_manager and
         '_cleaveSnapshot = snapshot;' in ability_manager and
-        'public bool Begin(Agent actor, MissionWeapon weapon, CleaveExecutionSnapshot snapshot, out string failure)' in cleave and
-        'settings.CleaveSweepDegrees' in cleave and
-        'VoidstepSettings.Current' not in cleave_code.split('public bool Begin(', 1)[1].split('public bool Tick(', 1)[0],
-    'legacy Cleave yaw remains virtual and is suppressed before native facing writes':
-        'var absoluteFacing = _startAngle + (int)_direction * _sweepRadians * progress;' in cleave and
-        '_animation.SetActorFacing(_actor, absoluteFacing);' in cleave and
-        '[HarmonyPatch(typeof(CleaveSweepController), nameof(CleaveSweepController.Tick))]' in facing_guard and
-        'BodyAlignedCleaveRuntime.EnterFacingSuppression();' in facing_guard,
-    'Cleave is aligned to rendered body frame rather than camera aim':
-        'visuals.GetGlobalFrame().rotation.f' in facing_guard and
-        'actor.Frame.rotation.f' in facing_guard and
-        'return NormalizeFacing(actor.LookDirection);' in facing_guard and
-        'state.Facing = GetBodyFacing(player);' in facing_guard and
-        'bodyLookDifference=' in facing_guard,
-    'Cleave teleport and fallback remain on one body-facing axis':
-        'return player.Position + state.Facing * travelDistance;' in facing_guard and
-        'var candidate = actor.Position + facing * distance;' in facing_guard and
-        'validator.Validate(actor, candidate, maximumRange, allowThroughWalls, 1)' in facing_guard and
-        'SideOffsets' not in facing_guard_code and
-        'BackOffsets' not in facing_guard_code,
-    'Cleave sweep is centred on body forward with the dead sector behind':
-        'facingAngle - (int)snapshot.Direction * snapshot.SweepRadians * 0.5' in facing_guard and
-        'state.StartAngle + (int)direction * sweepRadians * eased' in facing_guard and
-        'progress >= 0.5f' in facing_guard and
-        'state.Facing' in facing_guard,
-    'Cleave uses one short contiguous visual and damage sweep':
-        'private const float WindUpSeconds = 0.045f;' in facing_guard and
-        'private const float RecoverySeconds = 0.035f;' in facing_guard and
-        '____duration = 0.22f;' in facing_guard and
-        'BodyAlignedCleaveRuntime.EmitArc(' in facing_guard and
-        'BodyAlignedCleaveRuntime.TeleportPositionOnly(player, ____destination);' in facing_guard,
-    'Cleave no longer sends native attack or turn controls':
+        'public bool Begin(Agent actor, MissionWeapon weapon, CleaveExecutionSnapshot snapshot, out string failure)' in cleave,
+
+    'Cleave native turn and attack controls remain suppressed':
         'SetEventControlFlags' not in facing_guard_code and
-        'AttackRelease' not in facing_guard_code and
         'SetMovementDirection' not in facing_guard_code and
         'LookDirection =' not in facing_guard_code and
-        'SetCurrentActionProgress' not in facing_guard_code and
         'BodyAlignedCleaveActionSuppressionPatch' in facing_guard,
-    'Cleave cancellation cannot restore stale activation facing':
-        '____castOriginalLook = Vec3.Zero;' in facing_guard and
-        'BodyAlignedCleaveRuntime.Clear(__instance);' in facing_guard,
-    'Cleave state is weakly scoped and stores no static Agent collection':
-        'ConditionalWeakTable<AbilityManager, BodyAlignedCleaveState>' in facing_guard and
-        'static readonly List<Agent>' not in facing_guard_code and
-        'static readonly HashSet<Agent>' not in facing_guard_code and
-        'static readonly Dictionary<int, Agent>' not in facing_guard_code,
-    'Blink reports frozen targeting only while it owns the zero-speed request':
-        '_hud.Show(_ownsTimeRequest' in blink and
-        'timeFrozen={_ownsTimeRequest}' in blink,
+
+    'Blink frozen targeting request remains separately owned':
+        '_timeCleanupPending' in blink and
+        'RemoveTimeSpeedRequest' in blink and
+        '_hud.Show(_ownsTimeRequest' in blink,
 }
 
 failed = [name for name, passed in checks.items() if not passed]
@@ -250,4 +247,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} Cleave, Blink, Bend Time, Domino and TOR regression invariants.')
+print(f'Validated {len(checks)} selective-time, teleport, Domino, TOR and Cleave regressions.')
