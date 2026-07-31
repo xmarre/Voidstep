@@ -247,7 +247,7 @@ namespace Voidstep
 
             // The normal teleport path performs position changes only. It does not assign an
             // input vector, submit a movement direction, change look state, play an action,
-            // enable scripted movement, or write facing.
+            // or perform any scripted-movement or facing mutation.
             PostTeleportOrientationGuard.Arm(
                 __instance,
                 actor,
