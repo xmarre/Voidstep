@@ -20,13 +20,10 @@ namespace Voidstep
         private const string ScreenManagerTypeName = "TaleWorlds.ScreenSystem.ScreenManager";
         private const string MissionScreenTypeName = "TaleWorlds.MountAndBlade.View.Screens.MissionScreen";
 
-        private static readonly Type ScreenManagerType = AccessTools.TypeByName(ScreenManagerTypeName);
-        private static readonly Type MissionScreenType = AccessTools.TypeByName(MissionScreenTypeName);
-        private static readonly PropertyInfo TopScreenProperty =
-            ScreenManagerType == null ? null : AccessTools.Property(ScreenManagerType, "TopScreen");
-        private static readonly PropertyInfo MissionProperty =
-            MissionScreenType == null ? null : AccessTools.Property(MissionScreenType, "Mission");
-        private static readonly MethodInfo ProjectGroundMethod = ResolveProjectGroundMethod();
+        private static Type _missionScreenType;
+        private static PropertyInfo _topScreenProperty;
+        private static PropertyInfo _missionProperty;
+        private static MethodInfo _projectGroundMethod;
         private static bool _successLogged;
         private static bool _failureLogged;
         private static readonly VoidstepLogger Logger = new VoidstepLogger();
@@ -34,8 +31,7 @@ namespace Voidstep
         internal static bool TryResolve(Mission mission, Agent actor, float range, out Vec3 position)
         {
             position = Vec3.Invalid;
-            if (mission?.Scene == null || actor == null || !actor.IsActive() ||
-                TopScreenProperty == null || MissionProperty == null || ProjectGroundMethod == null)
+            if (mission?.Scene == null || actor == null || !actor.IsActive() || !EnsureResolved())
             {
                 LogFailureOnce("Mission-screen ground projection API was unavailable.");
                 return false;
@@ -43,9 +39,9 @@ namespace Voidstep
 
             try
             {
-                var screen = TopScreenProperty.GetValue(null, null);
-                if (screen == null || !MissionScreenType.IsInstanceOfType(screen) ||
-                    !ReferenceEquals(MissionProperty.GetValue(screen, null), mission))
+                var screen = _topScreenProperty.GetValue(null, null);
+                if (screen == null || !_missionScreenType.IsInstanceOfType(screen) ||
+                    !ReferenceEquals(_missionProperty.GetValue(screen, null), mission))
                 {
                     LogFailureOnce("The active top screen was not the current mission screen.");
                     return false;
@@ -58,7 +54,7 @@ namespace Voidstep
                     BodyFlags.AgentOnly | BodyFlags.MissileOnly | BodyFlags.DroppedItem,
                     false
                 };
-                var projected = ProjectGroundMethod.Invoke(screen, arguments);
+                var projected = _projectGroundMethod.Invoke(screen, arguments);
                 if (!(projected is bool success) || !success || !(arguments[0] is Vec3 ground) || !ground.IsValid)
                 {
                     LogFailureOnce("Bannerlord mission-screen projection returned no ground point.");
@@ -83,6 +79,41 @@ namespace Voidstep
             }
         }
 
+        private static bool EnsureResolved()
+        {
+            if (_missionScreenType != null && _topScreenProperty != null &&
+                _missionProperty != null && _projectGroundMethod != null)
+            {
+                return true;
+            }
+
+            var screenManagerType = AccessTools.TypeByName(ScreenManagerTypeName);
+            var missionScreenType = AccessTools.TypeByName(MissionScreenTypeName);
+            if (screenManagerType == null || missionScreenType == null)
+                return false;
+
+            var topScreen = AccessTools.Property(screenManagerType, "TopScreen");
+            var missionProperty = AccessTools.Property(missionScreenType, "Mission");
+            var projectedGround = AccessTools.Method(
+                missionScreenType,
+                "GetProjectedMousePositionOnGround",
+                new[]
+                {
+                    typeof(Vec3).MakeByRefType(),
+                    typeof(Vec3).MakeByRefType(),
+                    typeof(BodyFlags),
+                    typeof(bool)
+                });
+            if (topScreen == null || missionProperty == null || projectedGround == null)
+                return false;
+
+            _missionScreenType = missionScreenType;
+            _topScreenProperty = topScreen;
+            _missionProperty = missionProperty;
+            _projectGroundMethod = projectedGround;
+            return true;
+        }
+
         private static Vec3 ClampToCastCircle(Mission mission, Vec3 origin, Vec3 ground, float range)
         {
             var planar = ground - origin;
@@ -101,22 +132,6 @@ namespace Voidstep
                 return Vec3.Invalid;
             result.z = height;
             return result;
-        }
-
-        private static MethodInfo ResolveProjectGroundMethod()
-        {
-            if (MissionScreenType == null)
-                return null;
-            return AccessTools.Method(
-                MissionScreenType,
-                "GetProjectedMousePositionOnGround",
-                new[]
-                {
-                    typeof(Vec3).MakeByRefType(),
-                    typeof(Vec3).MakeByRefType(),
-                    typeof(BodyFlags),
-                    typeof(bool)
-                });
         }
 
         private static Exception Unwrap(Exception exception)
@@ -163,12 +178,16 @@ namespace Voidstep
     {
         private static readonly ConditionalWeakTable<TimeControlService, State> States =
             new ConditionalWeakTable<TimeControlService, State>();
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Player =
-            AccessTools.FieldRefAccess<TimeControlService, Agent>("_player");
-        private static readonly AccessTools.FieldRef<TimeControlService, Agent> Mount =
-            AccessTools.FieldRefAccess<TimeControlService, Agent>("_mount");
-        private static readonly AccessTools.FieldRef<TimeControlService, float> Factor =
-            AccessTools.FieldRefAccess<TimeControlService, float>("_factor");
+        private static readonly FieldInfo PlayerField =
+            AccessTools.Field(typeof(TimeControlService), "_player");
+        private static readonly FieldInfo MountField =
+            AccessTools.Field(typeof(TimeControlService), "_mount");
+        private static readonly FieldInfo FactorField =
+            AccessTools.Field(typeof(TimeControlService), "_factor");
+        private static readonly FieldInfo ManagerField =
+            AccessTools.Field(typeof(VoidstepMissionBehavior), "_manager");
+        private static readonly FieldInfo TimeField =
+            AccessTools.Field(typeof(AbilityManager), "_time");
 
         private sealed class State
         {
@@ -185,12 +204,12 @@ namespace Voidstep
             if (service == null || !service.Active)
                 return false;
 
-            var player = Player(service);
-            var mount = Mount(service);
+            var player = GetAgent(PlayerField, service);
+            var mount = GetAgent(MountField, service);
             if (!ReferenceEquals(agent, player) && !ReferenceEquals(agent, mount))
                 return false;
 
-            var factor = Factor(service);
+            var factor = GetFactor(service);
             if (factor <= 0.001f || factor >= 0.999f)
                 return false;
             compensation = Math.Min(8f, 1f / factor);
@@ -202,12 +221,12 @@ namespace Voidstep
             if (service == null || !service.Active)
                 return;
 
-            var factor = Factor(service);
+            var factor = GetFactor(service);
             if (factor <= 0.001f || factor >= 0.999f)
                 return;
             var compensation = Math.Min(8f, 1f / factor);
-            var player = Player(service);
-            var mount = Mount(service);
+            var player = GetAgent(PlayerField, service);
+            var mount = GetAgent(MountField, service);
 
             EnforceAgent(player, compensation);
             if (!ReferenceEquals(mount, player))
@@ -240,20 +259,32 @@ namespace Voidstep
             }
         }
 
+        private static Agent GetAgent(FieldInfo field, TimeControlService service)
+        {
+            try { return field?.GetValue(service) as Agent; }
+            catch { return null; }
+        }
+
+        private static float GetFactor(TimeControlService service)
+        {
+            try
+            {
+                var value = FactorField?.GetValue(service);
+                return value is float factor ? factor : 1f;
+            }
+            catch
+            {
+                return 1f;
+            }
+        }
+
         private static TimeControlService ResolveService()
         {
             try
             {
-                var mission = Mission.Current;
-                var behavior = mission?.GetMissionBehavior<VoidstepMissionBehavior>();
-                if (behavior == null)
-                    return null;
-                var managerField = AccessTools.Field(typeof(VoidstepMissionBehavior), "_manager");
-                var manager = managerField?.GetValue(behavior) as AbilityManager;
-                if (manager == null)
-                    return null;
-                var timeField = AccessTools.Field(typeof(AbilityManager), "_time");
-                return timeField?.GetValue(manager) as TimeControlService;
+                var behavior = Mission.Current?.GetMissionBehavior<VoidstepMissionBehavior>();
+                var manager = ManagerField?.GetValue(behavior) as AbilityManager;
+                return TimeField?.GetValue(manager) as TimeControlService;
             }
             catch
             {
@@ -300,6 +331,21 @@ namespace Voidstep
         {
             if (MandatoryBendTimePlayerExemption.TryGetCompensation(__instance, out var compensation))
                 actionSpeed = Math.Max(actionSpeed, compensation);
+        }
+    }
+
+    /// <summary>
+    /// The earlier controller-delta experiment affected only camera look interpolation in
+    /// Bannerlord's MissionMainAgentController. It cannot change native movement simulation.
+    /// Suppress it so it cannot distort camera response while the real native compensation runs.
+    /// </summary>
+    [HarmonyPatch(typeof(BendTimeMainAgentTickRuntime), nameof(BendTimeMainAgentTickRuntime.Scale))]
+    internal static class DisableIneffectiveMainAgentControllerDeltaPatch
+    {
+        [HarmonyPriority(Priority.First)]
+        private static bool Prefix()
+        {
+            return false;
         }
     }
 }
