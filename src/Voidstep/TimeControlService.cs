@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using HarmonyLib;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -8,21 +7,16 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Bend Time leaves the mission scene at native 1.0x. Slowing the whole scene and trying to
-    /// multiply the player back up cannot exempt native player simulation. This mission-owned
-    /// service instead slows only registered non-player agents and newly launched non-player
-    /// missiles. The controlled player and current mount are never mutated.
+    /// Bend Time leaves mission time itself at native 1.0x and slows only non-player mission
+    /// agents. It uses Bannerlord's public custom-driven-property push, native per-agent maximum
+    /// speed limits and the two verified action channels. The player and controlled mount are
+    /// never mutated.
     /// </summary>
     internal sealed class TimeControlService
     {
         private const int NativeActionChannelCount = 2;
-        private const int RefreshBudgetPerTick = 128;
+        private const int RefreshBudgetPerTick = 192;
         private const float MinimumFactor = 0.02f;
-
-        private static readonly PropertyInfo DrivenValuesProperty =
-            AccessTools.Property(typeof(AgentDrivenProperties), "Values");
-        private static readonly MethodInfo PushDrivenPropertiesMethod =
-            AccessTools.Method(typeof(Agent), "UpdateDrivenProperties", new[] { typeof(float[]) });
 
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
@@ -30,24 +24,49 @@ namespace Voidstep
         private readonly List<int> _refreshOrder = new List<int>();
 
         private Agent _player;
-        // Compatibility field for older branch-local Harmony metadata. It mirrors the exempt mount
-        // but no player-compensation method is called by this implementation.
         private Agent _mount;
         private bool _active;
         private float _remaining;
         private float _factor = 1f;
         private float _lastApplicationTime;
         private int _refreshCursor;
-        private bool _nativePushFailureLogged;
+        private int _lastAppliedCount;
 
         private sealed class SlowState
         {
             internal Agent Agent;
-            internal float[] OriginalValues;
-            internal float[] AppliedValues;
-            internal bool Applied;
+            internal bool PropertiesOwned;
             internal bool ActionSpeedOwned;
+            internal bool SpeedLimitOwned;
             internal bool FailureLogged;
+
+            internal float OriginalMaxSpeedMultiplier;
+            internal float OriginalCombatMaxSpeedMultiplier;
+            internal float OriginalTopSpeedReachDuration;
+            internal float OriginalSwingSpeedMultiplier;
+            internal float OriginalReadySpeedMultiplier;
+            internal float OriginalReloadSpeed;
+            internal float OriginalRangedReadySpeedMultiplier;
+            internal float OriginalRangedReloadSpeedMultiplier;
+            internal float OriginalHandlingMultiplier;
+            internal float OriginalMountSpeed;
+            internal float OriginalMountManeuver;
+            internal float OriginalMountDashAcceleration;
+            internal float OriginalMaximumSpeedLimit;
+
+            internal float AppliedMaxSpeedMultiplier;
+            internal float AppliedCombatMaxSpeedMultiplier;
+            internal float AppliedTopSpeedReachDuration;
+            internal float AppliedSwingSpeedMultiplier;
+            internal float AppliedReadySpeedMultiplier;
+            internal float AppliedReloadSpeed;
+            internal float AppliedRangedReadySpeedMultiplier;
+            internal float AppliedRangedReloadSpeedMultiplier;
+            internal float AppliedHandlingMultiplier;
+            internal float AppliedMountSpeed;
+            internal float AppliedMountManeuver;
+            internal float AppliedMountDashAcceleration;
+            internal float AppliedMaximumSpeedLimit;
         }
 
         public TimeControlService(Mission mission, VoidstepLogger logger)
@@ -75,15 +94,17 @@ namespace Voidstep
             _mount = GetActiveMount(player);
             _active = true;
             _refreshCursor = 0;
-            _nativePushFailureLogged = false;
 
             ReconcileKnownAgents();
-            ApplyToAllKnownAgents();
+            _lastAppliedCount = ApplyToAllKnownAgents();
 
             _logger.Debug(
                 "Bend Time selective dilation started factor=" + _factor.ToString("0.00") +
                 ", registeredAgents=" + _states.Count +
-                "; scene and controlled player remain native 1.00x.");
+                ", slowedAgents=" + _lastAppliedCount +
+                "; scene, player and controlled mount remain native 1.00x.");
+            if (_lastAppliedCount == 0)
+                _logger.Debug("Bend Time found no eligible non-player mission agents to slow.");
             return true;
         }
 
@@ -166,7 +187,7 @@ namespace Voidstep
                 _active = false;
                 foreach (var pair in _states)
                     Restore(pair.Value);
-                _logger.Debug("Bend Time selective dilation released; all owned agent state restored.");
+                _logger.Debug("Bend Time selective dilation released; all owned non-player state restored.");
             }
 
             _remaining = 0f;
@@ -175,6 +196,7 @@ namespace Voidstep
             _player = null;
             _mount = null;
             _refreshCursor = 0;
+            _lastAppliedCount = 0;
         }
 
         public void Cleanup()
@@ -195,16 +217,21 @@ namespace Voidstep
                 RegisterAgent(agents[i]);
         }
 
-        private void ApplyToAllKnownAgents()
+        private int ApplyToAllKnownAgents()
         {
+            var applied = 0;
             foreach (var pair in _states)
             {
                 var state = pair.Value;
                 if (state == null || state.Agent == null || IsExempt(state.Agent))
+                {
                     Restore(state);
-                else
-                    Apply(state);
+                    continue;
+                }
+                if (Apply(state))
+                    applied++;
             }
+            return applied;
         }
 
         private void RefreshPlayerExemptions()
@@ -265,50 +292,40 @@ namespace Voidstep
             return ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount);
         }
 
-        private void Apply(SlowState state)
+        private bool Apply(SlowState state)
         {
             var agent = state?.Agent;
             if (agent == null || !agent.IsActive() || IsExempt(agent))
             {
                 Restore(state);
-                return;
+                return false;
             }
 
             try
             {
+                // Rebuild the unmodified baseline first. Bannerlord may recalculate driven values
+                // between Voidstep refreshes; starting from native values prevents multiplier stacking.
+                agent.UpdateAgentProperties();
                 var driven = agent.AgentDrivenProperties;
-                var values = GetValues(driven);
-                if (driven != null && values != null)
-                {
-                    var needsDrivenPush = !state.Applied ||
-                        state.AppliedValues == null ||
-                        !ArraysApproximatelyEqual(values, state.AppliedValues);
-                    if (needsDrivenPush)
-                    {
-                        if (!state.Applied)
-                        {
-                            try { agent.UpdateAgentProperties(); }
-                            catch { }
-                            driven = agent.AgentDrivenProperties;
-                            values = GetValues(driven);
-                        }
+                if (driven == null)
+                    return false;
 
-                        if (driven != null && values != null)
-                        {
-                            state.OriginalValues = (float[])values.Clone();
-                            ApplyDrivenScale(driven);
-                            var applied = GetValues(driven);
-                            state.AppliedValues = applied == null ? null : (float[])applied.Clone();
-                            PushDrivenProperties(agent, driven);
-                        }
-                    }
-                }
+                CaptureBaseline(state, driven);
+                ApplyScaledValues(state, driven);
+                agent.UpdateCustomDrivenProperties();
+                state.PropertiesOwned = true;
+
+                if (!state.SpeedLimitOwned)
+                    state.OriginalMaximumSpeedLimit = agent.GetMaximumSpeedLimit();
+                agent.SetMaximumSpeedLimit(_factor, true);
+                state.AppliedMaximumSpeedLimit = agent.GetMaximumSpeedLimit();
+                state.SpeedLimitOwned = true;
 
                 for (var channel = 0; channel < NativeActionChannelCount; channel++)
                     agent.SetCurrentActionSpeed(channel, _factor);
                 state.ActionSpeedOwned = true;
-                state.Applied = true;
                 state.FailureLogged = false;
+                return true;
             }
             catch (Exception ex)
             {
@@ -319,12 +336,14 @@ namespace Voidstep
                         "Bend Time could not slow mission agent=" + agent.Index +
                         " safely: " + Unwrap(ex).Message);
                 }
+                return false;
             }
         }
 
         private void Restore(SlowState state)
         {
-            if (state == null || (!state.Applied && !state.ActionSpeedOwned))
+            if (state == null ||
+                (!state.PropertiesOwned && !state.ActionSpeedOwned && !state.SpeedLimitOwned))
                 return;
 
             var agent = state.Agent;
@@ -332,29 +351,22 @@ namespace Voidstep
             {
                 if (agent != null && agent.IsActive())
                 {
-                    var driven = agent.AgentDrivenProperties;
-                    var current = GetValues(driven);
-                    if (driven != null && current != null &&
-                        state.OriginalValues != null && state.AppliedValues != null)
-                    {
-                        var length = Math.Min(current.Length,
-                            Math.Min(state.OriginalValues.Length, state.AppliedValues.Length));
-                        var changed = false;
-                        for (var i = 0; i < length; i++)
-                        {
-                            if (!Approximately(current[i], state.AppliedValues[i]))
-                                continue;
-                            current[i] = state.OriginalValues[i];
-                            changed = true;
-                        }
-                        if (changed)
-                            PushDrivenProperties(agent, driven);
-                    }
+                    // Native recalculation is the safest restoration boundary because it preserves
+                    // current equipment, perks and other model changes instead of replaying stale data.
+                    if (state.PropertiesOwned)
+                        agent.UpdateAgentProperties();
 
                     if (state.ActionSpeedOwned)
                     {
                         for (var channel = 0; channel < NativeActionChannelCount; channel++)
                             agent.SetCurrentActionSpeed(channel, 1f);
+                    }
+
+                    if (state.SpeedLimitOwned)
+                    {
+                        var current = agent.GetMaximumSpeedLimit();
+                        if (Approximately(current, state.AppliedMaximumSpeedLimit))
+                            agent.SetMaximumSpeedLimit(state.OriginalMaximumSpeedLimit, false);
                     }
                 }
             }
@@ -371,87 +383,62 @@ namespace Voidstep
             }
             finally
             {
-                state.Applied = false;
+                state.PropertiesOwned = false;
                 state.ActionSpeedOwned = false;
-                state.OriginalValues = null;
-                state.AppliedValues = null;
+                state.SpeedLimitOwned = false;
             }
         }
 
-        private void ApplyDrivenScale(AgentDrivenProperties driven)
+        private static void CaptureBaseline(SlowState state, AgentDrivenProperties driven)
+        {
+            state.OriginalMaxSpeedMultiplier = driven.MaxSpeedMultiplier;
+            state.OriginalCombatMaxSpeedMultiplier = driven.CombatMaxSpeedMultiplier;
+            state.OriginalTopSpeedReachDuration = driven.TopSpeedReachDuration;
+            state.OriginalSwingSpeedMultiplier = driven.SwingSpeedMultiplier;
+            state.OriginalReadySpeedMultiplier = driven.ThrustOrRangedReadySpeedMultiplier;
+            state.OriginalReloadSpeed = driven.ReloadSpeed;
+            state.OriginalRangedReadySpeedMultiplier = driven.BipedalRangedReadySpeedMultiplier;
+            state.OriginalRangedReloadSpeedMultiplier = driven.BipedalRangedReloadSpeedMultiplier;
+            state.OriginalHandlingMultiplier = driven.HandlingMultiplier;
+            state.OriginalMountSpeed = driven.MountSpeed;
+            state.OriginalMountManeuver = driven.MountManeuver;
+            state.OriginalMountDashAcceleration = driven.MountDashAccelerationMultiplier;
+        }
+
+        private void ApplyScaledValues(SlowState state, AgentDrivenProperties driven)
         {
             var inverse = 1f / Math.Max(MinimumFactor, _factor);
-            driven.MaxSpeedMultiplier *= _factor;
-            driven.CombatMaxSpeedMultiplier *= _factor;
-            driven.TopSpeedReachDuration = Math.Max(0.01f, driven.TopSpeedReachDuration * inverse);
-            driven.SwingSpeedMultiplier *= _factor;
-            driven.ThrustOrRangedReadySpeedMultiplier *= _factor;
-            driven.ReloadSpeed *= _factor;
-            driven.BipedalRangedReadySpeedMultiplier *= _factor;
-            driven.BipedalRangedReloadSpeedMultiplier *= _factor;
-            driven.HandlingMultiplier *= _factor;
-            driven.MountSpeed *= _factor;
-            driven.MountManeuver *= _factor;
-            driven.MountDashAccelerationMultiplier *= _factor;
-        }
+            state.AppliedMaxSpeedMultiplier = state.OriginalMaxSpeedMultiplier * _factor;
+            state.AppliedCombatMaxSpeedMultiplier = state.OriginalCombatMaxSpeedMultiplier * _factor;
+            state.AppliedTopSpeedReachDuration = Math.Max(0.01f, state.OriginalTopSpeedReachDuration * inverse);
+            state.AppliedSwingSpeedMultiplier = state.OriginalSwingSpeedMultiplier * _factor;
+            state.AppliedReadySpeedMultiplier = state.OriginalReadySpeedMultiplier * _factor;
+            state.AppliedReloadSpeed = state.OriginalReloadSpeed * _factor;
+            state.AppliedRangedReadySpeedMultiplier = state.OriginalRangedReadySpeedMultiplier * _factor;
+            state.AppliedRangedReloadSpeedMultiplier = state.OriginalRangedReloadSpeedMultiplier * _factor;
+            state.AppliedHandlingMultiplier = state.OriginalHandlingMultiplier * _factor;
+            state.AppliedMountSpeed = state.OriginalMountSpeed * _factor;
+            state.AppliedMountManeuver = state.OriginalMountManeuver * _factor;
+            state.AppliedMountDashAcceleration = state.OriginalMountDashAcceleration * _factor;
 
-        private static float[] GetValues(AgentDrivenProperties driven)
-        {
-            if (driven == null || DrivenValuesProperty == null)
-                return null;
-            try { return DrivenValuesProperty.GetValue(driven, null) as float[]; }
-            catch { return null; }
-        }
-
-        private void PushDrivenProperties(Agent agent, AgentDrivenProperties driven)
-        {
-            if (PushDrivenPropertiesMethod == null)
-            {
-                LogNativePushFailure("Bend Time native driven-property push API was unavailable.");
-                return;
-            }
-
-            try
-            {
-                var values = GetValues(driven);
-                if (values == null)
-                    throw new InvalidOperationException("AgentDrivenProperties.Values was unavailable.");
-                PushDrivenPropertiesMethod.Invoke(agent, new object[] { values });
-                _nativePushFailureLogged = false;
-            }
-            catch (Exception ex)
-            {
-                LogNativePushFailure(
-                    "Bend Time native driven-property push failed safely: " + Unwrap(ex).Message);
-            }
-        }
-
-        private void LogNativePushFailure(string message)
-        {
-            if (_nativePushFailureLogged)
-                return;
-            _nativePushFailureLogged = true;
-            _logger.Debug(message);
+            driven.MaxSpeedMultiplier = state.AppliedMaxSpeedMultiplier;
+            driven.CombatMaxSpeedMultiplier = state.AppliedCombatMaxSpeedMultiplier;
+            driven.TopSpeedReachDuration = state.AppliedTopSpeedReachDuration;
+            driven.SwingSpeedMultiplier = state.AppliedSwingSpeedMultiplier;
+            driven.ThrustOrRangedReadySpeedMultiplier = state.AppliedReadySpeedMultiplier;
+            driven.ReloadSpeed = state.AppliedReloadSpeed;
+            driven.BipedalRangedReadySpeedMultiplier = state.AppliedRangedReadySpeedMultiplier;
+            driven.BipedalRangedReloadSpeedMultiplier = state.AppliedRangedReloadSpeedMultiplier;
+            driven.HandlingMultiplier = state.AppliedHandlingMultiplier;
+            driven.MountSpeed = state.AppliedMountSpeed;
+            driven.MountManeuver = state.AppliedMountManeuver;
+            driven.MountDashAccelerationMultiplier = state.AppliedMountDashAcceleration;
         }
 
         private static Agent GetActiveMount(Agent player)
         {
             var mount = player?.MountAgent;
             return mount != null && mount.IsActive() ? mount : null;
-        }
-
-        private static bool ArraysApproximatelyEqual(float[] left, float[] right)
-        {
-            if (ReferenceEquals(left, right))
-                return true;
-            if (left == null || right == null || left.Length != right.Length)
-                return false;
-            for (var i = 0; i < left.Length; i++)
-            {
-                if (!Approximately(left[i], right[i]))
-                    return false;
-            }
-            return true;
         }
 
         private static bool Approximately(float left, float right)
@@ -462,14 +449,14 @@ namespace Voidstep
 
         private static Exception Unwrap(Exception exception)
         {
-            while (exception is TargetInvocationException invocation && invocation.InnerException != null)
+            while (exception is System.Reflection.TargetInvocationException invocation &&
+                   invocation.InnerException != null)
                 exception = invocation.InnerException;
             return exception;
         }
 
-        // Compatibility targets for branch-local patches retained in another source file. The
-        // selective implementation never invokes these methods; they prevent Harmony startup from
-        // failing while the obsolete patches remain dormant.
+        // Compatibility targets retained for dormant branch-local Harmony metadata. The selective
+        // implementation never invokes player compensation.
         private void ApplyPlayerCompensation(float compensation)
         {
         }
