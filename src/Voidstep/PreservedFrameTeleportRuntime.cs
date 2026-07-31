@@ -8,10 +8,10 @@ namespace Voidstep
 {
     /// <summary>
     /// Translates the current main agent through Bannerlord's native IMBAgent.SetPosition call.
-    /// Agent.TeleportToPosition co-locates rider and mount before attachment reconciliation, which
-    /// can rotate the mounted body. Agent.SetInitialFrame is spawn/initialization state and can leak
-    /// into later presentation agents. This path uses neither wrapper: rider and mount keep their
-    /// existing native orientation and exact spatial offset while only their positions change.
+    /// The convenience teleport wrapper co-locates rider and mount before attachment reconciliation,
+    /// which can rotate the mounted body. The spawn-frame initialization API can leak into later
+    /// presentation agents. This path uses neither wrapper: rider and mount keep their existing
+    /// native orientation and exact spatial offset while only their positions change.
     /// </summary>
     internal static class PreservedFrameTeleportRuntime
     {
