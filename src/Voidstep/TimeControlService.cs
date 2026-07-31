@@ -7,16 +7,16 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Bend Time leaves mission time itself at native 1.0x and slows only non-player mission
-    /// agents. It uses Bannerlord's public custom-driven-property push, native per-agent maximum
-    /// speed limits and the two verified action channels. The player and controlled mount are
-    /// never mutated.
+    /// Bend Time leaves mission time itself at native 1.0x and slows only registered non-player
+    /// agents belonging to this exact Mission. No Agent method is Harmony-patched. The owned
+    /// mission behavior performs one normal refresh and one late-frame reassertion while active.
     /// </summary>
     internal sealed class TimeControlService
     {
         private const int NativeActionChannelCount = 2;
         private const int RefreshBudgetPerTick = 192;
         private const float MinimumFactor = 0.02f;
+        private const float MinimumAbsoluteSpeed = 0.05f;
 
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
@@ -26,6 +26,7 @@ namespace Voidstep
         private Agent _player;
         private Agent _mount;
         private bool _active;
+        private bool _lateEnforcementLogged;
         private float _remaining;
         private float _factor = 1f;
         private float _lastApplicationTime;
@@ -83,7 +84,8 @@ namespace Voidstep
         public bool Begin(Agent player, float requestedFactor, float duration, bool allowCompleteSuspension)
         {
             Release();
-            if (player == null || !player.IsActive() || duration <= 0f)
+            if (player == null || !player.IsActive() || duration <= 0f ||
+                _mission == null || !ReferenceEquals(Mission.Current, _mission))
                 return false;
 
             var requestedMinimum = allowCompleteSuspension ? 0.01f : MinimumFactor;
@@ -93,6 +95,7 @@ namespace Voidstep
             _player = player;
             _mount = GetActiveMount(player);
             _active = true;
+            _lateEnforcementLogged = false;
             _refreshCursor = 0;
 
             ReconcileKnownAgents();
@@ -112,7 +115,7 @@ namespace Voidstep
         {
             if (!_active)
                 return;
-            if (_player == null || !_player.IsActive() || _player.Health <= 0f)
+            if (!OwnsCurrentMission() || _player == null || !_player.IsActive() || _player.Health <= 0f)
             {
                 Release();
                 return;
@@ -132,9 +135,41 @@ namespace Voidstep
                 Release();
         }
 
+        /// <summary>
+        /// Called only by VoidstepMissionBehavior.OnPreDisplayMissionTick. Bannerlord may rebuild
+        /// driven properties or actions after normal mission behavior ticks, so this reasserts the
+        /// already captured values without patching Agent.UpdateAgentProperties, SetActionChannel,
+        /// SetCurrentActionSpeed or SetMaximumSpeedLimit globally.
+        /// </summary>
+        internal void LateTick()
+        {
+            if (!_active || !OwnsCurrentMission())
+                return;
+
+            RefreshPlayerExemptions();
+            var enforced = 0;
+            foreach (var pair in _states)
+            {
+                var state = pair.Value;
+                if (state == null || state.Agent == null || !state.Agent.IsActive() ||
+                    IsExempt(state.Agent) || !state.PropertiesOwned)
+                    continue;
+                if (ReassertOwnedState(state))
+                    enforced++;
+            }
+
+            if (!_lateEnforcementLogged)
+            {
+                _lateEnforcementLogged = true;
+                _logger.Debug(
+                    "Bend Time mission-owned late enforcement armed; agents=" + enforced +
+                    ", globalAgentPatches=0.");
+            }
+        }
+
         public void RegisterAgent(Agent agent)
         {
-            if (agent == null || agent.Index < 0)
+            if (agent == null || agent.Index < 0 || !OwnsCurrentMission())
                 return;
 
             SlowState state;
@@ -175,7 +210,7 @@ namespace Voidstep
 
         internal void ScaleMissile(Agent shooter, ref float speed)
         {
-            if (!_active || speed <= 0f || IsExempt(shooter))
+            if (!_active || !OwnsCurrentMission() || speed <= 0f || IsExempt(shooter))
                 return;
             speed = Math.Max(0.01f, speed * _factor);
         }
@@ -197,6 +232,7 @@ namespace Voidstep
             _mount = null;
             _refreshCursor = 0;
             _lastAppliedCount = 0;
+            _lateEnforcementLogged = false;
         }
 
         public void Cleanup()
@@ -207,9 +243,14 @@ namespace Voidstep
             _refreshCursor = 0;
         }
 
+        private bool OwnsCurrentMission()
+        {
+            return _mission != null && ReferenceEquals(Mission.Current, _mission);
+        }
+
         private void ReconcileKnownAgents()
         {
-            if (_mission == null)
+            if (!OwnsCurrentMission())
                 return;
 
             var agents = _mission.AllAgents;
@@ -272,10 +313,7 @@ namespace Voidstep
 
                 var agent = state.Agent;
                 if (!agent.IsActive())
-                {
-                    _states.Remove(index);
                     continue;
-                }
 
                 if (IsExempt(agent))
                     Restore(state);
@@ -287,15 +325,14 @@ namespace Voidstep
 
         private bool IsExempt(Agent agent)
         {
-            if (agent == null)
-                return false;
-            return ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount);
+            return agent != null &&
+                   (ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount));
         }
 
         private bool Apply(SlowState state)
         {
             var agent = state?.Agent;
-            if (agent == null || !agent.IsActive() || IsExempt(agent))
+            if (agent == null || !agent.IsActive() || IsExempt(agent) || !OwnsCurrentMission())
             {
                 Restore(state);
                 return false;
@@ -303,8 +340,9 @@ namespace Voidstep
 
             try
             {
-                // Rebuild the unmodified baseline first. Bannerlord may recalculate driven values
-                // between Voidstep refreshes; starting from native values prevents multiplier stacking.
+                if (state.SpeedLimitOwned)
+                    agent.SetMaximumSpeedLimit(state.OriginalMaximumSpeedLimit, false);
+
                 agent.UpdateAgentProperties();
                 var driven = agent.AgentDrivenProperties;
                 if (driven == null)
@@ -317,7 +355,11 @@ namespace Voidstep
 
                 if (!state.SpeedLimitOwned)
                     state.OriginalMaximumSpeedLimit = agent.GetMaximumSpeedLimit();
-                agent.SetMaximumSpeedLimit(_factor, true);
+                var baselineSpeed = agent.GetCurrentSpeedLimit();
+                if (float.IsNaN(baselineSpeed) || float.IsInfinity(baselineSpeed) || baselineSpeed <= 0.001f)
+                    baselineSpeed = 0.5f;
+                var absoluteLimit = Math.Max(MinimumAbsoluteSpeed, baselineSpeed * _factor);
+                agent.SetMaximumSpeedLimit(absoluteLimit, false);
                 state.AppliedMaximumSpeedLimit = agent.GetMaximumSpeedLimit();
                 state.SpeedLimitOwned = true;
 
@@ -329,13 +371,38 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                if (!state.FailureLogged)
+                LogFailure(state, "apply", ex);
+                return false;
+            }
+        }
+
+        private bool ReassertOwnedState(SlowState state)
+        {
+            var agent = state?.Agent;
+            if (agent == null || !agent.IsActive() || IsExempt(agent) || !OwnsCurrentMission())
+                return false;
+
+            try
+            {
+                var driven = agent.AgentDrivenProperties;
+                if (driven == null)
+                    return false;
+
+                WriteAppliedValues(state, driven);
+                agent.UpdateCustomDrivenProperties();
+                if (state.SpeedLimitOwned)
+                    agent.SetMaximumSpeedLimit(state.AppliedMaximumSpeedLimit, false);
+                if (state.ActionSpeedOwned)
                 {
-                    state.FailureLogged = true;
-                    _logger.Debug(
-                        "Bend Time could not slow mission agent=" + agent.Index +
-                        " safely: " + Unwrap(ex).Message);
+                    for (var channel = 0; channel < NativeActionChannelCount; channel++)
+                        agent.SetCurrentActionSpeed(channel, _factor);
                 }
+                state.FailureLogged = false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogFailure(state, "late reassert", ex);
                 return false;
             }
         }
@@ -351,8 +418,6 @@ namespace Voidstep
             {
                 if (agent != null && agent.IsActive())
                 {
-                    // Native recalculation is the safest restoration boundary because it preserves
-                    // current equipment, perks and other model changes instead of replaying stale data.
                     if (state.PropertiesOwned)
                         agent.UpdateAgentProperties();
 
@@ -363,23 +428,12 @@ namespace Voidstep
                     }
 
                     if (state.SpeedLimitOwned)
-                    {
-                        var current = agent.GetMaximumSpeedLimit();
-                        if (Approximately(current, state.AppliedMaximumSpeedLimit))
-                            agent.SetMaximumSpeedLimit(state.OriginalMaximumSpeedLimit, false);
-                    }
+                        agent.SetMaximumSpeedLimit(state.OriginalMaximumSpeedLimit, false);
                 }
             }
             catch (Exception ex)
             {
-                if (!state.FailureLogged)
-                {
-                    state.FailureLogged = true;
-                    _logger.Debug(
-                        "Bend Time agent restoration failed safely for index=" +
-                        (agent != null ? agent.Index.ToString() : "none") + ": " +
-                        Unwrap(ex).Message);
-                }
+                LogFailure(state, "restore", ex);
             }
             finally
             {
@@ -420,7 +474,11 @@ namespace Voidstep
             state.AppliedMountSpeed = state.OriginalMountSpeed * _factor;
             state.AppliedMountManeuver = state.OriginalMountManeuver * _factor;
             state.AppliedMountDashAcceleration = state.OriginalMountDashAcceleration * _factor;
+            WriteAppliedValues(state, driven);
+        }
 
+        private static void WriteAppliedValues(SlowState state, AgentDrivenProperties driven)
+        {
             driven.MaxSpeedMultiplier = state.AppliedMaxSpeedMultiplier;
             driven.CombatMaxSpeedMultiplier = state.AppliedCombatMaxSpeedMultiplier;
             driven.TopSpeedReachDuration = state.AppliedTopSpeedReachDuration;
@@ -435,16 +493,22 @@ namespace Voidstep
             driven.MountDashAccelerationMultiplier = state.AppliedMountDashAcceleration;
         }
 
+        private void LogFailure(SlowState state, string stage, Exception exception)
+        {
+            if (state == null || state.FailureLogged)
+                return;
+            state.FailureLogged = true;
+            var agent = state.Agent;
+            _logger.Debug(
+                "Bend Time mission-owned " + stage + " failed safely for agent=" +
+                (agent == null ? "none" : agent.Index.ToString()) + ": " +
+                Unwrap(exception).Message);
+        }
+
         private static Agent GetActiveMount(Agent player)
         {
             var mount = player?.MountAgent;
             return mount != null && mount.IsActive() ? mount : null;
-        }
-
-        private static bool Approximately(float left, float right)
-        {
-            return Math.Abs(left - right) <=
-                   0.001f * Math.Max(1f, Math.Max(Math.Abs(left), Math.Abs(right)));
         }
 
         private static Exception Unwrap(Exception exception)
@@ -455,8 +519,7 @@ namespace Voidstep
             return exception;
         }
 
-        // Compatibility targets retained for dormant branch-local Harmony metadata. The selective
-        // implementation never invokes player compensation.
+        // Compatibility targets retained for dormant branch-local Harmony metadata.
         private void ApplyPlayerCompensation(float compensation)
         {
         }
