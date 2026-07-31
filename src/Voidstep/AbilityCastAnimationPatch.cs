@@ -10,12 +10,13 @@ namespace Voidstep
         private static void Prefix(AbilityManager __instance, AbilityId ability, out bool __state)
         {
             var disablingDarkVision = ability == AbilityId.DarkVision && __instance.IsDarkVisionActive;
-            var confirmingBlink = ability == AbilityId.Blink && __instance.IsBusy &&
-                                  __instance.ActiveAbility == AbilityId.Blink &&
-                                  __instance.Phase == AbilityPhase.Targeting;
-            var enteringBlinkTargeting = ability == AbilityId.Blink && !confirmingBlink;
+
+            // Blink owns a two-stage targeting/teleport presentation. Applying the generic
+            // act_release_stone action after confirmation can rotate the skeleton immediately
+            // after teleport and fights TOR proxy cleanup on the same action channel.
+            var blinkOwnsItsPresentation = ability == AbilityId.Blink;
             var cleaveOwnsExecutionAction = ability == AbilityId.VoidstepCleave;
-            __state = disablingDarkVision || enteringBlinkTargeting || cleaveOwnsExecutionAction;
+            __state = disablingDarkVision || blinkOwnsItsPresentation || cleaveOwnsExecutionAction;
         }
 
         private static void Postfix(AbilityManager __instance, AbilityId ability, bool __result, bool __state)
