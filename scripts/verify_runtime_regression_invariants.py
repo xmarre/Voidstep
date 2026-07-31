@@ -181,9 +181,10 @@ checks = {
         'coordinator is not live yet' in tor_radial and
         'adapter is not live yet' in tor_radial and
         'return false;' in tor_radial,
-    'Cleave does not play a second generic cast action before its owned execution':
+    'Blink and Cleave own their presentation without generic turning cast actions':
+        'var blinkOwnsItsPresentation = ability == AbilityId.Blink;' in cast_animation and
         'var cleaveOwnsExecutionAction = ability == AbilityId.VoidstepCleave;' in cast_animation and
-        '__state = disablingDarkVision || enteringBlinkTargeting || cleaveOwnsExecutionAction;' in cast_animation,
+        '__state = disablingDarkVision || blinkOwnsItsPresentation || cleaveOwnsExecutionAction;' in cast_animation,
     'teleport preserves actor and mount facing after native position and movement mutation':
         teleport_capture >= 0 and teleport_actor > teleport_capture and
         mount_restore > teleport_actor and teleport_restore > mount_restore and
