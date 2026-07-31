@@ -30,6 +30,7 @@ bindings = read('src/Voidstep/VoidstepInputBindings.cs')
 project = read('src/Voidstep/Voidstep.csproj')
 prefab = read('module/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml')
 tor_compact = compact(tor)
+all_runtime = '\n'.join(path.read_text(encoding='utf-8') for path in (root / 'src' / 'Voidstep').glob('*.cs'))
 
 ability_order = (
     'AbilityId.VoidstepCleave',
@@ -119,8 +120,7 @@ checks = {
     'TOR remains an optional reflection boundary':
         'using TOR_Core' not in tor + tor_stance and
         '<Reference Include="TOR_Core"' not in project and
-        'AppDomain.CurrentDomain.GetAssemblies()' in tor and
-        'AppDomain.CurrentDomain.GetAssemblies()' in tor_stance,
+        'AppDomain.CurrentDomain.GetAssemblies()' in tor,
 
     'TOR template enums are semantic':
         'ParseEnumValue("TOR_Core.AbilitySystem.AbilityType", "Spell")' in tor and
@@ -128,30 +128,31 @@ checks = {
         'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")' in tor and
         'Enum.ToObject' not in tor,
 
-    'TOR presentation cleanup is live-state bounded':
-        'TryGetCurrentVoidstepProxy(__instance, true, out var actor)' in tor_stance and
-        'if (requireLiveTargeting && state != 2)' in tor_stance and
-        '_currentStateField.SetValue' not in tor_stance,
+    'TOR presentation integration is selection only':
+        'selection-only' in tor_stance and
+        'Agent.Main' not in tor_stance and
+        'SetActionChannel' not in tor_stance and
+        'SetCurrentActionSpeed' not in tor_stance and
+        'LookDirection =' not in tor_stance,
 
-    'TOR cleanup cannot mutate facing':
-        'IsLookDirectionLocked' not in tor_stance and
-        'LookDirection =' not in tor_stance and
-        'SetMovementDirection' not in tor_stance,
-
-    'Blink and Cleave use one native position translator':
+    'Blink and Cleave consume one inert teleport boundary':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
         'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
-        'AccessTools.Field(typeof(MBAPI), "IMBAgent")' in teleport and
-        'NativeSetPositionMethod.Invoke(api, arguments);' in teleport and
-        'riderTarget = destination + riderOffset;' in teleport,
+        'displacement suppressed to protect Agent orientation' in teleport and
+        'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in teleport,
 
-    'teleport never writes spawn or orientation state':
+    'teleport never writes position frame or orientation':
         'SetInitialFrame' not in teleport and
-        '.TeleportToPosition(' not in teleport and
+        'TeleportToPosition' not in teleport and
+        'IMBAgent' not in teleport and
+        'SetPosition' not in teleport and
         'LookDirection =' not in teleport and
         'SetMovementDirection' not in teleport and
-        'SetEventControlFlags' not in teleport and
-        'Suppress every legacy post-teleport camera-derived orientation write.' in post_cast,
+        'SetEventControlFlags' not in teleport,
+
+    'no global Agent Harmony target exists':
+        '[HarmonyPatch(typeof(Agent)' not in all_runtime and
+        'Agent.Main' not in all_runtime,
 
     'right mouse confirmation uses input bypass':
         'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and
@@ -191,4 +192,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} focused wheel, TOR session and native position-teleport invariants.')
+print(f'Validated {len(checks)} focused wheel, TOR session and inert-teleport invariants.')
