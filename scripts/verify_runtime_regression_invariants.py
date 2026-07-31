@@ -69,27 +69,37 @@ checks = {
         '[HarmonyPatch(typeof(Mission), "AddMissileSingleUsageAux")]' in time_control and
         'service?.ScaleMissile(shooterAgent, ref speed);' in time_control,
 
-    'Blink and Cleave share the no-displacement boundary':
+    'Blink and Cleave share one native position boundary':
         'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
         'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in teleport and
         'PreservedFrameTeleportRuntime.Teleport(' in teleport and
         'return false;' in teleport,
 
-    'teleport displacement is explicitly suppressed':
-        'displacement suppressed to protect Agent orientation' in teleport and
-        'requestedDestination=' in teleport and
-        'livePosition=' in teleport,
+    'teleport uses native position-only translation':
+        'AccessTools.Field(typeof(MBAPI), "IMBAgent")' in teleport and
+        'NativeSetPositionMethod.Invoke(api, arguments);' in teleport and
+        'SetNativePosition(mount, mountTarget)' in teleport and
+        'SetNativePosition(actor, riderTarget)' in teleport,
 
-    'teleport performs no native Agent mutation':
+    'teleport avoids frame and orientation mutation':
         'SetInitialFrame' not in teleport and
         'TeleportToPosition' not in teleport and
-        'IMBAgent' not in teleport and
-        'SetPosition' not in teleport and
+        'SetScriptedPosition' not in teleport and
         'LookDirection =' not in teleport and
         'SetMovementDirection' not in teleport and
         'SetEventControlFlags' not in teleport and
-        'MovementInputVector' not in teleport,
+        'SetActionChannel' not in teleport,
+
+    'mounted teleport preserves exact rider offset':
+        'riderOffset = actorPosition - mountPosition;' in teleport and
+        'riderTarget = destination + riderOffset;' in teleport and
+        'riderOffsetError=' in teleport,
+
+    'teleport notifies live components once':
+        'NotifyTeleported(mount);' in teleport and
+        'NotifyTeleported(actor);' in teleport and
+        'components[i]?.OnAgentTeleported();' in teleport,
 
     'teleport is one-shot and current-main-agent scoped':
         'ReferenceEquals(Mission.Current, mission)' in teleport and
@@ -167,4 +177,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-only time, no-displacement teleport, Domino, TOR and Cleave regressions.')
+print(f'Validated {len(checks)} mission-only time, native position-only teleport, Domino, TOR and Cleave regressions.')
