@@ -74,12 +74,8 @@ checks = {
     'standalone overlay owns no mission input':
         'display-only Gauntlet layer' in standalone and
         all(token not in standalone for token in (
-            'IsFocusLayer',
-            'ConfigureInputRestrictions',
-            'SetInputRestrictions',
-            'TrySetFocus',
-            'TryLoseFocus',
-            'InputUsageMask')),
+            'IsFocusLayer', 'ConfigureInputRestrictions', 'SetInputRestrictions',
+            'TrySetFocus', 'TryLoseFocus', 'InputUsageMask')),
 
     'wheel suppression never intercepts mouse wheel':
         all(token not in coordinator + wheel_suppression for token in (
@@ -132,34 +128,32 @@ checks = {
         'LookDirection =' not in tor_stance and
         'SetMovementDirection' not in tor_stance,
 
-    'Blink teleport uses exact native frame':
+    'Blink teleport is position-only':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
         'CameraFacingTeleportOwnership.Teleport(' in post_cast and
-        'SetInitialFrame(in actorPosition, in direction, true)' in post_cast and
-        'SetInitialFrame(in mountPosition, in direction, true)' in post_cast and
-        'TeleportToPosition' not in post_cast,
+        'actor.TeleportToPosition(position)' in post_cast and
+        'mount.TeleportToPosition(position)' in post_cast and
+        'SetInitialFrame' not in post_cast,
 
-    'post-teleport frame is one-shot and duplicate guarded':
-        'ConditionalWeakTable<Mission, State>' in post_cast and
-        'DuplicateWindowSeconds = 0.08f' in post_cast and
-        'DuplicateFacingDot = 0.995f' in post_cast and
-        'IsImmediateDuplicate' in post_cast and
-        'SetExactFrame(' not in post_cast.split('internal static void Tick(Mission mission)', 1)[1].split('internal static void Clear', 1)[0] and
-        'repeated 360-degree turns' in post_cast,
-
-    'post-teleport correction submits no movement controls':
-        '.SetMovementDirection(' not in post_cast and
-        '.MovementInputVector' not in post_cast and
-        'SetInitialFrame' in post_cast,
+    'post-teleport code submits no orientation controls':
+        'LookDirection =' not in post_cast and
+        'SetMovementDirection' not in post_cast and
+        'SetEventControlFlags' not in post_cast and
+        'Suppress every legacy post-teleport orientation write.' in post_cast,
 
     'right mouse confirmation uses input bypass':
         'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and
         'InputConflictSuppression.EnterBypass()' in coordinator,
 
-    'right mouse is suppressed through release':
+    'right mouse attempts only once per physical press':
+        'if (!confirm || _suppressRightMouseUntilRelease)' in coordinator and
         '_suppressRightMouseUntilRelease = true;' in coordinator and
+        'same physical press can call TryActivate every frame' in coordinator,
+
+    'right mouse remains suppressed through release':
         '_selection.HasSelection || _suppressRightMouseUntilRelease' in coordinator and
-        'Input.IsKeyReleased(InputKey.RightMouseButton)' in coordinator,
+        'Input.IsKeyReleased(InputKey.RightMouseButton)' in coordinator and
+        '!Input.IsKeyDownImmediate(InputKey.RightMouseButton)' in coordinator,
 
     'native attack and defend are suppressed only during Mouse2 ownership':
         'private const int Attack = 9;' in mission_input and
@@ -185,4 +179,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} focused wheel, TOR and teleport invariants.')
+print(f'Validated {len(checks)} focused wheel, TOR, confirmation and teleport invariants.')
