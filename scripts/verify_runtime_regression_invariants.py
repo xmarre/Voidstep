@@ -106,24 +106,31 @@ checks = {
         'ReferenceEquals(Mission.Current, mission)' in teleport and
         'ReferenceEquals(mission.MainAgent, actor)' in teleport,
 
-    'occupied destinations use mounted-aware clearance':
-        '[HarmonyPatch(typeof(TeleportValidator), "IsOccupied")]' in teleport_safety and
-        '[HarmonyPriority(Priority.First)]' in teleport_safety and
-        'mountCandidate = riderCandidate - riderOffset;' in teleport_safety and
-        'if (Overlaps(riderCandidate, RiderRadius, other, otherRadius))' in teleport_safety and
-        'if (mounted && Overlaps(mountCandidate, MountRadius, other, otherRadius))' in teleport_safety and
-        'return dx * dx + dy * dy < minimumDistance * minimumDistance;' in teleport_safety,
+    'occupied teleport destinations remain allowed':
+        '[HarmonyPatch(typeof(TeleportValidator), "IsOccupied")]' not in teleport_safety and
+        'Occupied destinations remain valid.' in teleport_safety and
+        'does not displace the requested destination to a fallback location' in teleport_safety and
+        '[HarmonyPatch(typeof(TeleportValidator), "IsOccupied")]' in camera_cast and
+        '__result = false;' in camera_cast,
 
-    'orientation restoration is exact mission owned and bounded':
-        'private const int SettlementTicks = 2;' in teleport_safety and
+    'orientation restoration uses exact native body vectors':
+        'private const int SettlementTicks = 3;' in teleport_safety and
         'ConditionalWeakTable<Mission, PendingState>' in teleport_safety and
         'ReferenceEquals(Mission.Current, mission)' in teleport_safety and
         'ReferenceEquals(mission.MainAgent, actor)' in teleport_safety and
+        'new Vec2(body.x, body.y)' in teleport_safety and
+        'MovementDirectionAsAngle' not in teleport_safety and
+        'restoreMovementDirection: !mounted' in teleport_safety and
+        'restoreMovementDirection: true' in teleport_safety and
         '"SetMovementDirection"' in teleport_safety and
         '"SetLookDirection"' in teleport_safety and
-        '[HarmonyPatch(\n        typeof(PreservedFrameTeleportRuntime)' in teleport_safety and
         '[HarmonyPatch(typeof(Agent)' not in teleport_safety and
         'Agent.Main' not in teleport_safety,
+
+    'mounted rider never receives independent body movement restore':
+        'A mounted rider\'s body is attachment-owned.' in teleport_safety and
+        'restoreMovementDirection: !mounted' in teleport_safety and
+        'ReferenceEquals(mount, capturedMount)' in teleport_safety,
 
     'orientation restoration cannot leak into presentation agents':
         'WeakReference<Agent> Actor;' in teleport_safety and
@@ -209,4 +216,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-only time, collision-safe teleport, bounded orientation restore, Domino, TOR and Cleave regressions.')
+print(f'Validated {len(checks)} mission-only time, occupied teleport passthrough, native body-vector restore, Domino, TOR and Cleave regressions.')
