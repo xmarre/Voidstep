@@ -80,7 +80,7 @@ checks = {
         'AddTimeSpeedRequest' not in time_control and
         'RemoveTimeSpeedRequest' not in time_control and
         'TimeSpeedRequest' not in time_control and
-        'scene and controlled player remain native 1.00x' in time_control,
+        'scene, player and controlled mount remain native 1.00x' in time_control,
 
     'Bend Time explicitly exempts player and mount':
         'ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount)' in time_control and
@@ -90,9 +90,16 @@ checks = {
     'Bend Time slows only registered non-player agents':
         'Dictionary<int, SlowState> _states' in time_control and
         'List<int> _refreshOrder' in time_control and
-        'RefreshBudgetPerTick = 128' in time_control and
+        'RefreshBudgetPerTick = 192' in time_control and
         'RefreshBudgetedAgents();' in time_tick and
         'AllAgents' not in time_tick,
+
+    'Bend Time uses public native property push':
+        'agent.UpdateAgentProperties();' in time_control and
+        'agent.UpdateCustomDrivenProperties();' in time_control and
+        'AgentDrivenProperties.Values' not in time_control and
+        'AccessTools.Property(typeof(AgentDrivenProperties)' not in time_control and
+        'UpdateDrivenProperties", new[] { typeof(float[]) }' not in time_control,
 
     'Bend Time owns verified action channels only':
         'NativeActionChannelCount = 2' in time_control and
@@ -100,11 +107,15 @@ checks = {
         'agent.SetCurrentActionSpeed(channel, _factor);' in time_control and
         'agent.SetCurrentActionSpeed(channel, 1f);' in time_control,
 
-    'Bend Time restores only owned driven values':
-        'OriginalValues' in time_control and
-        'AppliedValues' in time_control and
-        'Approximately(current[i], state.AppliedValues[i])' in time_control and
-        'current[i] = state.OriginalValues[i];' in time_control and
+    'Bend Time owns a native movement cap':
+        'agent.SetMaximumSpeedLimit(_factor, true);' in time_control and
+        'state.OriginalMaximumSpeedLimit = agent.GetMaximumSpeedLimit();' in time_control and
+        'state.AppliedMaximumSpeedLimit = agent.GetMaximumSpeedLimit();' in time_control and
+        'Approximately(current, state.AppliedMaximumSpeedLimit)' in time_control,
+
+    'Bend Time restores from current native models':
+        'if (state.PropertiesOwned)' in time_control and
+        'agent.UpdateAgentProperties();' in method_body(time_control, 'private void Restore(SlowState state)') and
         'Restore(pair.Value);' in time_release,
 
     'Bend Time slows non-player missiles at launch':
@@ -128,12 +139,12 @@ checks = {
         'SetInitialFrame(in actorPosition, in direction, true)' in post_cast and
         'TeleportToPosition' not in post_cast,
 
-    'teleport ownership is bounded and mission scoped':
+    'teleport frame is one-shot and mission scoped':
         'ConditionalWeakTable<Mission, State>' in post_cast and
-        'HoldSeconds = 0.55f' in post_cast and
-        'CameraReleaseDotThreshold = 0.82f' in post_cast and
-        'MBCommon.GetApplicationTime() >= state.ExpiresAt' in teleport_owner_tick and
-        'deliberate camera turn' in teleport_owner_tick,
+        'DuplicateWindowSeconds = 0.08f' in post_cast and
+        'IsImmediateDuplicate' in post_cast and
+        'replaying SetInitialFrame from Tick was the source of repeated 360-degree turns' in post_cast and
+        'SetExactFrame(' not in teleport_owner_tick,
 
     'teleport correction never submits movement controls':
         '.SetMovementDirection(' not in post_cast and
@@ -141,8 +152,8 @@ checks = {
         '.SetEventControlFlags(' not in post_cast,
 
     'teleport ownership mutates only live mission main agent':
-        'var actor = mission.MainAgent;' in teleport_owner_tick and
-        'actor.Index != state.ActorIndex' in teleport_owner_tick and
+        'ReferenceEquals(mission.MainAgent, actor)' in post_cast and
+        'ReferenceEquals(Mission.Current, mission)' in post_cast and
         'CameraFacingTeleportOwnership.Clear' in post_cast,
 
     'TOR proxy cleanup cannot mutate direction':
