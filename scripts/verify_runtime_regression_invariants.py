@@ -76,11 +76,12 @@ checks = {
         'PreservedFrameTeleportRuntime.Teleport(' in teleport and
         'return false;' in teleport,
 
-    'teleport uses native position-only translation':
+    'teleport uses attachment-only native translation':
         'AccessTools.Field(typeof(MBAPI), "IMBAgent")' in teleport and
         'NativeSetPositionMethod.Invoke(api, arguments);' in teleport and
+        'mountTarget = destination - riderOffset;' in teleport and
         'SetNativePosition(mount, mountTarget)' in teleport and
-        'SetNativePosition(actor, riderTarget)' in teleport,
+        'SetNativePosition(actor, riderTarget)' not in teleport,
 
     'teleport avoids frame and orientation mutation':
         'SetInitialFrame' not in teleport and
@@ -89,11 +90,12 @@ checks = {
         'LookDirection =' not in teleport and
         'SetMovementDirection' not in teleport and
         'SetEventControlFlags' not in teleport and
-        'SetActionChannel' not in teleport,
+        'SetActionChannel' not in teleport and
+        'MovementInputVector' not in teleport,
 
     'mounted teleport preserves exact rider offset':
         'riderOffset = actorPosition - mountPosition;' in teleport and
-        'riderTarget = destination + riderOffset;' in teleport and
+        'mountTarget = destination - riderOffset;' in teleport and
         'riderOffsetError=' in teleport,
 
     'teleport notifies live components once':
@@ -108,10 +110,13 @@ checks = {
     'no global Agent singleton path remains':
         'Agent.Main' not in all_runtime,
 
-    'TOR proxy integration is selection only':
-        'selection-only' in tor_stance and
-        'SetActionChannel' not in tor_stance and
-        'SetCurrentActionSpeed' not in tor_stance,
+    'TOR proxy action release is exact and bounded':
+        '[HarmonyPatch(typeof(Agent)' not in tor_stance and
+        'Agent.Main' not in tor_stance and
+        'ReferenceEquals(mission.MainAgent, actor)' in tor_stance and
+        'coordinator.IsTorProxy(currentAbility)' in tor_stance and
+        'actor.SetActionChannel(1, ActionIndexCache.act_none);' in tor_stance and
+        'ReleaseBeforeVoidstepActivation(actor);' in tor_weapon,
 
     'Voidstep direct facing methods are inert':
         'actor.LookDirection =' not in animation and
@@ -134,10 +139,11 @@ checks = {
         'GetProjectedMousePositionOnGround' in ground_aim and
         'ClampToCastCircle' in ground_aim,
 
-    'TOR targeting and weapon ownership still release':
+    'TOR targeting stance and weapon ownership release':
         'var selectedAbility = selection?.SelectedAbility;' in tor_weapon and
         'state.TargetingReleased = true;' in tor_weapon and
         '__instance.CloseTargetingMode();' in tor_weapon and
+        tor_weapon.count('TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation(actor);') >= 2 and
         'if (!state.WeaponStateRestored)' in tor_weapon,
 
     'TOR diagnostics retain weak mission lifetime':
@@ -177,4 +183,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-only time, native position-only teleport, Domino, TOR and Cleave regressions.')
+print(f'Validated {len(checks)} mission-only time, attachment-only teleport, Domino, TOR and Cleave regressions.')
