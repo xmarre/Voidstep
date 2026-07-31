@@ -4,7 +4,7 @@ namespace Voidstep
 {
     /// <summary>
     /// TOR is retained strictly as a selection UI boundary. Runtime testing showed that global
-    /// Agent.Main/action-channel cleanup can escape the live mission and contaminate presentation
+    /// actor/action-channel cleanup can escape the live mission and contaminate presentation
     /// agents. Voidstep therefore performs no TOR-side Agent action, frame or orientation mutation.
     /// </summary>
     internal static class TorProxyCastStanceFix
@@ -22,7 +22,7 @@ namespace Voidstep
 
         internal static void ReleaseBeforeVoidstepActivation()
         {
-            // Deliberately empty. Do not access Agent.Main or mutate any action channel.
+            // Deliberately empty. Do not access a global actor singleton or mutate any action channel.
         }
     }
 
