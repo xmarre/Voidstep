@@ -1,123 +1,118 @@
 using System;
+using System.Collections.Generic;
+using System.Reflection;
+using HarmonyLib;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
-using Voidstep.Core;
 
 namespace Voidstep
 {
+    /// <summary>
+    /// Bend Time deliberately leaves the mission scene at native 1.0x speed. Slowing the whole
+    /// scene and trying to multiply the player back up cannot exempt native player simulation.
+    /// Instead this service owns a mission-local registry and slows only non-player agents and
+    /// newly launched non-player missiles. The main agent and current controlled mount are never
+    /// mutated, so their movement, camera, attacks and animation remain genuinely real-time.
+    /// </summary>
     internal sealed class TimeControlService
     {
-        private const int RequestId = 0x56535450; // "VSTP"
-        // Bannerlord 1.3.15 exposes two native action channels for agents. Its own
-        // SetCurrentActionSpeed call sites use only channel 0 and channel 1.
-        // Writing channel 2 or 3 crosses the native action-channel boundary and can
-        // corrupt mission memory without producing a catchable managed exception.
         private const int NativeActionChannelCount = 2;
+        private const int RefreshBudgetPerTick = 128;
+        private const float MinimumFactor = 0.02f;
+
+        private static readonly PropertyInfo DrivenValuesProperty =
+            AccessTools.Property(typeof(AgentDrivenProperties), "Values");
+        private static readonly MethodInfo PushDrivenPropertiesMethod =
+            AccessTools.Method(typeof(Agent), "UpdateDrivenProperties", new[] { typeof(float[]) });
 
         private readonly Mission _mission;
         private readonly VoidstepLogger _logger;
-        private readonly OwnershipLedger<int> _ownership = new OwnershipLedger<int>();
-        private long _token;
+        private readonly Dictionary<int, SlowState> _states = new Dictionary<int, SlowState>();
+        private readonly List<int> _refreshOrder = new List<int>();
+
+        private Agent _player;
+        private Agent _exemptMount;
+        private bool _active;
         private float _remaining;
         private float _factor = 1f;
         private float _lastApplicationTime;
-        private Agent _player;
-        private Agent _mount;
-        private bool _playerDrivenSnapshotCaptured;
-        private bool _mountDrivenSnapshotCaptured;
-        private bool _playerPropertiesApplied;
-        private bool _mountPropertiesApplied;
-        private bool _actionSpeedsApplied;
-        private bool _actionSpeedFailureLogged;
-        private bool _cleanupPending;
+        private int _refreshCursor;
+        private bool _nativePushFailureLogged;
 
-        private float _originalMaxSpeedMultiplier;
-        private float _originalCombatMaxSpeedMultiplier;
-        private float _originalTopSpeedReachDuration;
-        private float _originalSwingSpeedMultiplier;
-        private float _originalReadySpeedMultiplier;
-        private float _originalReloadSpeed;
-        private float _originalRangedReadySpeedMultiplier;
-        private float _originalRangedReloadSpeedMultiplier;
-        private float _appliedMaxSpeedMultiplier;
-        private float _appliedCombatMaxSpeedMultiplier;
-        private float _appliedTopSpeedReachDuration;
-        private float _appliedSwingSpeedMultiplier;
-        private float _appliedReadySpeedMultiplier;
-        private float _appliedReloadSpeed;
-        private float _appliedRangedReadySpeedMultiplier;
-        private float _appliedRangedReloadSpeedMultiplier;
+        private sealed class SlowState
+        {
+            internal Agent Agent;
+            internal bool Applied;
+            internal bool ActionSpeedOwned;
+            internal bool FailureLogged;
 
-        private float _originalMountSpeed;
-        private float _originalMountManeuver;
-        private float _originalMountDashAcceleration;
-        private float _appliedMountSpeed;
-        private float _appliedMountManeuver;
-        private float _appliedMountDashAcceleration;
+            internal float OriginalMaxSpeed;
+            internal float OriginalCombatMaxSpeed;
+            internal float OriginalTopSpeedReachDuration;
+            internal float OriginalSwingSpeed;
+            internal float OriginalReadySpeed;
+            internal float OriginalReloadSpeed;
+            internal float OriginalRangedReadySpeed;
+            internal float OriginalRangedReloadSpeed;
+            internal float OriginalHandling;
+            internal float OriginalMountSpeed;
+            internal float OriginalMountManeuver;
+            internal float OriginalMountDashAcceleration;
+
+            internal float AppliedMaxSpeed;
+            internal float AppliedCombatMaxSpeed;
+            internal float AppliedTopSpeedReachDuration;
+            internal float AppliedSwingSpeed;
+            internal float AppliedReadySpeed;
+            internal float AppliedReloadSpeed;
+            internal float AppliedRangedReadySpeed;
+            internal float AppliedRangedReloadSpeed;
+            internal float AppliedHandling;
+            internal float AppliedMountSpeed;
+            internal float AppliedMountManeuver;
+            internal float AppliedMountDashAcceleration;
+        }
 
         public TimeControlService(Mission mission, VoidstepLogger logger)
         {
             _mission = mission;
             _logger = logger;
+            ReconcileKnownAgents();
         }
 
-        public bool Active => !_cleanupPending && _token != 0 && _ownership.Owns(_token);
+        public bool Active => _active;
         public float Remaining => _remaining;
+        internal float Factor => _factor;
 
         public bool Begin(Agent player, float requestedFactor, float duration, bool allowCompleteSuspension)
         {
             Release();
-            if (_token != 0)
-            {
-                _logger.Info("Bend Time is waiting for a previous mission speed request to finish cleanup.");
-                return false;
-            }
             if (player == null || !player.IsActive() || duration <= 0f)
                 return false;
 
-            var minimum = allowCompleteSuspension ? 0f : 0.02f;
-            _factor = Math.Max(minimum, Math.Min(1f, requestedFactor));
+            var requestedMinimum = allowCompleteSuspension ? 0.01f : MinimumFactor;
+            _factor = Math.Max(requestedMinimum, Math.Min(1f, requestedFactor));
             _remaining = duration;
             _lastApplicationTime = MBCommon.GetApplicationTime();
             _player = player;
-            _actionSpeedFailureLogged = false;
-            CapturePlayerSnapshot();
-            CaptureCurrentMountSnapshot();
+            _exemptMount = GetActiveMount(player);
+            _active = true;
+            _refreshCursor = 0;
+            _nativePushFailureLogged = false;
 
-            try
-            {
-                float existingFactor;
-                if (_mission.GetRequestedTimeSpeed(RequestId, out existingFactor))
-                {
-                    _logger.Info("Bend Time found an existing mission speed request with its reserved ID; refusing to replace a request it does not own.");
-                    CompleteLocalState();
-                    return false;
-                }
+            ReconcileKnownAgents();
+            ApplyToAllKnownAgents();
 
-                // Bannerlord 1.3.15 removes by request ID but calls RemoveAt(-1)
-                // when the ID is absent. Acquire ownership before adding so the
-                // catch path can safely verify and remove any partially added request.
-                _token = _ownership.Acquire(RequestId);
-                _cleanupPending = false;
-                _mission.AddTimeSpeedRequest(new Mission.TimeSpeedRequest(_factor, RequestId));
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("Bend Time could not acquire its mission speed request.", ex);
-                Release();
-                return false;
-            }
+            _logger.Debug(
+                "Bend Time selective dilation started factor=" + _factor.ToString("0.00") +
+                ", registeredAgents=" + _states.Count +
+                "; scene and controlled player remain native 1.00x.");
+            return true;
         }
 
         public void Tick(float dt)
         {
-            if (_cleanupPending)
-            {
-                TryCompleteRelease();
-                return;
-            }
-            if (!Active)
+            if (!_active)
                 return;
             if (_player == null || !_player.IsActive() || _player.Health <= 0f)
             {
@@ -126,349 +121,439 @@ namespace Voidstep
             }
 
             var now = MBCommon.GetApplicationTime();
-            var realDt = _lastApplicationTime > 0f ? Math.Max(0f, now - _lastApplicationTime) : Math.Max(0f, dt);
+            var realDt = _lastApplicationTime > 0f
+                ? Math.Max(0f, now - _lastApplicationTime)
+                : Math.Max(0f, dt);
             _lastApplicationTime = now;
             _remaining -= realDt;
 
-            RefreshControlledMount();
-            if (VoidstepSettings.Current.PreservePlayerSpeed && _factor > 0.001f && _factor < 0.999f)
-            {
-                var compensation = Math.Min(8f, 1f / _factor);
-                ApplyPlayerCompensation(compensation);
-            }
-            else
-            {
-                RestoreCompensation();
-            }
+            RefreshPlayerExemptions();
+            RefreshBudgetedAgents();
 
             if (_remaining <= 0f)
                 Release();
         }
 
+        public void RegisterAgent(Agent agent)
+        {
+            if (agent == null || agent.Index < 0)
+                return;
+
+            SlowState existing;
+            if (_states.TryGetValue(agent.Index, out existing))
+            {
+                if (ReferenceEquals(existing.Agent, agent))
+                    return;
+                Restore(existing);
+                existing = new SlowState { Agent = agent };
+                _states[agent.Index] = existing;
+            }
+            else
+            {
+                existing = new SlowState { Agent = agent };
+                _states.Add(agent.Index, existing);
+                _refreshOrder.Add(agent.Index);
+            }
+
+            if (_active && !IsExempt(agent))
+                Apply(existing);
+        }
+
+        public void UnregisterAgent(Agent agent)
+        {
+            if (agent == null)
+                return;
+
+            SlowState state;
+            if (!_states.TryGetValue(agent.Index, out state) ||
+                !ReferenceEquals(state.Agent, agent))
+                return;
+
+            Restore(state);
+            _states.Remove(agent.Index);
+            if (ReferenceEquals(agent, _exemptMount))
+                _exemptMount = null;
+        }
+
+        internal void ScaleMissile(Agent shooter, ref float speed)
+        {
+            if (!_active || speed <= 0f || IsExempt(shooter))
+                return;
+            speed = Math.Max(0.01f, speed * _factor);
+        }
+
         public void Release()
         {
-            _remaining = 0f;
-            if (_token == 0)
+            if (!_active)
             {
-                _cleanupPending = false;
-                CompleteLocalState();
+                _remaining = 0f;
+                _factor = 1f;
+                _lastApplicationTime = 0f;
+                _player = null;
+                _exemptMount = null;
                 return;
             }
 
-            _cleanupPending = true;
-            TryCompleteRelease();
-        }
+            _active = false;
+            foreach (var pair in _states)
+                Restore(pair.Value);
 
-        private bool TryCompleteRelease()
-        {
-            if (_token == 0)
-            {
-                _cleanupPending = false;
-                CompleteLocalState();
-                return true;
-            }
-
-            int requestId;
-            if (!_ownership.TryGet(_token, out requestId))
-            {
-                _token = 0;
-                _cleanupPending = false;
-                CompleteLocalState();
-                return true;
-            }
-
-            try
-            {
-                float requestedFactor;
-                if (_mission.GetRequestedTimeSpeed(requestId, out requestedFactor))
-                {
-                    _mission.RemoveTimeSpeedRequest(requestId);
-                    if (_mission.GetRequestedTimeSpeed(requestId, out requestedFactor))
-                        return false;
-                }
-
-                var token = _token;
-                int releasedRequestId;
-                if (!_ownership.Release(token, out releasedRequestId))
-                    return false;
-
-                _token = 0;
-                _cleanupPending = false;
-                CompleteLocalState();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug("Owned time request cleanup failed; ownership retained for retry: " + ex.Message);
-                return false;
-            }
-        }
-
-        private void CapturePlayerSnapshot()
-        {
-            _playerDrivenSnapshotCaptured = false;
-            try
-            {
-                var driven = _player?.AgentDrivenProperties;
-                if (driven == null) return;
-                _originalMaxSpeedMultiplier = driven.MaxSpeedMultiplier;
-                _originalCombatMaxSpeedMultiplier = driven.CombatMaxSpeedMultiplier;
-                _originalTopSpeedReachDuration = driven.TopSpeedReachDuration;
-                _originalSwingSpeedMultiplier = driven.SwingSpeedMultiplier;
-                _originalReadySpeedMultiplier = driven.ThrustOrRangedReadySpeedMultiplier;
-                _originalReloadSpeed = driven.ReloadSpeed;
-                _originalRangedReadySpeedMultiplier = driven.BipedalRangedReadySpeedMultiplier;
-                _originalRangedReloadSpeedMultiplier = driven.BipedalRangedReloadSpeedMultiplier;
-                _playerDrivenSnapshotCaptured = true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug("Bend Time player-speed snapshot unavailable: " + ex.Message);
-            }
-        }
-
-        private void CaptureCurrentMountSnapshot()
-        {
-            var mount = _player?.MountAgent;
-            if (mount != null && !mount.IsActive()) mount = null;
-            _mount = mount;
-            TryCaptureMountSnapshot(mount, "mount-speed");
-        }
-
-        private void TryCaptureMountSnapshot(Agent mount, string label)
-        {
-            _mountDrivenSnapshotCaptured = false;
-            if (mount == null) return;
-
-            try
-            {
-                var driven = mount.AgentDrivenProperties;
-                if (driven == null) return;
-                _originalMountSpeed = driven.MountSpeed;
-                _originalMountManeuver = driven.MountManeuver;
-                _originalMountDashAcceleration = driven.MountDashAccelerationMultiplier;
-                _mountDrivenSnapshotCaptured = true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug($"Bend Time {label} snapshot unavailable: {ex.Message}");
-            }
-        }
-
-        private void RefreshControlledMount()
-        {
-            var current = _player?.MountAgent;
-            if (current != null && !current.IsActive()) current = null;
-            if (ReferenceEquals(current, _mount)) return;
-
-            RestoreMountProperties();
-            _mount = current;
-            TryCaptureMountSnapshot(current, "replacement-mount");
-        }
-
-        private void ApplyPlayerCompensation(float compensation)
-        {
-            if (_playerDrivenSnapshotCaptured)
-            {
-                try
-                {
-                    var driven = _player.AgentDrivenProperties;
-                    RefreshPlayerBaselinesAfterExternalUpdate(driven);
-                    _appliedMaxSpeedMultiplier = _originalMaxSpeedMultiplier * compensation;
-                    _appliedCombatMaxSpeedMultiplier = _originalCombatMaxSpeedMultiplier * compensation;
-                    _appliedTopSpeedReachDuration = Math.Max(0.01f, _originalTopSpeedReachDuration / compensation);
-                    _appliedSwingSpeedMultiplier = _originalSwingSpeedMultiplier * compensation;
-                    _appliedReadySpeedMultiplier = _originalReadySpeedMultiplier * compensation;
-                    _appliedReloadSpeed = _originalReloadSpeed * compensation;
-                    _appliedRangedReadySpeedMultiplier = _originalRangedReadySpeedMultiplier * compensation;
-                    _appliedRangedReloadSpeedMultiplier = _originalRangedReloadSpeedMultiplier * compensation;
-                    _playerPropertiesApplied = true;
-                    driven.MaxSpeedMultiplier = _appliedMaxSpeedMultiplier;
-                    driven.CombatMaxSpeedMultiplier = _appliedCombatMaxSpeedMultiplier;
-                    driven.TopSpeedReachDuration = _appliedTopSpeedReachDuration;
-                    driven.SwingSpeedMultiplier = _appliedSwingSpeedMultiplier;
-                    driven.ThrustOrRangedReadySpeedMultiplier = _appliedReadySpeedMultiplier;
-                    driven.ReloadSpeed = _appliedReloadSpeed;
-                    driven.BipedalRangedReadySpeedMultiplier = _appliedRangedReadySpeedMultiplier;
-                    driven.BipedalRangedReloadSpeedMultiplier = _appliedRangedReloadSpeedMultiplier;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Debug("Bend Time player-property compensation failed: " + ex.Message);
-                }
-            }
-
-            if (_mountDrivenSnapshotCaptured && _mount != null && _mount.IsActive())
-            {
-                try
-                {
-                    var driven = _mount.AgentDrivenProperties;
-                    RefreshMountBaselinesAfterExternalUpdate(driven);
-                    _appliedMountSpeed = _originalMountSpeed * compensation;
-                    _appliedMountManeuver = _originalMountManeuver * compensation;
-                    _appliedMountDashAcceleration = _originalMountDashAcceleration * compensation;
-                    _mountPropertiesApplied = true;
-                    driven.MountSpeed = _appliedMountSpeed;
-                    driven.MountManeuver = _appliedMountManeuver;
-                    driven.MountDashAccelerationMultiplier = _appliedMountDashAcceleration;
-                }
-                catch (Exception ex)
-                {
-                    _logger.Debug("Bend Time mount-property compensation failed: " + ex.Message);
-                }
-            }
-
-            SetActionSpeeds(compensation);
-        }
-
-        private void RefreshPlayerBaselinesAfterExternalUpdate(AgentDrivenProperties driven)
-        {
-            if (!_playerPropertiesApplied) return;
-            if (!Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier))
-                _originalMaxSpeedMultiplier = driven.MaxSpeedMultiplier;
-            if (!Approximately(driven.CombatMaxSpeedMultiplier, _appliedCombatMaxSpeedMultiplier))
-                _originalCombatMaxSpeedMultiplier = driven.CombatMaxSpeedMultiplier;
-            if (!Approximately(driven.TopSpeedReachDuration, _appliedTopSpeedReachDuration))
-                _originalTopSpeedReachDuration = driven.TopSpeedReachDuration;
-            if (!Approximately(driven.SwingSpeedMultiplier, _appliedSwingSpeedMultiplier))
-                _originalSwingSpeedMultiplier = driven.SwingSpeedMultiplier;
-            if (!Approximately(driven.ThrustOrRangedReadySpeedMultiplier, _appliedReadySpeedMultiplier))
-                _originalReadySpeedMultiplier = driven.ThrustOrRangedReadySpeedMultiplier;
-            if (!Approximately(driven.ReloadSpeed, _appliedReloadSpeed))
-                _originalReloadSpeed = driven.ReloadSpeed;
-            if (!Approximately(driven.BipedalRangedReadySpeedMultiplier, _appliedRangedReadySpeedMultiplier))
-                _originalRangedReadySpeedMultiplier = driven.BipedalRangedReadySpeedMultiplier;
-            if (!Approximately(driven.BipedalRangedReloadSpeedMultiplier, _appliedRangedReloadSpeedMultiplier))
-                _originalRangedReloadSpeedMultiplier = driven.BipedalRangedReloadSpeedMultiplier;
-        }
-
-        private void RefreshMountBaselinesAfterExternalUpdate(AgentDrivenProperties driven)
-        {
-            if (!_mountPropertiesApplied) return;
-            if (!Approximately(driven.MountSpeed, _appliedMountSpeed))
-                _originalMountSpeed = driven.MountSpeed;
-            if (!Approximately(driven.MountManeuver, _appliedMountManeuver))
-                _originalMountManeuver = driven.MountManeuver;
-            if (!Approximately(driven.MountDashAccelerationMultiplier, _appliedMountDashAcceleration))
-                _originalMountDashAcceleration = driven.MountDashAccelerationMultiplier;
-        }
-
-        private void RestoreCompensation()
-        {
-            RestorePlayerProperties();
-            RestoreMountProperties();
-            RestoreActionSpeeds();
-        }
-
-        private void RestorePlayerProperties()
-        {
-            if (!_playerPropertiesApplied) return;
-            try
-            {
-                if (_playerDrivenSnapshotCaptured && _player != null && _player.IsActive())
-                {
-                    var driven = _player.AgentDrivenProperties;
-                    if (Approximately(driven.MaxSpeedMultiplier, _appliedMaxSpeedMultiplier)) driven.MaxSpeedMultiplier = _originalMaxSpeedMultiplier;
-                    if (Approximately(driven.CombatMaxSpeedMultiplier, _appliedCombatMaxSpeedMultiplier)) driven.CombatMaxSpeedMultiplier = _originalCombatMaxSpeedMultiplier;
-                    if (Approximately(driven.TopSpeedReachDuration, _appliedTopSpeedReachDuration)) driven.TopSpeedReachDuration = _originalTopSpeedReachDuration;
-                    if (Approximately(driven.SwingSpeedMultiplier, _appliedSwingSpeedMultiplier)) driven.SwingSpeedMultiplier = _originalSwingSpeedMultiplier;
-                    if (Approximately(driven.ThrustOrRangedReadySpeedMultiplier, _appliedReadySpeedMultiplier)) driven.ThrustOrRangedReadySpeedMultiplier = _originalReadySpeedMultiplier;
-                    if (Approximately(driven.ReloadSpeed, _appliedReloadSpeed)) driven.ReloadSpeed = _originalReloadSpeed;
-                    if (Approximately(driven.BipedalRangedReadySpeedMultiplier, _appliedRangedReadySpeedMultiplier)) driven.BipedalRangedReadySpeedMultiplier = _originalRangedReadySpeedMultiplier;
-                    if (Approximately(driven.BipedalRangedReloadSpeedMultiplier, _appliedRangedReloadSpeedMultiplier)) driven.BipedalRangedReloadSpeedMultiplier = _originalRangedReloadSpeedMultiplier;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug("Player driven-property cleanup failed: " + ex.Message);
-            }
-            finally
-            {
-                _playerPropertiesApplied = false;
-            }
-        }
-
-        private void RestoreMountProperties()
-        {
-            if (!_mountPropertiesApplied) return;
-            try
-            {
-                if (_mountDrivenSnapshotCaptured && _mount != null && _mount.IsActive())
-                {
-                    var driven = _mount.AgentDrivenProperties;
-                    if (Approximately(driven.MountSpeed, _appliedMountSpeed)) driven.MountSpeed = _originalMountSpeed;
-                    if (Approximately(driven.MountManeuver, _appliedMountManeuver)) driven.MountManeuver = _originalMountManeuver;
-                    if (Approximately(driven.MountDashAccelerationMultiplier, _appliedMountDashAcceleration)) driven.MountDashAccelerationMultiplier = _originalMountDashAcceleration;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug("Mount driven-property cleanup failed: " + ex.Message);
-            }
-            finally
-            {
-                _mountPropertiesApplied = false;
-            }
-        }
-
-        private void SetActionSpeeds(float speed)
-        {
-            if (_player == null || !_player.IsActive()) return;
-            for (var channel = 0; channel < NativeActionChannelCount; channel++)
-            {
-                try
-                {
-                    _player.SetCurrentActionSpeed(channel, speed);
-                    _actionSpeedsApplied = true;
-                }
-                catch (Exception ex)
-                {
-                    if (_actionSpeedFailureLogged) continue;
-                    _actionSpeedFailureLogged = true;
-                    _logger.Debug($"Player action-speed channel {channel} unavailable: {ex.Message}");
-                }
-            }
-        }
-
-        private void RestoreActionSpeeds()
-        {
-            if (!_actionSpeedsApplied) return;
-            if (_player != null && _player.IsActive())
-            {
-                for (var channel = 0; channel < NativeActionChannelCount; channel++)
-                {
-                    try { _player.SetCurrentActionSpeed(channel, 1f); }
-                    catch (Exception ex)
-                    {
-                        if (_actionSpeedFailureLogged) continue;
-                        _actionSpeedFailureLogged = true;
-                        _logger.Debug($"Player action-speed cleanup channel {channel} unavailable: {ex.Message}");
-                    }
-                }
-            }
-            _actionSpeedsApplied = false;
-        }
-
-        private void CompleteLocalState()
-        {
-            RestoreCompensation();
-            _playerDrivenSnapshotCaptured = false;
-            _mountDrivenSnapshotCaptured = false;
-            _actionSpeedFailureLogged = false;
-            _player = null;
-            _mount = null;
-            _factor = 1f;
             _remaining = 0f;
+            _factor = 1f;
             _lastApplicationTime = 0f;
+            _player = null;
+            _exemptMount = null;
+            _refreshCursor = 0;
+            _logger.Debug("Bend Time selective dilation released; all owned agent state restored.");
         }
-
-        private static bool Approximately(float left, float right) => Math.Abs(left - right) <= 0.001f * Math.Max(1f, Math.Max(Math.Abs(left), Math.Abs(right)));
 
         public void Cleanup()
         {
             Release();
-            if (_token == 0)
-                _ownership.Clear();
+            _states.Clear();
+            _refreshOrder.Clear();
+            _refreshCursor = 0;
+        }
+
+        private void ReconcileKnownAgents()
+        {
+            if (_mission == null)
+                return;
+
+            var agents = _mission.AllAgents;
+            for (var i = 0; i < agents.Count; i++)
+                RegisterAgent(agents[i]);
+        }
+
+        private void ApplyToAllKnownAgents()
+        {
+            foreach (var pair in _states)
+            {
+                var state = pair.Value;
+                if (state?.Agent == null || IsExempt(state.Agent))
+                {
+                    Restore(state);
+                    continue;
+                }
+                Apply(state);
+            }
+        }
+
+        private void RefreshPlayerExemptions()
+        {
+            var currentMount = GetActiveMount(_player);
+            if (ReferenceEquals(currentMount, _exemptMount))
+                return;
+
+            var previousMount = _exemptMount;
+            _exemptMount = currentMount;
+
+            SlowState state;
+            if (currentMount != null && _states.TryGetValue(currentMount.Index, out state))
+                Restore(state);
+            if (previousMount != null && previousMount.IsActive() &&
+                _states.TryGetValue(previousMount.Index, out state) && !IsExempt(previousMount))
+                Apply(state);
+        }
+
+        private void RefreshBudgetedAgents()
+        {
+            var count = _refreshOrder.Count;
+            if (count == 0)
+                return;
+
+            var inspected = 0;
+            var refreshed = 0;
+            while (inspected < count && refreshed < RefreshBudgetPerTick)
+            {
+                if (_refreshCursor >= count)
+                    _refreshCursor = 0;
+                var index = _refreshOrder[_refreshCursor++];
+                inspected++;
+
+                SlowState state;
+                if (!_states.TryGetValue(index, out state) || state?.Agent == null)
+                    continue;
+
+                var agent = state.Agent;
+                if (!agent.IsActive())
+                {
+                    _states.Remove(index);
+                    continue;
+                }
+
+                if (IsExempt(agent))
+                    Restore(state);
+                else
+                    Apply(state);
+                refreshed++;
+            }
+        }
+
+        private bool IsExempt(Agent agent)
+        {
+            if (agent == null)
+                return false;
+            return ReferenceEquals(agent, _player) || ReferenceEquals(agent, _exemptMount);
+        }
+
+        private void Apply(SlowState state)
+        {
+            var agent = state?.Agent;
+            if (agent == null || !agent.IsActive() || IsExempt(agent))
+            {
+                Restore(state);
+                return;
+            }
+
+            try
+            {
+                var driven = agent.AgentDrivenProperties;
+                if (driven != null)
+                {
+                    var needsPush = !state.Applied;
+                    if (!state.Applied)
+                    {
+                        try { agent.UpdateAgentProperties(); }
+                        catch { }
+                        Capture(state, driven);
+                    }
+                    else
+                    {
+                        needsPush = RefreshBaselines(state, driven);
+                    }
+
+                    if (needsPush)
+                    {
+                        ApplyDrivenValues(state, driven);
+                        PushDrivenProperties(agent, driven);
+                    }
+                }
+
+                for (var channel = 0; channel < NativeActionChannelCount; channel++)
+                    agent.SetCurrentActionSpeed(channel, _factor);
+                state.ActionSpeedOwned = true;
+                state.Applied = true;
+                state.FailureLogged = false;
+            }
+            catch (Exception ex)
+            {
+                if (!state.FailureLogged)
+                {
+                    state.FailureLogged = true;
+                    _logger.Debug(
+                        "Bend Time could not slow mission agent=" + agent.Index +
+                        " safely: " + ex.Message);
+                }
+            }
+        }
+
+        private void Restore(SlowState state)
+        {
+            if (state == null || (!state.Applied && !state.ActionSpeedOwned))
+                return;
+
+            var agent = state.Agent;
+            try
+            {
+                if (agent != null && agent.IsActive())
+                {
+                    var driven = agent.AgentDrivenProperties;
+                    if (driven != null && state.Applied)
+                    {
+                        var changed = RestoreDrivenValues(state, driven);
+                        if (changed)
+                            PushDrivenProperties(agent, driven);
+                    }
+
+                    if (state.ActionSpeedOwned)
+                    {
+                        for (var channel = 0; channel < NativeActionChannelCount; channel++)
+                            agent.SetCurrentActionSpeed(channel, 1f);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!state.FailureLogged)
+                {
+                    state.FailureLogged = true;
+                    _logger.Debug(
+                        "Bend Time agent restoration failed safely for index=" +
+                        (agent != null ? agent.Index.ToString() : "none") + ": " + ex.Message);
+                }
+            }
+            finally
+            {
+                state.Applied = false;
+                state.ActionSpeedOwned = false;
+            }
+        }
+
+        private static void Capture(SlowState state, AgentDrivenProperties driven)
+        {
+            state.OriginalMaxSpeed = driven.MaxSpeedMultiplier;
+            state.OriginalCombatMaxSpeed = driven.CombatMaxSpeedMultiplier;
+            state.OriginalTopSpeedReachDuration = driven.TopSpeedReachDuration;
+            state.OriginalSwingSpeed = driven.SwingSpeedMultiplier;
+            state.OriginalReadySpeed = driven.ThrustOrRangedReadySpeedMultiplier;
+            state.OriginalReloadSpeed = driven.ReloadSpeed;
+            state.OriginalRangedReadySpeed = driven.BipedalRangedReadySpeedMultiplier;
+            state.OriginalRangedReloadSpeed = driven.BipedalRangedReloadSpeedMultiplier;
+            state.OriginalHandling = driven.HandlingMultiplier;
+            state.OriginalMountSpeed = driven.MountSpeed;
+            state.OriginalMountManeuver = driven.MountManeuver;
+            state.OriginalMountDashAcceleration = driven.MountDashAccelerationMultiplier;
+        }
+
+        private static bool RefreshBaselines(SlowState state, AgentDrivenProperties driven)
+        {
+            var changed = false;
+            changed |= Refresh(ref state.OriginalMaxSpeed, driven.MaxSpeedMultiplier, state.AppliedMaxSpeed);
+            changed |= Refresh(ref state.OriginalCombatMaxSpeed, driven.CombatMaxSpeedMultiplier, state.AppliedCombatMaxSpeed);
+            changed |= Refresh(ref state.OriginalTopSpeedReachDuration, driven.TopSpeedReachDuration, state.AppliedTopSpeedReachDuration);
+            changed |= Refresh(ref state.OriginalSwingSpeed, driven.SwingSpeedMultiplier, state.AppliedSwingSpeed);
+            changed |= Refresh(ref state.OriginalReadySpeed, driven.ThrustOrRangedReadySpeedMultiplier, state.AppliedReadySpeed);
+            changed |= Refresh(ref state.OriginalReloadSpeed, driven.ReloadSpeed, state.AppliedReloadSpeed);
+            changed |= Refresh(ref state.OriginalRangedReadySpeed, driven.BipedalRangedReadySpeedMultiplier, state.AppliedRangedReadySpeed);
+            changed |= Refresh(ref state.OriginalRangedReloadSpeed, driven.BipedalRangedReloadSpeedMultiplier, state.AppliedRangedReloadSpeed);
+            changed |= Refresh(ref state.OriginalHandling, driven.HandlingMultiplier, state.AppliedHandling);
+            changed |= Refresh(ref state.OriginalMountSpeed, driven.MountSpeed, state.AppliedMountSpeed);
+            changed |= Refresh(ref state.OriginalMountManeuver, driven.MountManeuver, state.AppliedMountManeuver);
+            changed |= Refresh(ref state.OriginalMountDashAcceleration, driven.MountDashAccelerationMultiplier, state.AppliedMountDashAcceleration);
+            return changed;
+        }
+
+        private void ApplyDrivenValues(SlowState state, AgentDrivenProperties driven)
+        {
+            var inverse = 1f / Math.Max(MinimumFactor, _factor);
+            state.AppliedMaxSpeed = state.OriginalMaxSpeed * _factor;
+            state.AppliedCombatMaxSpeed = state.OriginalCombatMaxSpeed * _factor;
+            state.AppliedTopSpeedReachDuration = Math.Max(0.01f, state.OriginalTopSpeedReachDuration * inverse);
+            state.AppliedSwingSpeed = state.OriginalSwingSpeed * _factor;
+            state.AppliedReadySpeed = state.OriginalReadySpeed * _factor;
+            state.AppliedReloadSpeed = state.OriginalReloadSpeed * _factor;
+            state.AppliedRangedReadySpeed = state.OriginalRangedReadySpeed * _factor;
+            state.AppliedRangedReloadSpeed = state.OriginalRangedReloadSpeed * _factor;
+            state.AppliedHandling = state.OriginalHandling * _factor;
+            state.AppliedMountSpeed = state.OriginalMountSpeed * _factor;
+            state.AppliedMountManeuver = state.OriginalMountManeuver * _factor;
+            state.AppliedMountDashAcceleration = state.OriginalMountDashAcceleration * _factor;
+
+            driven.MaxSpeedMultiplier = state.AppliedMaxSpeed;
+            driven.CombatMaxSpeedMultiplier = state.AppliedCombatMaxSpeed;
+            driven.TopSpeedReachDuration = state.AppliedTopSpeedReachDuration;
+            driven.SwingSpeedMultiplier = state.AppliedSwingSpeed;
+            driven.ThrustOrRangedReadySpeedMultiplier = state.AppliedReadySpeed;
+            driven.ReloadSpeed = state.AppliedReloadSpeed;
+            driven.BipedalRangedReadySpeedMultiplier = state.AppliedRangedReadySpeed;
+            driven.BipedalRangedReloadSpeedMultiplier = state.AppliedRangedReloadSpeed;
+            driven.HandlingMultiplier = state.AppliedHandling;
+            driven.MountSpeed = state.AppliedMountSpeed;
+            driven.MountManeuver = state.AppliedMountManeuver;
+            driven.MountDashAccelerationMultiplier = state.AppliedMountDashAcceleration;
+        }
+
+        private static bool RestoreDrivenValues(SlowState state, AgentDrivenProperties driven)
+        {
+            var changed = false;
+            changed |= Restore(ref driven.MaxSpeedMultiplier, state.AppliedMaxSpeed, state.OriginalMaxSpeed);
+            changed |= Restore(ref driven.CombatMaxSpeedMultiplier, state.AppliedCombatMaxSpeed, state.OriginalCombatMaxSpeed);
+            changed |= Restore(ref driven.TopSpeedReachDuration, state.AppliedTopSpeedReachDuration, state.OriginalTopSpeedReachDuration);
+            changed |= Restore(ref driven.SwingSpeedMultiplier, state.AppliedSwingSpeed, state.OriginalSwingSpeed);
+            changed |= Restore(ref driven.ThrustOrRangedReadySpeedMultiplier, state.AppliedReadySpeed, state.OriginalReadySpeed);
+            changed |= Restore(ref driven.ReloadSpeed, state.AppliedReloadSpeed, state.OriginalReloadSpeed);
+            changed |= Restore(ref driven.BipedalRangedReadySpeedMultiplier, state.AppliedRangedReadySpeed, state.OriginalRangedReadySpeed);
+            changed |= Restore(ref driven.BipedalRangedReloadSpeedMultiplier, state.AppliedRangedReloadSpeed, state.OriginalRangedReloadSpeed);
+            changed |= Restore(ref driven.HandlingMultiplier, state.AppliedHandling, state.OriginalHandling);
+            changed |= Restore(ref driven.MountSpeed, state.AppliedMountSpeed, state.OriginalMountSpeed);
+            changed |= Restore(ref driven.MountManeuver, state.AppliedMountManeuver, state.OriginalMountManeuver);
+            changed |= Restore(ref driven.MountDashAccelerationMultiplier, state.AppliedMountDashAcceleration, state.OriginalMountDashAcceleration);
+            return changed;
+        }
+
+        private void PushDrivenProperties(Agent agent, AgentDrivenProperties driven)
+        {
+            if (DrivenValuesProperty == null || PushDrivenPropertiesMethod == null)
+            {
+                if (!_nativePushFailureLogged)
+                {
+                    _nativePushFailureLogged = true;
+                    _logger.Debug("Bend Time native driven-property push API was unavailable.");
+                }
+                return;
+            }
+
+            try
+            {
+                var values = DrivenValuesProperty.GetValue(driven, null) as float[];
+                if (values == null)
+                    throw new InvalidOperationException("AgentDrivenProperties.Values was unavailable.");
+                PushDrivenPropertiesMethod.Invoke(agent, new object[] { values });
+                _nativePushFailureLogged = false;
+            }
+            catch (Exception ex)
+            {
+                if (_nativePushFailureLogged)
+                    return;
+                _nativePushFailureLogged = true;
+                _logger.Debug("Bend Time native driven-property push failed safely: " + Unwrap(ex).Message);
+            }
+        }
+
+        private static Agent GetActiveMount(Agent player)
+        {
+            var mount = player?.MountAgent;
+            return mount != null && mount.IsActive() ? mount : null;
+        }
+
+        private static bool Refresh(ref float original, float current, float applied)
+        {
+            if (Approximately(current, applied))
+                return false;
+            original = current;
+            return true;
+        }
+
+        private static bool Restore(ref float current, float applied, float original)
+        {
+            if (!Approximately(current, applied))
+                return false;
+            current = original;
+            return true;
+        }
+
+        private static bool Approximately(float left, float right)
+        {
+            return Math.Abs(left - right) <=
+                   0.001f * Math.Max(1f, Math.Max(Math.Abs(left), Math.Abs(right)));
+        }
+
+        private static Exception Unwrap(Exception exception)
+        {
+            while (exception is TargetInvocationException invocation && invocation.InnerException != null)
+                exception = invocation.InnerException;
+            return exception;
+        }
+    }
+
+    [HarmonyPatch(typeof(Mission), "AddMissileAux")]
+    internal static class BendTimeRegularMissileSpeedPatch
+    {
+        private static void Prefix(Mission __instance, Agent shooterAgent, ref float speed)
+        {
+            var service = __instance?.GetMissionBehavior<VoidstepMissionBehavior>()?.TimeControl;
+            service?.ScaleMissile(shooterAgent, ref speed);
+        }
+    }
+
+    [HarmonyPatch(typeof(Mission), "AddMissileSingleUsageAux")]
+    internal static class BendTimeSingleUsageMissileSpeedPatch
+    {
+        private static void Prefix(Mission __instance, Agent shooterAgent, ref float speed)
+        {
+            var service = __instance?.GetMissionBehavior<VoidstepMissionBehavior>()?.TimeControl;
+            service?.ScaleMissile(shooterAgent, ref speed);
         }
     }
 }
