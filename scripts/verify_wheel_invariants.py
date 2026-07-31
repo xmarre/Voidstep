@@ -128,12 +128,15 @@ checks = {
         'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")' in tor and
         'Enum.ToObject' not in tor,
 
-    'TOR presentation integration is selection only':
-        'selection-only' in tor_stance and
+    'TOR stance cleanup affects only current Voidstep proxy actor':
         'Agent.Main' not in tor_stance and
-        'SetActionChannel' not in tor_stance and
-        'SetCurrentActionSpeed' not in tor_stance and
-        'LookDirection =' not in tor_stance,
+        '[HarmonyPatch(typeof(Agent)' not in tor_stance and
+        'var mission = Mission.Current;' in tor_stance and
+        'ReferenceEquals(mission.MainAgent, actor)' in tor_stance and
+        'coordinator.IsTorProxy(currentAbility)' in tor_stance and
+        'actor.SetActionChannel(1, ActionIndexCache.act_none);' in tor_stance and
+        'LookDirection =' not in tor_stance and
+        'SetMovementDirection' not in tor_stance,
 
     'Blink and Cleave use one scoped native teleport boundary':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
@@ -149,13 +152,14 @@ checks = {
         'LookDirection =' not in teleport and
         'SetMovementDirection' not in teleport and
         'SetEventControlFlags' not in teleport and
-        'SetActionChannel' not in teleport,
+        'SetActionChannel' not in teleport and
+        'MovementInputVector' not in teleport,
 
-    'mounted teleport preserves rider offset':
+    'mounted teleport moves through one attachment origin':
         'riderOffset = actorPosition - mountPosition;' in teleport and
-        'riderTarget = destination + riderOffset;' in teleport and
+        'mountTarget = destination - riderOffset;' in teleport and
         'SetNativePosition(mount, mountTarget)' in teleport and
-        'SetNativePosition(actor, riderTarget)' in teleport,
+        'SetNativePosition(actor, riderTarget)' not in teleport,
 
     'no global Agent Harmony target exists':
         '[HarmonyPatch(typeof(Agent)' not in all_runtime and
@@ -199,4 +203,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} focused wheel, TOR session and native-teleport invariants.')
+print(f'Validated {len(checks)} focused wheel, TOR session, scoped stance and attachment-teleport invariants.')
