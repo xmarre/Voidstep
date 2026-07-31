@@ -104,6 +104,10 @@ namespace Voidstep
                 if (!__instance.OwnsTargeting)
                     return;
 
+                // TOR's DisableAbilityMode does not clear act_spellcasting_idle from channel 1.
+                // Remove the proxy-owned stance before closing state 2 so neither Blink nor
+                // Cleave inherits a turn/stuck action into the actual Voidstep cast.
+                TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation();
                 __instance.CloseTargetingMode();
                 state.TargetingReleased = true;
             }
