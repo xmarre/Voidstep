@@ -18,6 +18,8 @@ namespace Voidstep
         private static readonly VoidstepLogger FallbackLogger = new VoidstepLogger();
         private static readonly FieldInfo NativeAgentApiField =
             AccessTools.Field(typeof(MBAPI), "IMBAgent");
+        private static readonly MethodInfo NativeGetPtrMethod =
+            AccessTools.Method(typeof(Agent), "GetPtr", Type.EmptyTypes);
         private static readonly MethodInfo NativeSetPositionMethod =
             NativeAgentApiField == null
                 ? null
@@ -111,8 +113,8 @@ namespace Voidstep
 
         private static bool NativePositionApiAvailable()
         {
-            return NativeAgentApiField != null && NativeSetPositionMethod != null &&
-                   NativeAgentApiField.GetValue(null) != null;
+            return NativeAgentApiField != null && NativeGetPtrMethod != null &&
+                   NativeSetPositionMethod != null && NativeAgentApiField.GetValue(null) != null;
         }
 
         private static bool SetNativePosition(Agent agent, Vec3 position)
@@ -124,7 +126,11 @@ namespace Voidstep
             if (api == null)
                 return false;
 
-            var arguments = new object[] { agent.GetPtr(), position };
+            var pointerValue = NativeGetPtrMethod.Invoke(agent, null);
+            if (!(pointerValue is UIntPtr pointer) || pointer.Equals(UIntPtr.Zero))
+                return false;
+
+            var arguments = new object[] { pointer, position };
             NativeSetPositionMethod.Invoke(api, arguments);
             return true;
         }
