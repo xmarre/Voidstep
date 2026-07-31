@@ -112,7 +112,9 @@ namespace Voidstep
             if (!TryGetCurrentVoidstepProxy(__instance, out var actor))
                 return true;
 
-            NeutralizeProxyFlags(__instance);
+            // Keep TOR in state 2 so the wheel adapter can still detect and select the proxy.
+            // Only remove the Spell/Prayer presentation ownership.
+            NeutralizeProxyFlags(__instance, false);
             ClearProxyCastAction(actor, "during TOR targeting");
             return false;
         }
@@ -124,7 +126,7 @@ namespace Voidstep
 
             // EnableTargetingMode sets these for Spell/Prayer templates before the next
             // animation tick. Voidstep owns its own presentation and must not inherit them.
-            NeutralizeProxyFlags(__instance);
+            NeutralizeProxyFlags(__instance, false);
             ClearProxyCastAction(actor, "after TOR targeting opened");
         }
 
@@ -133,7 +135,7 @@ namespace Voidstep
             if (!TryGetCurrentVoidstepProxy(__instance, out var actor))
                 return;
 
-            NeutralizeProxyFlags(__instance);
+            NeutralizeProxyFlags(__instance, true);
             ClearProxyCastAction(actor, "after TOR targeting closed");
         }
 
@@ -159,7 +161,7 @@ namespace Voidstep
             }
         }
 
-        private static void NeutralizeProxyFlags(object logic)
+        private static void NeutralizeProxyFlags(object logic, bool clearTargetingState)
         {
             if (logic == null)
                 return;
@@ -170,10 +172,13 @@ namespace Voidstep
                 _shouldSheathWeaponField?.SetValue(logic, false);
                 _disableCombatActionsAfterCastField?.SetValue(logic, false);
 
-                // DisableAbilityMode normally owns the state transition. This assignment is
-                // only a guard for proxy cleanup paths where TOR retained state 2 for a tick.
-                if (_currentStateField != null && Convert.ToInt32(_currentStateField.GetValue(logic)) == 2)
+                // DisableAbilityMode normally owns this transition. This is only a guard
+                // for a stale proxy state after TOR has already been asked to close.
+                if (clearTargetingState && _currentStateField != null &&
+                    Convert.ToInt32(_currentStateField.GetValue(logic)) == 2)
+                {
                     _currentStateField.SetValue(logic, 0);
+                }
             }
             catch (Exception ex)
             {
