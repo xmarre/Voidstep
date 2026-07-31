@@ -8,98 +8,17 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Replaces the old destination-occupancy bypass with mounted-aware clearance. A teleport
-    /// into another live collision capsule can make Bannerlord's native position operation solve
-    /// the overlap by rotating the mount, so occupied destinations must be rejected before the
-    /// native move is attempted.
-    /// </summary>
-    [HarmonyPatch(typeof(TeleportValidator), "IsOccupied")]
-    internal static class ScopedTeleportOccupancyPatch
-    {
-        private const float RiderRadius = 0.45f;
-        private const float HumanRadius = 0.45f;
-        private const float MountRadius = 1.20f;
-        private const float ClearanceMargin = 0.15f;
-
-        [HarmonyPriority(Priority.First)]
-        private static bool Prefix(
-            Mission ____mission,
-            MBList<Agent> ____nearby,
-            Agent actor,
-            Vec3 candidate,
-            ref bool __result)
-        {
-            __result = IsOccupied(____mission, ____nearby, actor, candidate);
-            return false;
-        }
-
-        private static bool IsOccupied(
-            Mission mission,
-            MBList<Agent> nearby,
-            Agent actor,
-            Vec3 riderCandidate)
-        {
-            if (mission == null || nearby == null || actor == null)
-                return true;
-
-            var mount = actor.MountAgent;
-            var mounted = mount != null && mount.IsActive();
-            var mountCandidate = riderCandidate;
-            if (mounted)
-            {
-                var riderOffset = actor.Position - mount.Position;
-                mountCandidate = riderCandidate - riderOffset;
-            }
-
-            nearby.Clear();
-            mission.GetNearbyAgents(riderCandidate.AsVec2, mounted ? 4.0f : 1.75f, nearby);
-            for (var i = 0; i < nearby.Count; i++)
-            {
-                var other = nearby[i];
-                if (other == null || !other.IsActive() ||
-                    ReferenceEquals(other, actor) || ReferenceEquals(other, mount) ||
-                    ReferenceEquals(other, actor.RiderAgent))
-                {
-                    continue;
-                }
-
-                var otherRadius = other.IsMount ? MountRadius : HumanRadius;
-                if (Overlaps(riderCandidate, RiderRadius, other, otherRadius))
-                    return true;
-                if (mounted && Overlaps(mountCandidate, MountRadius, other, otherRadius))
-                    return true;
-            }
-
-            return false;
-        }
-
-        private static bool Overlaps(
-            Vec3 candidate,
-            float candidateRadius,
-            Agent other,
-            float otherRadius)
-        {
-            var maximumVerticalDelta = other.IsMount ? 2.6f : 2.1f;
-            if (Math.Abs(other.Position.z - candidate.z) > maximumVerticalDelta)
-                return false;
-
-            var dx = other.Position.x - candidate.x;
-            var dy = other.Position.y - candidate.y;
-            var minimumDistance = candidateRadius + otherRadius + ClearanceMargin;
-            return dx * dx + dy * dy < minimumDistance * minimumDistance;
-        }
-    }
-
-    /// <summary>
     /// Bannerlord 1.3.15 can rotate a mount inside IMBAgent.SetPosition before any managed
-    /// teleport callback runs. This guard captures only the current mission main agent and its
-    /// current mount, restores their pre-cast native movement/look directions immediately, and
-    /// repeats that restoration for two owned mission ticks while native collision attachment
-    /// state settles. It never patches an Agent method and never resolves an actor globally.
+    /// teleport callback runs. This guard is restricted to the exact current mission main agent
+    /// and its current mount. It restores their pre-cast native body/look directions immediately
+    /// and for a small bounded number of owned mission ticks while attachment state settles.
+    ///
+    /// Occupied destinations remain valid. This class does not patch TeleportValidator.IsOccupied
+    /// and does not displace the requested destination to a fallback location.
     /// </summary>
     internal static class ScopedTeleportOrientationGuard
     {
-        private const int SettlementTicks = 2;
+        private const int SettlementTicks = 3;
         private static readonly ConditionalWeakTable<Mission, PendingState> PendingByMission =
             new ConditionalWeakTable<Mission, PendingState>();
         private static readonly FieldInfo NativeAgentApiField =
@@ -125,10 +44,10 @@ namespace Voidstep
         {
             internal WeakReference<Agent> Actor;
             internal WeakReference<Agent> Mount;
-            internal NativeDirection ActorDirection;
-            internal NativeDirection MountDirection;
             internal Vec3 ActorBody;
+            internal Vec3 ActorLook;
             internal Vec3 MountBody;
+            internal Vec3 MountLook;
             internal string Source;
             internal VoidstepLogger Logger;
         }
@@ -137,18 +56,6 @@ namespace Voidstep
         {
             internal Snapshot Snapshot;
             internal int RemainingTicks;
-        }
-
-        internal readonly struct NativeDirection
-        {
-            internal NativeDirection(Vec2 movement, Vec3 look)
-            {
-                Movement = movement;
-                Look = look;
-            }
-
-            internal Vec2 Movement { get; }
-            internal Vec3 Look { get; }
         }
 
         internal static Snapshot Capture(
@@ -168,10 +75,14 @@ namespace Voidstep
             {
                 Actor = new WeakReference<Agent>(actor),
                 Mount = mount == null ? null : new WeakReference<Agent>(mount),
-                ActorDirection = CaptureDirection(actor),
-                MountDirection = mount == null ? default(NativeDirection) : CaptureDirection(mount),
-                ActorBody = BodyAlignedCleaveRuntime.GetBodyFacing(actor),
-                MountBody = mount == null ? Vec3.Forward : BodyAlignedCleaveRuntime.GetBodyFacing(mount),
+                ActorBody = NormalizeBody(BodyAlignedCleaveRuntime.GetBodyFacing(actor)),
+                ActorLook = NormalizeLook(actor.LookDirection),
+                MountBody = mount == null
+                    ? Vec3.Forward
+                    : NormalizeBody(BodyAlignedCleaveRuntime.GetBodyFacing(mount)),
+                MountLook = mount == null
+                    ? Vec3.Forward
+                    : NormalizeLook(mount.LookDirection),
                 Source = source ?? "Voidstep",
                 Logger = logger
             };
@@ -235,29 +146,36 @@ namespace Voidstep
 
         private static void Restore(Snapshot snapshot, Agent actor)
         {
-            RestoreDirection(actor, snapshot.ActorDirection);
-            if (snapshot.Mount != null && snapshot.Mount.TryGetTarget(out var mount) && mount.IsActive() &&
-                ReferenceEquals(actor.MountAgent, mount))
+            var mount = actor.MountAgent;
+            var mounted = snapshot.Mount != null &&
+                          snapshot.Mount.TryGetTarget(out var capturedMount) &&
+                          capturedMount != null && capturedMount.IsActive() &&
+                          ReferenceEquals(mount, capturedMount);
+
+            // A mounted rider's body is attachment-owned. Restoring a separate rider movement
+            // direction fights that attachment and was the source of the deterministic 90-degree
+            // right turn. Preserve only the rider look while the mount owns body direction.
+            RestoreDirection(
+                actor,
+                snapshot.ActorBody,
+                snapshot.ActorLook,
+                restoreMovementDirection: !mounted);
+
+            if (mounted)
             {
-                RestoreDirection(mount, snapshot.MountDirection);
+                RestoreDirection(
+                    capturedMount,
+                    snapshot.MountBody,
+                    snapshot.MountLook,
+                    restoreMovementDirection: true);
             }
         }
 
-        private static NativeDirection CaptureDirection(Agent agent)
-        {
-            var angle = agent != null ? agent.MovementDirectionAsAngle : 0f;
-            var movement = new Vec2((float)Math.Cos(angle), (float)Math.Sin(angle));
-            if (movement.Normalize() < 0.001f)
-                movement = Vec2.Forward;
-
-            var look = agent != null ? agent.LookDirection : Vec3.Forward;
-            look.z = 0f;
-            if (look.Normalize() < 0.001f)
-                look = Vec3.Forward;
-            return new NativeDirection(movement, look);
-        }
-
-        private static void RestoreDirection(Agent agent, NativeDirection direction)
+        private static void RestoreDirection(
+            Agent agent,
+            Vec3 body,
+            Vec3 look,
+            bool restoreMovementDirection)
         {
             if (agent == null || !agent.IsActive() ||
                 NativeAgentApiField == null || NativeGetPtrMethod == null ||
@@ -273,9 +191,18 @@ namespace Voidstep
                 if (api == null || !(pointerValue is UIntPtr pointer) || pointer.Equals(UIntPtr.Zero))
                     return;
 
-                var movement = direction.Movement;
-                NativeSetMovementDirectionMethod.Invoke(api, new object[] { pointer, movement });
-                NativeSetLookDirectionMethod.Invoke(api, new object[] { pointer, direction.Look });
+                if (restoreMovementDirection)
+                {
+                    // SetMovementDirection uses Bannerlord's native XY direction vector. Do not
+                    // reconstruct it from MovementDirectionAsAngle: that angle convention is
+                    // offset by 90 degrees from the vector convention in 1.3.15.
+                    var movement = new Vec2(body.x, body.y);
+                    if (movement.Normalize() < 0.001f)
+                        movement = Vec2.Forward;
+                    NativeSetMovementDirectionMethod.Invoke(api, new object[] { pointer, movement });
+                }
+
+                NativeSetLookDirectionMethod.Invoke(api, new object[] { pointer, look });
             }
             catch
             {
@@ -305,14 +232,25 @@ namespace Voidstep
                    ReferenceEquals(mission.MainAgent, actor);
         }
 
+        private static Vec3 NormalizeBody(Vec3 direction)
+        {
+            direction.z = 0f;
+            if (direction.Normalize() < 0.001f)
+                direction = Vec3.Forward;
+            return direction;
+        }
+
+        private static Vec3 NormalizeLook(Vec3 direction)
+        {
+            if (direction.Normalize() < 0.001f)
+                direction = Vec3.Forward;
+            return direction;
+        }
+
         private static double AngleDegrees(Vec3 left, Vec3 right)
         {
-            left.z = 0f;
-            right.z = 0f;
-            if (left.Normalize() < 0.001f)
-                left = Vec3.Forward;
-            if (right.Normalize() < 0.001f)
-                right = Vec3.Forward;
+            left = NormalizeBody(left);
+            right = NormalizeBody(right);
             var dot = Math.Max(-1f, Math.Min(1f, Vec3.DotProduct(left, right)));
             return Math.Acos(dot) * 180.0 / Math.PI;
         }
