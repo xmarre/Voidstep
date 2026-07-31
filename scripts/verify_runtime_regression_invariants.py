@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
 import sys
 
 root = Path(__file__).resolve().parents[1]
@@ -108,7 +107,6 @@ facing_guard = read('src/Voidstep/CleaveFacingGuardPatches.cs')
 all_runtime = '\n'.join(
     path.read_text(encoding='utf-8')
     for path in (root / 'src' / 'Voidstep').glob('*.cs'))
-all_runtime_code = mask_csharp_noncode(all_runtime)
 facing_guard_code = mask_csharp_noncode(facing_guard)
 
 checks = {
@@ -121,7 +119,7 @@ checks = {
         'AddTimeSpeedRequest' not in time_control and
         'RemoveTimeSpeedRequest' not in time_control and
         'TimeSpeedRequest' not in time_control and
-        'scene and controlled player remain native 1.00x' in time_control,
+        'scene, player and controlled mount remain native 1.00x' in time_control,
 
     'Bend Time player and current mount are never slowed':
         'ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount)' in time_control and
@@ -136,21 +134,26 @@ checks = {
         mission.count('TimeControl?.UnregisterAgent(affectedAgent);') >= 2,
 
     'Bend Time avoids per-tick full mission scans':
-        'RefreshBudgetPerTick = 128' in time_control and
+        'RefreshBudgetPerTick = 192' in time_control and
         'RefreshBudgetedAgents();' in time_control and
         'AllAgents' not in time_control.split('public void Tick(float dt)', 1)[1].split('public void RegisterAgent', 1)[0],
 
-    'Bend Time restores only values it still owns':
-        'OriginalValues' in time_control and
-        'AppliedValues' in time_control and
-        'Approximately(current[i], state.AppliedValues[i])' in time_control and
-        'current[i] = state.OriginalValues[i];' in time_control,
+    'Bend Time uses public driven-property refresh and push':
+        'agent.UpdateAgentProperties();' in time_control and
+        'agent.UpdateCustomDrivenProperties();' in time_control and
+        'AgentDrivenProperties.Values' not in time_control and
+        'PushDrivenPropertiesMethod' not in time_control,
 
-    'Bend Time action ownership is limited to native channels zero and one':
+    'Bend Time owns native movement and action slowdown':
+        'agent.SetMaximumSpeedLimit(_factor, true);' in time_control and
         'NativeActionChannelCount = 2' in time_control and
-        'channel < NativeActionChannelCount' in time_control and
         'agent.SetCurrentActionSpeed(channel, _factor);' in time_control and
         'agent.SetCurrentActionSpeed(channel, 1f);' in time_control,
+
+    'Bend Time restores from current native agent models':
+        'agent.UpdateAgentProperties();' in time_control.split('private void Restore(SlowState state)', 1)[1].split('private static void CaptureBaseline', 1)[0] and
+        'Approximately(current, state.AppliedMaximumSpeedLimit)' in time_control and
+        'state.PropertiesOwned = false;' in time_control,
 
     'Bend Time slows non-player missiles only at mission launch points':
         '[HarmonyPatch(typeof(Mission), "AddMissileAux")]' in time_control and
@@ -170,12 +173,12 @@ checks = {
         'SetInitialFrame(in actorPosition, in direction, true)' in post_cast and
         'TeleportToPosition' not in post_cast,
 
-    'post-teleport rollback correction is bounded and mission scoped':
+    'post-teleport frame is one-shot and duplicate guarded':
         'ConditionalWeakTable<Mission, State>' in post_cast and
-        'HoldSeconds = 0.55f' in post_cast and
-        'MBCommon.GetApplicationTime() >= state.ExpiresAt' in post_cast and
-        'CameraReleaseDotThreshold = 0.82f' in post_cast and
-        'released for deliberate camera turn' in post_cast,
+        'DuplicateWindowSeconds = 0.08f' in post_cast and
+        'IsImmediateDuplicate' in post_cast and
+        'SetExactFrame(' not in post_cast.split('internal static void Tick(Mission mission)', 1)[1].split('internal static void Clear', 1)[0] and
+        'repeated 360-degree turns' in post_cast,
 
     'post-teleport correction never injects movement controls':
         '.SetMovementDirection(' not in post_cast and
@@ -183,8 +186,8 @@ checks = {
         '.SetEventControlFlags(' not in post_cast,
 
     'post-teleport ownership cannot affect character preview agents':
-        'var actor = mission.MainAgent;' in post_cast and
-        'actor.Index != state.ActorIndex' in post_cast and
+        'ReferenceEquals(mission.MainAgent, actor)' in post_cast and
+        'ReferenceEquals(Mission.Current, mission)' in post_cast and
         'CameraFacingTeleportOwnership.Clear' in post_cast and
         'ConditionalWeakTable<Mission, State>' in post_cast,
 
