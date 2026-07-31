@@ -33,6 +33,7 @@ def method_body(source, signature):
 
 mission = text('VoidstepMissionBehavior.cs')
 time_control = text('TimeControlService.cs')
+native_time = text('BendTimeNativeEnforcement.cs')
 post_cast = text('PostCastOrientationOwnershipFix.cs')
 ground_aim = text('AuthoritativeGroundAimAndPlayerTimeFix.cs')
 runtime_corrections = text('RuntimeGameplayCorrections.cs')
@@ -68,9 +69,14 @@ checks = {
         '_manager?.Cleanup(reason)' in mission and
         'public void Cleanup()' in time_control,
 
-    'no global player action interception':
-        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetCurrentActionSpeed))]' not in all_text and
-        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetActionChannel))]' not in all_text,
+    'Bend Time action interception is exact-agent guarded':
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetCurrentActionSpeed))]' in native_time and
+        'nameof(Agent.SetActionChannel)' in native_time and
+        'TryGetEligible(agent' in native_time and
+        'states.Contains(agent.Index)' in native_time and
+        'ReferenceEquals(SlowStateAgentField.GetValue(slowState), agent)' in native_time and
+        'ReferenceEquals(agent, player) || ReferenceEquals(agent, mount)' in native_time and
+        'if (IsBypassed || agent == null || !agent.IsActive()' in native_time,
 
     'no global driven-property interception':
         'BendTimePostCalculatedDrivenPropertiesPatch' not in all_text and
@@ -85,33 +91,59 @@ checks = {
     'Bend Time explicitly exempts player and mount':
         'ReferenceEquals(agent, _player) || ReferenceEquals(agent, _mount)' in time_control and
         'if (_active && !IsExempt(agent))' in time_control and
-        'if (agent == null || !agent.IsActive() || IsExempt(agent))' in time_control,
+        'if (agent == null || !agent.IsActive() || IsExempt(agent))' in time_control and
+        'ReferenceEquals(agent, player) || ReferenceEquals(agent, mount)' in native_time,
 
     'Bend Time slows only registered non-player agents':
         'Dictionary<int, SlowState> _states' in time_control and
         'List<int> _refreshOrder' in time_control and
         'RefreshBudgetPerTick = 192' in time_control and
         'RefreshBudgetedAgents();' in time_tick and
-        'AllAgents' not in time_tick,
+        'AllAgents' not in time_tick and
+        'states.Contains(agent.Index)' in native_time,
 
     'Bend Time uses public native property push':
         'agent.UpdateAgentProperties();' in time_control and
         'agent.UpdateCustomDrivenProperties();' in time_control and
-        'AgentDrivenProperties.Values' not in time_control and
-        'AccessTools.Property(typeof(AgentDrivenProperties)' not in time_control and
-        'UpdateDrivenProperties", new[] { typeof(float[]) }' not in time_control,
+        'agent.UpdateAgentProperties();' in native_time and
+        'agent.UpdateCustomDrivenProperties();' in native_time and
+        'AgentDrivenProperties.Values' not in time_control + native_time and
+        'AccessTools.Property(typeof(AgentDrivenProperties)' not in time_control + native_time,
 
     'Bend Time owns verified action channels only':
         'NativeActionChannelCount = 2' in time_control and
+        'NativeActionChannelCount = 2' in native_time and
         'channel < NativeActionChannelCount' in time_control and
-        'agent.SetCurrentActionSpeed(channel, _factor);' in time_control and
-        'agent.SetCurrentActionSpeed(channel, 1f);' in time_control,
+        'channel >= NativeActionChannelCount' in native_time and
+        'agent.SetCurrentActionSpeed(channel, factor);' in native_time,
 
-    'Bend Time owns a native movement cap':
-        'agent.SetMaximumSpeedLimit(_factor, true);' in time_control and
-        'state.OriginalMaximumSpeedLimit = agent.GetMaximumSpeedLimit();' in time_control and
-        'state.AppliedMaximumSpeedLimit = agent.GetMaximumSpeedLimit();' in time_control and
-        'Approximately(current, state.AppliedMaximumSpeedLimit)' in time_control,
+    'Bend Time reasserts an absolute native movement cap':
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.SetMaximumSpeedLimit))]' in native_time and
+        'agent.SetMaximumSpeedLimit(' in native_time and
+        'baseline * factor' in native_time and
+        'false);' in method_body(native_time, 'private static void ApplyAbsoluteMovementCap') and
+        'MaximumForwardUnlimitedSpeed' in native_time,
+
+    'Bend Time restores original native caps':
+        'OriginalMaximumSpeedLimits' in native_time and
+        'CaptureOriginalMaximumSpeedLimit' in native_time and
+        'RestoreOriginalMaximumSpeedLimits' in native_time and
+        'RestoreAndUntrack(__instance)' in native_time and
+        'agent.SetMaximumSpeedLimit(original, false);' in native_time,
+
+    'Bend Time reapplies after native resets':
+        '[HarmonyPatch(typeof(Agent), nameof(Agent.UpdateAgentProperties))]' in native_time and
+        'EnforceAfterPropertyUpdate(__instance)' in native_time and
+        'BendTimeServiceApplyBoundaryPatch' in native_time and
+        'EnforceAfterServiceApply(__instance, __0)' in native_time and
+        'BendTimeNewActionSpeedGuardPatch' in native_time,
+
+    'Bend Time native enforcement uses weak mission lifetime':
+        'WeakReference<TimeControlService>' in native_time and
+        'WeakReference<Mission>' in native_time and
+        'ConditionalWeakTable<TimeControlService, RuntimeState>' in native_time and
+        'Dictionary<int, float>' in native_time and
+        not re.search(r'static\s+.*\bAgent\b', native_time),
 
     'Bend Time restores from current native models':
         'if (state.PropertiesOwned)' in time_control and
@@ -133,23 +165,27 @@ checks = {
         'ClampToCastCircle' in ground_aim and
         'MissionScreen projected reticle ground' in ground_aim,
 
-    'teleport position and direction are atomic':
-        'SetInitialFrame(in mountPosition, in direction, true)' in post_cast and
-        'SetInitialFrame(in riderPosition, in direction, true)' in post_cast and
-        'SetInitialFrame(in actorPosition, in direction, true)' in post_cast and
-        'TeleportToPosition' not in post_cast,
+    'teleport owns position only':
+        'mount.TeleportToPosition(position)' in post_cast and
+        'actor.TeleportToPosition(position + Vec3.Up * 0.4f)' in post_cast and
+        'actor.TeleportToPosition(position)' in post_cast and
+        'SetInitialFrame' not in post_cast and
+        'LookDirection =' not in post_cast and
+        'SetMovementDirection' not in post_cast,
 
-    'teleport frame is one-shot and mission scoped':
-        'ConditionalWeakTable<Mission, State>' in post_cast and
-        'DuplicateWindowSeconds = 0.08f' in post_cast and
-        'IsImmediateDuplicate' in post_cast and
-        'replaying SetInitialFrame from Tick was the source of repeated 360-degree turns' in post_cast and
-        'SetExactFrame(' not in teleport_owner_tick,
+    'all legacy post-teleport alignment is suppressed':
+        'CameraAlignmentUsesExactNativeFramePatch' in post_cast and
+        'private static bool Prefix()' in post_cast and
+        'return false;' in method_body(post_cast, 'private static bool Prefix()') and
+        'internal static void AlignCurrent' in post_cast and
+        'Deliberately empty' in post_cast and
+        not teleport_owner_tick.strip(),
 
-    'teleport correction never submits movement controls':
+    'teleport submits no directional controls':
         '.SetMovementDirection(' not in post_cast and
-        '.MovementInputVector' not in post_cast and
-        '.SetEventControlFlags(' not in post_cast,
+        '.SetEventControlFlags(' not in post_cast and
+        'LookDirection =' not in post_cast and
+        'SetInitialFrame' not in post_cast,
 
     'teleport ownership mutates only live mission main agent':
         'ReferenceEquals(mission.MainAgent, actor)' in post_cast and
@@ -216,4 +252,4 @@ if failed:
     print('Failed invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
 
-print(f'Validated {len(checks)} mission-scope, selective-time and teleport invariants.')
+print(f'Validated {len(checks)} mission-scope, native selective-time and position-only teleport invariants.')
