@@ -12,6 +12,8 @@ namespace Voidstep
     /// </summary>
     internal static class PreservedFrameTeleportRuntime
     {
+        private static readonly VoidstepLogger FallbackLogger = new VoidstepLogger();
+
         internal static bool Teleport(
             Mission mission,
             Agent actor,
@@ -23,6 +25,7 @@ namespace Voidstep
             if (!OwnsLiveMainAgent(mission, actor) || !destination.IsValid)
                 return false;
 
+            logger = logger ?? FallbackLogger;
             var actorPosition = actor.Position;
             var actorDirection = CaptureNativeFrameDirection(actor);
             var actorLook = CaptureLookDirection(actor);
@@ -83,7 +86,7 @@ namespace Voidstep
             }
             catch (Exception ex)
             {
-                logger?.Debug(
+                logger.Debug(
                     source + " preserved-frame teleport failed safely for actor=" +
                     actor.Index + ": " + ex.Message);
                 return false;
@@ -103,9 +106,6 @@ namespace Voidstep
             Vec3 mountTarget,
             Vec3 riderTarget)
         {
-            if (logger == null)
-                return;
-
             var actorBodyAfter = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
             var actorLookAfter = CaptureLookDirection(actor);
             var actorPositionError = Distance(actor.Position, riderTarget);
