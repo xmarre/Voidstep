@@ -14,6 +14,7 @@ time_control = read('src/Voidstep/TimeControlService.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
 post_cast = read('src/Voidstep/PostCastOrientationOwnershipFix.cs')
 teleport = read('src/Voidstep/PreservedFrameTeleportRuntime.cs')
+teleport_safety = read('src/Voidstep/ScopedTeleportCollisionAndOrientationFix.cs')
 tor_latch = read('src/Voidstep/TorProxySelectionAttemptLatch.cs')
 ground_aim = read('src/Voidstep/AuthoritativeGroundAimAndPlayerTimeFix.cs')
 runtime_corrections = read('src/Voidstep/RuntimeGameplayCorrections.cs')
@@ -83,12 +84,10 @@ checks = {
         'SetNativePosition(mount, mountTarget)' in teleport and
         'SetNativePosition(actor, riderTarget)' not in teleport,
 
-    'teleport avoids frame and orientation mutation':
+    'teleport avoids frame mutation':
         'SetInitialFrame' not in teleport and
         'TeleportToPosition' not in teleport and
         'SetScriptedPosition' not in teleport and
-        'LookDirection =' not in teleport and
-        'SetMovementDirection' not in teleport and
         'SetEventControlFlags' not in teleport and
         'SetActionChannel' not in teleport and
         'MovementInputVector' not in teleport,
@@ -107,6 +106,32 @@ checks = {
         'ReferenceEquals(Mission.Current, mission)' in teleport and
         'ReferenceEquals(mission.MainAgent, actor)' in teleport,
 
+    'occupied destinations use mounted-aware clearance':
+        '[HarmonyPatch(typeof(TeleportValidator), "IsOccupied")]' in teleport_safety and
+        '[HarmonyPriority(Priority.First)]' in teleport_safety and
+        'mountCandidate = riderCandidate - riderOffset;' in teleport_safety and
+        'if (Overlaps(riderCandidate, RiderRadius, other, otherRadius))' in teleport_safety and
+        'if (mounted && Overlaps(mountCandidate, MountRadius, other, otherRadius))' in teleport_safety and
+        'return dx * dx + dy * dy < minimumDistance * minimumDistance;' in teleport_safety,
+
+    'orientation restoration is exact mission owned and bounded':
+        'private const int SettlementTicks = 2;' in teleport_safety and
+        'ConditionalWeakTable<Mission, PendingState>' in teleport_safety and
+        'ReferenceEquals(Mission.Current, mission)' in teleport_safety and
+        'ReferenceEquals(mission.MainAgent, actor)' in teleport_safety and
+        '"SetMovementDirection"' in teleport_safety and
+        '"SetLookDirection"' in teleport_safety and
+        '[HarmonyPatch(\n        typeof(PreservedFrameTeleportRuntime)' in teleport_safety and
+        '[HarmonyPatch(typeof(Agent)' not in teleport_safety and
+        'Agent.Main' not in teleport_safety,
+
+    'orientation restoration cannot leak into presentation agents':
+        'WeakReference<Agent> Actor;' in teleport_safety and
+        'WeakReference<Agent> Mount;' in teleport_safety and
+        'PendingByMission.Remove(mission);' in teleport_safety and
+        'ScopedTeleportOrientationGuard.Clear(mission);' in teleport_safety and
+        'CampaignBehaviorBase' not in teleport_safety,
+
     'no global Agent singleton path remains':
         'Agent.Main' not in all_runtime,
 
@@ -118,9 +143,10 @@ checks = {
         'actor.SetActionChannel(1, ActionIndexCache.act_none);' in tor_stance and
         'ReleaseBeforeVoidstepActivation(actor);' in tor_weapon,
 
-    'Voidstep direct facing methods are inert':
+    'Voidstep direct camera facing methods remain inert':
         'actor.LookDirection =' not in animation and
-        'Voidstep never owns Agent body or look direction' in animation,
+        'Voidstep never owns Agent body or look direction' in animation and
+        'GetCameraFacing' not in teleport_safety,
 
     'Cleave origin and orientation remain explicit':
         'state.Facing = CameraAuthoritativeCastRuntime.GetCameraFacing' in camera_cast and
@@ -183,4 +209,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed runtime regression invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-only time, attachment-only teleport, Domino, TOR and Cleave regressions.')
+print(f'Validated {len(checks)} mission-only time, collision-safe teleport, bounded orientation restore, Domino, TOR and Cleave regressions.')
