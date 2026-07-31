@@ -8,8 +8,8 @@ namespace Voidstep
 {
     /// <summary>
     /// Translates only the current mission's controlled actor through Bannerlord's native
-    /// IMBAgent.SetPosition operation. It never uses the convenience teleport wrapper or the
-    /// spawn-frame initialization API, and it never changes body, look or movement direction.
+    /// IMBAgent.SetPosition operation. Mounted actors are moved through the existing mount
+    /// attachment only; the rider is never independently repositioned or given orientation input.
     /// </summary>
     internal static class PreservedFrameTeleportRuntime
     {
@@ -38,7 +38,6 @@ namespace Voidstep
                 return false;
 
             logger = logger ?? FallbackLogger;
-            var actorPosition = actor.Position;
             var actorBodyBefore = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
             var actorLookBefore = CaptureLookDirection(actor);
             var mount = actor.MountAgent;
@@ -46,7 +45,6 @@ namespace Voidstep
             var riderOffset = Vec3.Zero;
             var mountBodyBefore = Vec3.Forward;
             var mountTarget = Vec3.Invalid;
-            var riderTarget = destination;
 
             try
             {
@@ -58,47 +56,61 @@ namespace Voidstep
 
                 if (mounted)
                 {
+                    var actorPosition = actor.Position;
                     var mountPosition = mount.Position;
-                    mountBodyBefore = BodyAlignedCleaveRuntime.GetBodyFacing(mount);
                     riderOffset = actorPosition - mountPosition;
-                    mountTarget = destination;
-                    riderTarget = destination + riderOffset;
+                    mountBodyBefore = BodyAlignedCleaveRuntime.GetBodyFacing(mount);
 
-                    if (!SetNativePosition(mount, mountTarget) ||
-                        !SetNativePosition(actor, riderTarget))
+                    // The requested destination is the rider destination. Move only the mount to
+                    // the corresponding attachment origin and let Bannerlord carry the rider.
+                    // Moving mount and rider independently forces attachment reconciliation and
+                    // was the remaining source of intermittent 180-degree turns.
+                    mountTarget = destination - riderOffset;
+                    if (!SetNativePosition(mount, mountTarget))
                     {
-                        logger.Debug(source + " native mounted position translation failed safely.");
+                        logger.Debug(source + " native mounted attachment translation failed safely.");
                         return false;
                     }
+
+                    var mountBodyAfterNativeMove = BodyAlignedCleaveRuntime.GetBodyFacing(mount);
+                    NotifyTeleported(mount);
+                    NotifyTeleported(actor);
+                    LogResult(
+                        source,
+                        logger,
+                        actor,
+                        mount,
+                        true,
+                        actorBodyBefore,
+                        actorLookBefore,
+                        mountBodyBefore,
+                        mountBodyAfterNativeMove,
+                        riderOffset,
+                        mountTarget,
+                        destination);
+                    return true;
                 }
-                else if (!SetNativePosition(actor, riderTarget))
+
+                if (!SetNativePosition(actor, destination))
                 {
                     logger.Debug(source + " native actor position translation failed safely.");
                     return false;
                 }
 
-                NotifyTeleported(mount);
                 NotifyTeleported(actor);
-
-                if (!preserveMomentum)
-                {
-                    actor.MovementInputVector = Vec2.Zero;
-                    if (mounted)
-                        mount.MovementInputVector = Vec2.Zero;
-                }
-
                 LogResult(
                     source,
                     logger,
                     actor,
-                    mount,
-                    mounted,
+                    null,
+                    false,
                     actorBodyBefore,
                     actorLookBefore,
-                    mountBodyBefore,
-                    riderOffset,
-                    mountTarget,
-                    riderTarget);
+                    Vec3.Forward,
+                    Vec3.Forward,
+                    Vec3.Zero,
+                    Vec3.Invalid,
+                    destination);
                 return true;
             }
             catch (Exception ex)
@@ -159,25 +171,27 @@ namespace Voidstep
             Vec3 actorBodyBefore,
             Vec3 actorLookBefore,
             Vec3 mountBodyBefore,
+            Vec3 mountBodyAfterNativeMove,
             Vec3 riderOffset,
             Vec3 mountTarget,
             Vec3 riderTarget)
         {
             var actorBodyAfter = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
             var actorLookAfter = CaptureLookDirection(actor);
-            var actorPositionError = Distance(actor.Position, riderTarget);
-            var message = source + " applied native position-only teleport; actor=" + actor.Index +
+            var message = source + " applied attachment-safe native teleport; actor=" + actor.Index +
                           ", bodyDelta=" + AngleDegrees(actorBodyBefore, actorBodyAfter).ToString("0.0") +
                           "deg, lookDelta=" + AngleDegrees(actorLookBefore, actorLookAfter).ToString("0.0") +
-                          "deg, positionError=" + actorPositionError.ToString("0.000") +
+                          "deg, positionError=" + Distance(actor.Position, riderTarget).ToString("0.000") +
                           ", mounted=" + mounted;
 
             if (mounted && mount != null && mount.IsActive())
             {
-                var mountBodyAfter = BodyAlignedCleaveRuntime.GetBodyFacing(mount);
+                var mountBodyAfterCallbacks = BodyAlignedCleaveRuntime.GetBodyFacing(mount);
                 var liveOffset = actor.Position - mount.Position;
-                message += ", mountBodyDelta=" +
-                           AngleDegrees(mountBodyBefore, mountBodyAfter).ToString("0.0") +
+                message += ", mountNativeBodyDelta=" +
+                           AngleDegrees(mountBodyBefore, mountBodyAfterNativeMove).ToString("0.0") +
+                           "deg, mountCallbackBodyDelta=" +
+                           AngleDegrees(mountBodyAfterNativeMove, mountBodyAfterCallbacks).ToString("0.0") +
                            "deg, mountPositionError=" +
                            Distance(mount.Position, mountTarget).ToString("0.000") +
                            ", riderOffsetError=" +
