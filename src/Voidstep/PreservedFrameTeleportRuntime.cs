@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -6,13 +7,24 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Translates the current main agent without allowing Bannerlord's convenience teleport
-    /// routine to derive a new body yaw from movement, camera or terrain state. Rider and mount
-    /// are moved as one rigid pair using their existing native frame directions and spatial offset.
+    /// Translates the current main agent through Bannerlord's native IMBAgent.SetPosition call.
+    /// Agent.TeleportToPosition co-locates rider and mount before attachment reconciliation, which
+    /// can rotate the mounted body. Agent.SetInitialFrame is spawn/initialization state and can leak
+    /// into later presentation agents. This path uses neither wrapper: rider and mount keep their
+    /// existing native orientation and exact spatial offset while only their positions change.
     /// </summary>
     internal static class PreservedFrameTeleportRuntime
     {
         private static readonly VoidstepLogger FallbackLogger = new VoidstepLogger();
+        private static readonly FieldInfo NativeAgentApiField =
+            AccessTools.Field(typeof(MBAPI), "IMBAgent");
+        private static readonly MethodInfo NativeSetPositionMethod =
+            NativeAgentApiField == null
+                ? null
+                : AccessTools.Method(
+                    NativeAgentApiField.FieldType,
+                    "SetPosition",
+                    new[] { typeof(UIntPtr), typeof(Vec3).MakeByRefType() });
 
         internal static bool Teleport(
             Mission mission,
@@ -27,9 +39,8 @@ namespace Voidstep
 
             logger = logger ?? FallbackLogger;
             var actorPosition = actor.Position;
-            var actorDirection = CaptureNativeFrameDirection(actor);
-            var actorLook = CaptureLookDirection(actor);
             var actorBodyBefore = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
+            var actorLookBefore = CaptureLookDirection(actor);
             var mount = actor.MountAgent;
             var mounted = mount != null && mount.IsActive();
             var riderOffset = Vec3.Zero;
@@ -39,29 +50,34 @@ namespace Voidstep
 
             try
             {
+                if (!NativePositionApiAvailable())
+                {
+                    logger.Debug(source + " native position-only teleport API was unavailable.");
+                    return false;
+                }
+
                 if (mounted)
                 {
                     var mountPosition = mount.Position;
-                    var mountDirection = CaptureNativeFrameDirection(mount);
-                    var mountLook = CaptureLookDirection(mount);
                     mountBodyBefore = BodyAlignedCleaveRuntime.GetBodyFacing(mount);
                     riderOffset = actorPosition - mountPosition;
                     mountTarget = destination;
                     riderTarget = destination + riderOffset;
 
-                    mount.SetInitialFrame(in mountTarget, in mountDirection, true);
-                    actor.SetInitialFrame(in riderTarget, in actorDirection, true);
-
-                    // SetInitialFrame owns the native body frame. Restore independent look state
-                    // exactly as captured so aiming cannot become an implicit facing command.
-                    mount.LookDirection = mountLook;
-                    actor.LookDirection = actorLook;
+                    if (!SetNativePosition(mount, mountTarget) ||
+                        !SetNativePosition(actor, riderTarget))
+                    {
+                        logger.Debug(source + " native mounted position translation failed safely.");
+                        return false;
+                    }
                 }
-                else
+                else if (!SetNativePosition(actor, riderTarget))
                 {
-                    actor.SetInitialFrame(in riderTarget, in actorDirection, true);
-                    actor.LookDirection = actorLook;
+                    logger.Debug(source + " native actor position translation failed safely.");
+                    return false;
                 }
+
+                NotifyTeleported(actor);
 
                 if (!preserveMomentum)
                 {
@@ -77,7 +93,7 @@ namespace Voidstep
                     mount,
                     mounted,
                     actorBodyBefore,
-                    actorLook,
+                    actorLookBefore,
                     mountBodyBefore,
                     riderOffset,
                     mountTarget,
@@ -87,9 +103,45 @@ namespace Voidstep
             catch (Exception ex)
             {
                 logger.Debug(
-                    source + " preserved-frame teleport failed safely for actor=" +
-                    actor.Index + ": " + ex.Message);
+                    source + " native position-only teleport failed safely for actor=" +
+                    actor.Index + ": " + Unwrap(ex).Message);
                 return false;
+            }
+        }
+
+        private static bool NativePositionApiAvailable()
+        {
+            return NativeAgentApiField != null && NativeSetPositionMethod != null &&
+                   NativeAgentApiField.GetValue(null) != null;
+        }
+
+        private static bool SetNativePosition(Agent agent, Vec3 position)
+        {
+            if (agent == null || !agent.IsActive() || !position.IsValid)
+                return false;
+
+            var api = NativeAgentApiField.GetValue(null);
+            if (api == null)
+                return false;
+
+            var arguments = new object[] { agent.GetPtr(), position };
+            NativeSetPositionMethod.Invoke(api, arguments);
+            return true;
+        }
+
+        private static void NotifyTeleported(Agent actor)
+        {
+            if (actor == null)
+                return;
+
+            var components = actor.Components;
+            if (components == null)
+                return;
+
+            for (var i = 0; i < components.Count; i++)
+            {
+                try { components[i]?.OnAgentTeleported(); }
+                catch { }
             }
         }
 
@@ -109,7 +161,7 @@ namespace Voidstep
             var actorBodyAfter = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
             var actorLookAfter = CaptureLookDirection(actor);
             var actorPositionError = Distance(actor.Position, riderTarget);
-            var message = source + " applied preserved-frame teleport; actor=" + actor.Index +
+            var message = source + " applied native position-only teleport; actor=" + actor.Index +
                           ", bodyDelta=" + AngleDegrees(actorBodyBefore, actorBodyAfter).ToString("0.0") +
                           "deg, lookDelta=" + AngleDegrees(actorLookBefore, actorLookAfter).ToString("0.0") +
                           "deg, positionError=" + actorPositionError.ToString("0.000") +
@@ -128,29 +180,6 @@ namespace Voidstep
             }
 
             logger.Debug(message + ".");
-        }
-
-        private static Vec2 CaptureNativeFrameDirection(Agent agent)
-        {
-            if (agent != null)
-            {
-                try
-                {
-                    var forward = agent.Frame.rotation.f;
-                    var direction = new Vec2(forward.x, forward.y);
-                    if (direction.Normalize() >= 0.001f)
-                        return direction;
-                }
-                catch
-                {
-                }
-
-                var body = BodyAlignedCleaveRuntime.GetBodyFacing(agent);
-                var fallback = new Vec2(body.x, body.y);
-                if (fallback.Normalize() >= 0.001f)
-                    return fallback;
-            }
-            return new Vec2(0f, 1f);
         }
 
         private static Vec3 CaptureLookDirection(Agent agent)
@@ -184,6 +213,13 @@ namespace Voidstep
                 right = Vec3.Forward;
             var dot = Math.Max(-1f, Math.Min(1f, Vec3.DotProduct(left, right)));
             return Math.Acos(dot) * 180.0 / Math.PI;
+        }
+
+        private static Exception Unwrap(Exception exception)
+        {
+            while (exception is TargetInvocationException invocation && invocation.InnerException != null)
+                exception = invocation.InnerException;
+            return exception;
         }
     }
 
