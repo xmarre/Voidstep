@@ -27,7 +27,6 @@ bindings = read('src/Voidstep/VoidstepInputBindings.cs')
 project = read('src/Voidstep/Voidstep.csproj')
 prefab = read('module/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml')
 tor_compact = compact(tor)
-tor_stance_compact = compact(tor_stance)
 
 ability_order = (
     'AbilityId.VoidstepCleave',
@@ -137,11 +136,11 @@ checks = {
         '_shouldPlayIdleCastStanceAnimField?.SetValue(logic, false);' in tor_stance and
         '_shouldSheathWeaponField?.SetValue(logic, false);' in tor_stance and
         '_disableCombatActionsAfterCastField?.SetValue(logic, false);' in tor_stance,
-    'TOR proxy cleanup unlocks rider and mount look direction':
+    'TOR proxy cleanup unlocks look control without submitting a turn':
         'actor.IsLookDirectionLocked = false;' in tor_stance and
         'mount.IsLookDirectionLocked = false;' in tor_stance and
-        'actor.LookDirection = preservedLook;' in tor_stance and
-        'mount.LookDirection = preservedMountLook;' in tor_stance,
+        'actor.LookDirection =' not in tor_stance and
+        'mount.LookDirection =' not in tor_stance,
     'right mouse confirmation is read through bypass': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and 'InputConflictSuppression.EnterBypass()' in coordinator,
     'right mouse is suppressed through release': all(token in coordinator for token in (
         '_suppressRightMouseUntilRelease = true;',
