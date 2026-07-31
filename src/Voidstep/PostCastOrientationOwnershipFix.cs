@@ -245,8 +245,9 @@ namespace Voidstep
                 actor.TeleportToPosition(position);
             }
 
-            // No MovementInputVector, SetMovementDirection, LookDirection, look-lock, action,
-            // scripted-movement or facing mutation is performed on the normal teleport path.
+            // The normal teleport path performs position changes only. It does not assign an
+            // input vector, submit a movement direction, change look state, play an action,
+            // enable scripted movement, or write facing.
             PostTeleportOrientationGuard.Arm(
                 __instance,
                 actor,
