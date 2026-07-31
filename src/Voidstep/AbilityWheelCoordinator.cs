@@ -73,7 +73,10 @@ namespace Voidstep
                 return;
             }
 
-            if (!confirm)
+            // Bannerlord/TOR can report IsKeyPressed repeatedly while Mouse 2 is held. A failed
+            // cast (for example, cooldown not yet complete) retains the selection, so without this
+            // latch the same physical press can call TryActivate every frame.
+            if (!confirm || _suppressRightMouseUntilRelease)
                 return;
 
             _suppressRightMouseUntilRelease = true;
