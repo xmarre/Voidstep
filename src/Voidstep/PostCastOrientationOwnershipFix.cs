@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -7,46 +6,46 @@ using TaleWorlds.MountAndBlade;
 namespace Voidstep
 {
     /// <summary>
-    /// Applies one exact native position-and-facing frame per teleport. The previous 0.55-second
-    /// reconciliation loop repeatedly resubmitted SetInitialFrame whenever normal animation changed
-    /// body yaw, producing visible full rotations. This implementation never reapplies a teleport
-    /// frame from Tick and deduplicates the immediate postfix alignment for Blink.
+    /// Teleporting owns position only. TOR's projected cursor can select a destination that is
+    /// unrelated or even opposite to the camera/body facing vector, so writing any orientation at
+    /// the teleport boundary can produce a 180/360-degree correction. Native body, look, action and
+    /// mount orientation are therefore left completely untouched.
     /// </summary>
     internal static class CameraFacingTeleportOwnership
     {
-        private const float DuplicateWindowSeconds = 0.08f;
-        private const float DuplicatePositionToleranceSquared = 0.04f;
-        private const float DuplicateFacingDot = 0.995f;
-
-        private static readonly ConditionalWeakTable<Mission, State> States =
-            new ConditionalWeakTable<Mission, State>();
-
-        private sealed class State
-        {
-            internal int ActorIndex = -1;
-            internal Vec3 Position = Vec3.Invalid;
-            internal Vec3 Facing = Vec3.Forward;
-            internal float AppliedAt;
-            internal string Source;
-        }
-
         internal static void Teleport(
             Mission mission,
             Agent actor,
             Vec3 position,
-            Vec3 facing,
+            Vec3 ignoredFacing,
             string source,
             VoidstepLogger logger)
         {
             if (!OwnsLiveMainAgent(mission, actor))
                 return;
 
-            facing = Normalize(facing);
-            SetExactFrame(actor, position, facing);
-            Remember(mission, actor, position, facing, source);
+            var beforeBody = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
+            var beforeLook = Normalize(actor.LookDirection);
+            var mount = actor.MountAgent;
+            var mounted = mount != null && mount.IsActive();
+
+            if (mounted)
+            {
+                mount.TeleportToPosition(position);
+                actor.TeleportToPosition(position + Vec3.Up * 0.4f);
+            }
+            else
+            {
+                actor.TeleportToPosition(position);
+            }
+
+            var afterBody = BodyAlignedCleaveRuntime.GetBodyFacing(actor);
+            var afterLook = Normalize(actor.LookDirection);
             logger?.Debug(
-                source + " applied one atomic native teleport frame; actor=" + actor.Index +
-                ", facing=" + Format(facing) + ".");
+                source + " applied position-only teleport; actor=" + actor.Index +
+                ", bodyDelta=" + AngleDegrees(beforeBody, afterBody).ToString("0.0") +
+                "deg, lookDelta=" + AngleDegrees(beforeLook, afterLook).ToString("0.0") +
+                "deg, mounted=" + mounted + ".");
         }
 
         internal static void AlignCurrent(
@@ -56,31 +55,16 @@ namespace Voidstep
             string source,
             VoidstepLogger logger)
         {
-            if (!OwnsLiveMainAgent(mission, actor))
-                return;
-
-            facing = Normalize(facing);
-            var position = GetTeleportBasePosition(actor);
-            if (IsImmediateDuplicate(mission, actor, position, facing))
-                return;
-
-            SetExactFrame(actor, position, facing);
-            Remember(mission, actor, position, facing, source);
-            logger?.Debug(
-                source + " applied one post-teleport native facing frame; actor=" + actor.Index +
-                ", facing=" + Format(facing) + ".");
+            // Deliberately empty. Post-teleport camera/body alignment was the remaining source of
+            // intermittent turns because cursor-projected destinations do not own camera facing.
         }
 
-        // Deliberately no frame reconciliation here. Normal body/action updates after teleport must
-        // remain native; replaying SetInitialFrame from Tick was the source of repeated 360-degree turns.
         internal static void Tick(Mission mission)
         {
         }
 
         internal static void Clear(Mission mission)
         {
-            if (mission != null)
-                States.Remove(mission);
         }
 
         private static bool OwnsLiveMainAgent(Mission mission, Agent actor)
@@ -88,67 +72,6 @@ namespace Voidstep
             return mission != null && actor != null && actor.IsActive() &&
                    ReferenceEquals(mission.MainAgent, actor) &&
                    ReferenceEquals(Mission.Current, mission);
-        }
-
-        private static bool IsImmediateDuplicate(
-            Mission mission,
-            Agent actor,
-            Vec3 position,
-            Vec3 facing)
-        {
-            if (mission == null || !States.TryGetValue(mission, out var state) ||
-                state.ActorIndex != actor.Index)
-                return false;
-
-            if (MBCommon.GetApplicationTime() - state.AppliedAt > DuplicateWindowSeconds)
-                return false;
-
-            var delta = position - state.Position;
-            delta.z = 0f;
-            return delta.LengthSquared <= DuplicatePositionToleranceSquared &&
-                   Vec3.DotProduct(state.Facing, facing) >= DuplicateFacingDot;
-        }
-
-        private static void Remember(
-            Mission mission,
-            Agent actor,
-            Vec3 position,
-            Vec3 facing,
-            string source)
-        {
-            var state = States.GetOrCreateValue(mission);
-            state.ActorIndex = actor.Index;
-            state.Position = position;
-            state.Facing = facing;
-            state.AppliedAt = MBCommon.GetApplicationTime();
-            state.Source = source;
-        }
-
-        private static void SetExactFrame(Agent actor, Vec3 basePosition, Vec3 facing)
-        {
-            var direction = facing.AsVec2;
-            var mount = actor.MountAgent;
-            if (mount != null && mount.IsActive())
-            {
-                var mountPosition = basePosition;
-                mount.SetInitialFrame(in mountPosition, in direction, true);
-                mount.LookDirection = facing;
-
-                var riderPosition = basePosition + Vec3.Up * 0.4f;
-                actor.SetInitialFrame(in riderPosition, in direction, true);
-                actor.LookDirection = facing;
-                return;
-            }
-
-            var actorPosition = basePosition;
-            actor.SetInitialFrame(in actorPosition, in direction, true);
-            actor.LookDirection = facing;
-        }
-
-        private static Vec3 GetTeleportBasePosition(Agent actor)
-        {
-            var mount = actor?.MountAgent;
-            return mount != null && mount.IsActive() ? mount.Position : actor.Position;
         }
 
         private static Vec3 Normalize(Vec3 value)
@@ -159,15 +82,15 @@ namespace Voidstep
             return value;
         }
 
-        private static string Format(Vec3 value) =>
-            "(" + value.x.ToString("0.00") + ", " + value.y.ToString("0.00") +
-            ", " + value.z.ToString("0.00") + ")";
+        private static double AngleDegrees(Vec3 left, Vec3 right)
+        {
+            left = Normalize(left);
+            right = Normalize(right);
+            var dot = Math.Max(-1f, Math.Min(1f, Vec3.DotProduct(left, right)));
+            return Math.Acos(dot) * 180.0 / Math.PI;
+        }
     }
 
-    /// <summary>
-    /// Compatibility target retained for the branch-local patch that disables the obsolete
-    /// pre-teleport guard. It intentionally owns no state and performs no direction mutation.
-    /// </summary>
     internal static class PostTeleportOrientationGuard
     {
         internal readonly struct Snapshot
@@ -191,20 +114,27 @@ namespace Voidstep
         private static bool Prefix(
             Agent actor,
             Vec3 position,
+            bool preserveMomentum,
             AbilityContext ____context)
         {
             if (actor == null || !actor.IsActive())
                 return false;
 
-            var mission = ____context?.Mission;
-            var facing = CameraAuthoritativeCastRuntime.GetCameraFacing(mission, actor);
             CameraFacingTeleportOwnership.Teleport(
-                mission,
+                ____context?.Mission,
                 actor,
                 position,
-                facing,
+                Vec3.Zero,
                 "Blink",
                 ____context?.Logger);
+
+            if (!preserveMomentum)
+            {
+                actor.MovementInputVector = Vec2.Zero;
+                var mount = actor.MountAgent;
+                if (mount != null && mount.IsActive())
+                    mount.MovementInputVector = Vec2.Zero;
+            }
             return false;
         }
     }
@@ -215,18 +145,9 @@ namespace Voidstep
     internal static class CameraAlignmentUsesExactNativeFramePatch
     {
         [HarmonyPriority(Priority.First)]
-        private static bool Prefix(
-            Agent actor,
-            Vec3 facing,
-            string source,
-            VoidstepLogger logger)
+        private static bool Prefix()
         {
-            CameraFacingTeleportOwnership.AlignCurrent(
-                Mission.Current,
-                actor,
-                facing,
-                source,
-                logger);
+            // Suppress every legacy post-teleport orientation write.
             return false;
         }
     }
