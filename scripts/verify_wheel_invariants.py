@@ -18,6 +18,7 @@ coordinator = read('src/Voidstep/AbilityWheelCoordinator.cs')
 standalone = read('src/Voidstep/StandaloneAbilityWheel.cs')
 wheel_suppression = read('src/Voidstep/AbilityWheelInputSuppressionPatch.cs')
 tor = read('src/Voidstep/TorAbilityWheelAdapter.cs')
+tor_stance = read('src/Voidstep/TorProxyCastStanceFix.cs')
 selection = read('src/Voidstep/AbilitySelectionController.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
 mission_input = read('src/Voidstep/MissionOrderInputSuppression.cs')
@@ -26,6 +27,7 @@ bindings = read('src/Voidstep/VoidstepInputBindings.cs')
 project = read('src/Voidstep/Voidstep.csproj')
 prefab = read('module/Voidstep/GUI/Prefabs/VoidstepAbilityWheel.xml')
 tor_compact = compact(tor)
+tor_stance_compact = compact(tor_stance)
 
 ability_order = (
     'AbilityId.VoidstepCleave',
@@ -107,12 +109,39 @@ checks = {
         'return runtime == null || !runtime.IsTorProxy(__instance);' in tor_compact,
     'TOR spell override is separately guarded': 'spellDoCast' in tor and '_harmony.Patch(spellDoCast, prefix: doCastPrefix);' in tor,
     'TOR patches and proxies are removed on cleanup': '_harmony?.UnpatchAll(HarmonyId)' in tor and 'DeactivateLiveAttachment(true);' in tor and 'RemoveInjectedProxies();' in tor,
-    'TOR remains an optional reflection boundary': 'using TOR_Core' not in tor and '<Reference Include="TOR_Core"' not in project and 'AppDomain.CurrentDomain.GetAssemblies()' in tor,
+    'TOR remains an optional reflection boundary': 'using TOR_Core' not in tor + tor_stance and '<Reference Include="TOR_Core"' not in project and 'AppDomain.CurrentDomain.GetAssemblies()' in tor and 'AppDomain.CurrentDomain.GetAssemblies()' in tor_stance,
     'TOR template enums are semantic': all(token in tor for token in (
         'ParseEnumValue("TOR_Core.AbilitySystem.AbilityType", "Spell")',
         'ParseEnumValue("TOR_Core.AbilitySystem.AbilityTargetType", "WorldPosition")',
         'ParseEnumValue("TOR_Core.AbilitySystem.Crosshairs.CrosshairType", "Pointer")',
         'ParseEnumValue("TOR_Core.AbilitySystem.CastType", "Instant")')) and 'Enum.ToObject' not in tor,
+    'TOR proxy animation loop is suppressed only for owned proxies':
+        'nameof(BeforeTorHandleAnimations)' in tor_stance and
+        'coordinator.IsTorProxy(currentAbility)' in tor_stance and
+        'if (!TryGetCurrentVoidstepProxy(__instance, out var actor))' in tor_stance and
+        'return true;' in tor_stance and
+        'return false;' in tor_stance,
+    'TOR proxy targeting state survives stance suppression':
+        'NeutralizeProxyFlags(__instance, false);' in tor_stance and
+        tor_stance.count('NeutralizeProxyFlags(__instance, false);') >= 2 and
+        'if (clearTargetingState && _currentStateField != null' in tor_stance and
+        '_currentStateField.SetValue(logic, 0);' in tor_stance,
+    'TOR spellcasting idle is cleared before Voidstep activation':
+        'ActionIndexCache.Create("act_spellcasting_idle")' in tor_stance and
+        'actor.GetCurrentAction(1)' in tor_stance and
+        'actor.SetCurrentActionSpeed(1, 1f);' in tor_stance and
+        'actor.SetActionChannel(1, ActionIndexCache.act_none);' in tor_stance and
+        '[HarmonyPatch(typeof(AbilitySelectionController), nameof(AbilitySelectionController.Confirm))]' in tor_stance and
+        'TorProxyCastStanceFix.ReleaseBeforeVoidstepActivation();' in tor_stance,
+    'TOR proxy flags cannot retain sheath or cast ownership':
+        '_shouldPlayIdleCastStanceAnimField?.SetValue(logic, false);' in tor_stance and
+        '_shouldSheathWeaponField?.SetValue(logic, false);' in tor_stance and
+        '_disableCombatActionsAfterCastField?.SetValue(logic, false);' in tor_stance,
+    'TOR proxy cleanup unlocks rider and mount look direction':
+        'actor.IsLookDirectionLocked = false;' in tor_stance and
+        'mount.IsLookDirectionLocked = false;' in tor_stance and
+        'actor.LookDirection = preservedLook;' in tor_stance and
+        'mount.LookDirection = preservedMountLook;' in tor_stance,
     'right mouse confirmation is read through bypass': 'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and 'InputConflictSuppression.EnterBypass()' in coordinator,
     'right mouse is suppressed through release': all(token in coordinator for token in (
         '_suppressRightMouseUntilRelease = true;',
@@ -126,7 +155,12 @@ checks = {
         'nameof(InputContext.IsGameKeyPressed)',
         'nameof(InputContext.GetGameKeyState)')),
     'selection casts only after confirmation': '_manager.TryActivate(ability);' in selection and 'internal bool Confirm()' in selection and '_manager.TryActivate(ability.Value)' not in mission,
-    'Blink targeting begins on selection but animation waits for confirmation': '_manager.TryActivate(AbilityId.Blink)' in selection and 'enteringBlinkTargeting' in cast_animation and 'confirmingBlink' in cast_animation,
+    'Blink owns targeting and teleport without a generic turning action':
+        '_manager.TryActivate(AbilityId.Blink)' in selection and
+        'var blinkOwnsItsPresentation = ability == AbilityId.Blink;' in cast_animation and
+        '__state = disablingDarkVision || blinkOwnsItsPresentation || cleaveOwnsExecutionAction;' in cast_animation and
+        'enteringBlinkTargeting' not in cast_animation and
+        'confirmingBlink' not in cast_animation,
     'registry and standalone prefab share exact six-slot order':
         registered_abilities == ability_order and prefab_bindings == prefab_order,
 }
