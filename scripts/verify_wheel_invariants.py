@@ -18,8 +18,10 @@ coordinator = read('src/Voidstep/AbilityWheelCoordinator.cs')
 standalone = read('src/Voidstep/StandaloneAbilityWheel.cs')
 wheel_suppression = read('src/Voidstep/AbilityWheelInputSuppressionPatch.cs')
 tor = read('src/Voidstep/TorAbilityWheelAdapter.cs')
+tor_selection_latch = read('src/Voidstep/TorProxySelectionAttemptLatch.cs')
 tor_stance = read('src/Voidstep/TorProxyCastStanceFix.cs')
 post_cast = read('src/Voidstep/PostCastOrientationOwnershipFix.cs')
+preserved_teleport = read('src/Voidstep/PreservedFrameTeleportRuntime.cs')
 selection = read('src/Voidstep/AbilitySelectionController.cs')
 mission = read('src/Voidstep/VoidstepMissionBehavior.cs')
 mission_input = read('src/Voidstep/MissionOrderInputSuppression.cs')
@@ -85,6 +87,14 @@ checks = {
         'state == 1 && _lastState != 1 && _selection.HasSelection' in tor and
         '_selection.Cancel(true);' in tor,
 
+    'TOR failed selection attempts once per targeting session':
+        '[HarmonyPatch(typeof(TorAbilityWheelAdapter), nameof(TorAbilityWheelAdapter.Tick))]' in tor_selection_latch and
+        'torState != 2' in tor_selection_latch and
+        '!__instance.TryGetProxyAbility(proxy, out ability)' in tor_selection_latch and
+        'state.Attempted && state.Ability == ability' in tor_selection_latch and
+        'ReferenceEquals(state.Proxy, proxy)' in tor_selection_latch and
+        'States.Remove(adapter);' in tor_selection_latch,
+
     'TOR proxies receive stable donor icons':
         'ResolveDonorSprites();' in tor and
         '_donorSprites[i % _donorSprites.Count]' in tor and
@@ -128,18 +138,19 @@ checks = {
         'LookDirection =' not in tor_stance and
         'SetMovementDirection' not in tor_stance,
 
-    'Blink teleport is position-only':
+    'Blink and Cleave use preserved native frames':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
-        'CameraFacingTeleportOwnership.Teleport(' in post_cast and
-        'actor.TeleportToPosition(position)' in post_cast and
-        'mount.TeleportToPosition(position)' in post_cast and
-        'SetInitialFrame' not in post_cast,
+        'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
+        'mount.SetInitialFrame(in mountTarget, in mountDirection, true);' in preserved_teleport and
+        'actor.SetInitialFrame(in riderTarget, in actorDirection, true);' in preserved_teleport and
+        'riderTarget = destination + riderOffset;' in preserved_teleport,
 
-    'post-teleport code submits no orientation controls':
-        'LookDirection =' not in post_cast and
-        'SetMovementDirection' not in post_cast and
-        'SetEventControlFlags' not in post_cast and
-        'Suppress every legacy post-teleport orientation write.' in post_cast,
+    'post-teleport code derives no camera or movement facing':
+        'GetCameraFacing' not in preserved_teleport and
+        'GetAimDirection' not in preserved_teleport and
+        'SetMovementDirection' not in preserved_teleport and
+        'SetEventControlFlags' not in preserved_teleport and
+        'Suppress every legacy post-teleport camera-derived orientation write.' in post_cast,
 
     'right mouse confirmation uses input bypass':
         'Input.IsKeyPressed(InputKey.RightMouseButton)' in coordinator and
@@ -179,4 +190,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed wheel invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} focused wheel, TOR, confirmation and teleport invariants.')
+print(f'Validated {len(checks)} focused wheel, TOR session, confirmation and preserved-teleport invariants.')
