@@ -17,6 +17,8 @@ mission = read('VoidstepMissionBehavior.cs')
 time_control = read('TimeControlService.cs')
 native_time = read('BendTimeNativeEnforcement.cs')
 post_cast = read('PostCastOrientationOwnershipFix.cs')
+preserved_teleport = read('PreservedFrameTeleportRuntime.cs')
+tor_selection_latch = read('TorProxySelectionAttemptLatch.cs')
 ground_aim = read('AuthoritativeGroundAimAndPlayerTimeFix.cs')
 runtime_corrections = read('RuntimeGameplayCorrections.cs')
 tor_stance = read('TorProxyCastStanceFix.cs')
@@ -98,20 +100,43 @@ checks = {
     'native reticle projection remains authoritative':
         'GetProjectedMousePositionOnGround' in ground_aim and 'ClampToCastCircle' in ground_aim and
         'MissionScreen projected reticle ground' in ground_aim,
-    'Blink teleport owns position only':
+    'Blink and Cleave share preserved-frame teleport':
         '[HarmonyPatch(typeof(AbilityManager), "TeleportActor")]' in post_cast and
-        'actor.TeleportToPosition(position)' in post_cast and 'mount.TeleportToPosition(position)' in post_cast and
-        'SetInitialFrame' not in post_cast,
-    'teleport code writes no orientation':
-        'LookDirection =' not in post_cast and 'SetMovementDirection' not in post_cast and
-        'SetEventControlFlags' not in post_cast and 'IsLookDirectionLocked' not in post_cast,
-    'legacy post-teleport alignment is fully suppressed':
+        'PreservedFrameTeleportRuntime.Teleport(' in post_cast and
+        'typeof(BodyAlignedCleaveRuntime)' in preserved_teleport and
+        'nameof(BodyAlignedCleaveRuntime.TeleportPositionOnly)' in preserved_teleport and
+        'return false;' in preserved_teleport,
+    'mounted teleport preserves rigid rider and mount state':
+        'riderOffset = actorPosition - mountPosition;' in preserved_teleport and
+        'riderTarget = destination + riderOffset;' in preserved_teleport and
+        'mount.SetInitialFrame(in mountTarget, in mountDirection, true);' in preserved_teleport and
+        'actor.SetInitialFrame(in riderTarget, in actorDirection, true);' in preserved_teleport and
+        'mount.LookDirection = mountLook;' in preserved_teleport and
+        'actor.LookDirection = actorLook;' in preserved_teleport,
+    'teleport direction comes only from current native state':
+        'agent.Frame.rotation.f' in preserved_teleport and
+        'CaptureNativeFrameDirection' in preserved_teleport and
+        'GetCameraFacing' not in preserved_teleport and
+        'GetAimDirection' not in preserved_teleport and
+        'destination - actor.Position' not in preserved_teleport,
+    'teleport has no replay or movement-direction command':
+        'SetMovementDirection' not in preserved_teleport and
+        'SetEventControlFlags' not in preserved_teleport and
+        'internal static void Tick(Mission mission)' in post_cast and
+        'PreservedFrameTeleportRuntime.Teleport(' not in post_cast.split('internal static void Tick(Mission mission)', 1)[1].split('internal static void Clear', 1)[0],
+    'legacy camera-derived alignment is fully suppressed':
         'CameraAlignmentUsesExactNativeFramePatch' in post_cast and
-        'Suppress every legacy post-teleport orientation write.' in post_cast and
+        'Suppress every legacy post-teleport camera-derived orientation write.' in post_cast and
         'internal static void AlignCurrent' in post_cast and 'Deliberately empty.' in post_cast,
     'teleport is limited to the current main agent':
-        'ReferenceEquals(mission.MainAgent, actor)' in post_cast and
-        'ReferenceEquals(Mission.Current, mission)' in post_cast,
+        'ReferenceEquals(Mission.Current, mission)' in preserved_teleport and
+        'ReferenceEquals(mission.MainAgent, actor)' in preserved_teleport,
+    'TOR proxy selection attempts once per targeting session':
+        'ConditionalWeakTable<TorAbilityWheelAdapter, State>' in tor_selection_latch and
+        'torState != 2' in tor_selection_latch and
+        'state.Attempted && state.Ability == ability' in tor_selection_latch and
+        'ReferenceEquals(state.Proxy, proxy)' in tor_selection_latch and
+        'return false;' in tor_selection_latch,
     'TOR proxy cleanup cannot mutate direction':
         'IsLookDirectionLocked' not in tor_stance and 'LookDirection =' not in tor_stance and
         'SetMovementDirection' not in tor_stance and 'if (requireLiveTargeting && state != 2)' in tor_stance,
@@ -146,4 +171,4 @@ for name, passed in checks.items():
 if failed:
     print('Failed invariants: ' + ', '.join(failed), file=sys.stderr)
     raise SystemExit(1)
-print(f'Validated {len(checks)} mission-scope, native selective-time and position-only teleport invariants.')
+print(f'Validated {len(checks)} mission-scope, native selective-time and preserved-frame teleport invariants.')
