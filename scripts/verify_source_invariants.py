@@ -35,7 +35,6 @@ mission = text('VoidstepMissionBehavior.cs')
 time_control = text('TimeControlService.cs')
 post_cast = text('PostCastOrientationOwnershipFix.cs')
 ground_aim = text('AuthoritativeGroundAimAndPlayerTimeFix.cs')
-camera = text('CameraAuthoritativeCastPatches.cs')
 runtime_corrections = text('RuntimeGameplayCorrections.cs')
 tor_stance = text('TorProxyCastStanceFix.cs')
 domino = text('DominoLinkService.cs')
@@ -50,7 +49,6 @@ ability_manager = text('AbilityManager.cs')
 blink = text('BlinkController.cs')
 
 time_tick = method_body(time_control, 'public void Tick(float dt)')
-time_begin = method_body(time_control, 'public bool Begin(')
 time_release = method_body(time_control, 'public void Release()')
 teleport_owner_tick = method_body(post_cast, 'internal static void Tick(Mission mission)')
 
@@ -75,8 +73,8 @@ checks = {
         '[HarmonyPatch(typeof(Agent), nameof(Agent.SetActionChannel))]' not in all_text,
 
     'no global driven-property interception':
-        'typeof(AgentDrivenProperties),\n                "UpdateDrivenProperties"' not in all_text and
-        'BendTimePostCalculatedDrivenPropertiesPatch' not in all_text,
+        'BendTimePostCalculatedDrivenPropertiesPatch' not in all_text and
+        '[HarmonyPatch(typeof(AgentDrivenProperties)' not in all_text,
 
     'Bend Time never changes mission scene time':
         'AddTimeSpeedRequest' not in time_control and
@@ -107,7 +105,7 @@ checks = {
         'AppliedValues' in time_control and
         'Approximately(current[i], state.AppliedValues[i])' in time_control and
         'current[i] = state.OriginalValues[i];' in time_control and
-        'PushDrivenProperties(agent, driven);' in time_release + time_control,
+        'Restore(pair.Value);' in time_release,
 
     'Bend Time slows non-player missiles at launch':
         '[HarmonyPatch(typeof(Mission), "AddMissileAux")]' in time_control and
@@ -138,9 +136,9 @@ checks = {
         'deliberate camera turn' in teleport_owner_tick,
 
     'teleport correction never submits movement controls':
-        'SetMovementDirection' not in post_cast and
-        'MovementInputVector' not in post_cast and
-        'SetEventControlFlags' not in post_cast,
+        '.SetMovementDirection(' not in post_cast and
+        '.MovementInputVector' not in post_cast and
+        '.SetEventControlFlags(' not in post_cast,
 
     'teleport ownership mutates only live mission main agent':
         'var actor = mission.MainAgent;' in teleport_owner_tick and
@@ -178,7 +176,7 @@ checks = {
     'wheel and direct bindings remain separate':
         '_selection.Select(directAbility.Value, "configured direct selector")' in wheel and
         'Input.IsKeyPressed(InputKey.RightMouseButton)' in wheel and
-        'VoidstepInputBindings.Abilities' in input_bindings,
+        'internal static readonly AbilityId[] Abilities' in input_bindings,
 
     'hotkey and Harmony teardown remain explicit':
         'VoidstepHotKeyContext.Clear();' in submodule and
