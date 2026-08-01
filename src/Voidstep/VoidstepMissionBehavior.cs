@@ -1,4 +1,6 @@
 using System;
+using System.Reflection;
+using HarmonyLib;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -9,6 +11,8 @@ namespace Voidstep
     internal sealed class VoidstepMissionBehavior : MissionLogic
     {
         private const float BindingRefreshInterval = 0.25f;
+        private static readonly FieldInfo TimeField =
+            AccessTools.Field(typeof(AbilityManager), "_time");
 
         private readonly VoidstepLogger _logger;
         private AbilityManager _manager;
@@ -22,6 +26,17 @@ namespace Voidstep
         private bool _bindingConflictInitialized;
         private float _bindingRefreshRemaining;
         private string _lastBindingConflict;
+
+        internal TimeControlService TimeControl
+        {
+            get
+            {
+                if (_manager == null || TimeField == null)
+                    return null;
+                try { return TimeField.GetValue(_manager) as TimeControlService; }
+                catch { return null; }
+            }
+        }
 
         public VoidstepMissionBehavior(VoidstepLogger logger)
         {
@@ -105,7 +120,7 @@ namespace Voidstep
                     _readyNoticeShown = true;
                     var wheelName = _wheel.UsesTorWheel ? "TOR Q cast wheel" : "Voidstep Q cast wheel";
                     _logger.Info($"Runtime ready. Selection: {wheelName}; confirm=RightMouseButton. Direct selectors: {VoidstepInputBindings.GetSummary()}.");
-                    TryDisplayNotice($"Voidstep v1.2.3 active — Q selects an ability; Right Mouse Button casts. Using {wheelName}.");
+                    TryDisplayNotice($"Voidstep v1.2.4 active — Q selects an ability; Right Mouse Button casts. Using {wheelName}.");
                 }
                 if (!ReferenceEquals(current, _lastPlayer))
                 {
@@ -120,6 +135,23 @@ namespace Voidstep
             {
                 _logger.Error("A mission tick failed; all owned ability state was cleaned up.", ex);
                 Cleanup(CancelReason.Exception);
+            }
+        }
+
+        public override void OnPreDisplayMissionTick(float dt)
+        {
+            base.OnPreDisplayMissionTick(dt);
+            if (_cleaned || _manager == null)
+                return;
+
+            try
+            {
+                TimeControl?.LateTick();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Bend Time late mission enforcement failed safely.", ex);
+                try { TimeControl?.Release(); } catch { }
             }
         }
 
@@ -166,6 +198,14 @@ namespace Voidstep
             catch (Exception ex) { _logger.Debug($"Runtime notification was unavailable: {ex.GetType().Name}."); }
         }
 
+        public override void OnAgentBuild(Agent agent, Banner banner)
+        {
+            base.OnAgentBuild(agent, banner);
+            if (_cleaned) return;
+            try { TimeControl?.RegisterAgent(agent); }
+            catch (Exception ex) { _logger.Error("Bend Time agent registration failed safely.", ex); }
+        }
+
         public override void OnAgentHit(Agent affectedAgent, Agent affectorAgent, in MissionWeapon affectorWeapon, in Blow blow, in AttackCollisionData attackCollisionData)
         {
             base.OnAgentHit(affectedAgent, affectorAgent, in affectorWeapon, in blow, in attackCollisionData);
@@ -181,6 +221,7 @@ namespace Voidstep
             if (_cleaned || _manager == null) return;
             try
             {
+                TimeControl?.UnregisterAgent(affectedAgent);
                 _manager.OnAgentRemoved(affectedAgent, affectorAgent, agentState);
                 if (affectedAgent != null && _lastPlayer != null && affectedAgent.Index == _lastPlayer.Index)
                     Cleanup(CancelReason.ActorDied);
@@ -192,7 +233,11 @@ namespace Voidstep
         {
             base.OnAgentDeleted(affectedAgent);
             if (_cleaned || _manager == null) return;
-            try { _manager.OnAgentDeleted(affectedAgent); }
+            try
+            {
+                TimeControl?.UnregisterAgent(affectedAgent);
+                _manager.OnAgentDeleted(affectedAgent);
+            }
             catch (Exception ex) { _logger.Error("Agent-deletion cleanup failed safely.", ex); }
         }
 

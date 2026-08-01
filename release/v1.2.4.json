@@ -1,0 +1,6 @@
+{
+  "version": "v1.2.4",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable release fixing mounted Blink and Voidstep Cleave orientation, restoring occupied-area teleports, and releasing TOR's cast stance after Voidstep proxy abilities."
+}

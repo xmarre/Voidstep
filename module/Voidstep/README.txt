@@ -1,4 +1,4 @@
-VOIDSTEP — ARCANE MELEE ABILITIES v1.2.2
+VOIDSTEP — ARCANE MELEE ABILITIES v1.2.4
 Target: Mount & Blade II: Bannerlord 1.3.15, single-player
 Optional integration: The Old Realms 1.16
 
@@ -63,6 +63,13 @@ Blink freezes mission time while its validated destination reticle follows the c
 Windblast displays its aimed cone footprint.
 Bend Time and Dark Vision display radius indicators.
 Domino previews the human enemies that will be linked. Missiles, arrows and dropped projectile entities are not candidates.
+
+TELEPORT ORIENTATION
+Blink and Voidstep Cleave use one mission-scoped native position translator.
+Mounted teleports move the mount attachment origin once and preserve the rider offset.
+Occupied destinations remain allowed.
+The current rider and mount body/look vectors are restored only for the exact mission main agent while native attachment and collision state settles.
+No global Agent patch, Agent.Main lookup or presentation-agent mutation is used.
 
 DOMINO
 Domino links are persistent effects, not an active cast lock. Other abilities remain selectable and castable while links exist. Damage and death propagation are queued inside Bannerlord callbacks and dispatched on the following mission tick. An explicit propagation ledger prevents only Domino-owned callbacks from recursing; NoSound attacks from Cleave, Windblast or other valid player sources remain eligible to trigger Domino. Missing missile or synthetic affectors are repaired from the authoritative player or controlled-mount Blow owner.

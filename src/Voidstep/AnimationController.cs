@@ -37,9 +37,6 @@ namespace Voidstep
             _cleaveActionOwned = false;
             if (actor == null || !actor.IsActive()) return;
 
-            // Use a native heavy-release action as the visible execution motion. The
-            // action's progress is driven by the sweep, while damage remains the
-            // separately registered native melee blows using the captured weapon.
             if (!TryPlay(actor, HeavyCastActions, true, _logger)) return;
             try
             {
@@ -69,15 +66,20 @@ namespace Voidstep
             }
         }
 
+        public void SetActorFacing(Agent actor, Vec3 facing)
+        {
+            // Deliberately empty. Voidstep never owns Agent body or look direction.
+        }
+
+        public void SetActorFacing(Agent actor, double radians)
+        {
+            // Deliberately empty. Cleave geometry rotates mathematically around its camera axis;
+            // the live character and every presentation Agent retain native orientation.
+        }
+
         public void RotateActor(Agent actor, float radians)
         {
-            if (actor == null || !actor.IsActive()) return;
-            var look = actor.LookDirection;
-            look.z = 0f;
-            if (look.Normalize() < 0.001f)
-                look = Vec3.Forward;
-            look.RotateAboutZ(radians);
-            actor.LookDirection = look;
+            // Deliberately empty. No direct Agent facing mutation is allowed.
         }
 
         public void ResetActionSpeed(Agent actor)

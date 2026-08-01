@@ -85,8 +85,10 @@ namespace Voidstep
                 }
             }
             RefreshPreview();
-            _hud.Show("Blink targeting — time frozen. Move the camera; green is valid, red is blocked. Press Blink again to teleport.");
-            _logger.Debug("Blink targeting started.");
+            _hud.Show(_ownsTimeRequest
+                ? "Blink targeting — time frozen. Move the camera; green is valid, red is blocked. Press Blink again to teleport."
+                : "Blink targeting — move the camera; green is valid, red is blocked. Press Blink again to teleport.");
+            _logger.Debug($"Blink targeting started; timeFrozen={_ownsTimeRequest}.");
             return true;
         }
 
