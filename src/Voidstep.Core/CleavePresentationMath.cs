@@ -4,12 +4,6 @@ namespace Voidstep.Core
 {
     public static class CleavePresentationMath
     {
-        public static float CalculateDuration(float sweepDegrees)
-        {
-            var normalized = NormalizeSweep(sweepDegrees);
-            return 0.18f + 0.42f * normalized;
-        }
-
         public static float CalculateActionStartProgress(float sweepDegrees)
         {
             var normalized = NormalizeSweep(sweepDegrees);
@@ -20,6 +14,15 @@ namespace Voidstep.Core
         {
             var normalized = NormalizeSweep(sweepDegrees);
             return 0.82f + 0.12f * normalized;
+        }
+
+        public static bool IsLiveTargetDue(
+            double targetProgress,
+            double currentProgress,
+            double leadProgress = 0.018)
+        {
+            var lead = Math.Max(0.0, leadProgress);
+            return targetProgress <= currentProgress + lead;
         }
 
         public static float CalculateMountedSweepHeight(float groundHeight, float riderChestHeight)
