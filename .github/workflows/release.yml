@@ -4,19 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - 'release/v1.2.4.json'
+      - 'release/v1.2.5.json'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: voidstep-v1.2.4-release
+  group: voidstep-v1.2.5-release
   cancel-in-progress: false
 
 env:
-  VERSION: 1.2.4
-  RELEASE_TAG: v1.2.4
+  VERSION: 1.2.5
+  RELEASE_TAG: v1.2.5
 
 jobs:
   release:
@@ -109,11 +109,11 @@ jobs:
           if ($exists) {
             gh release upload $env:RELEASE_TAG @assets --clobber
             if ($LASTEXITCODE -ne 0) { throw 'Failed to restore release assets.' }
-            $flags = @('release', 'edit', $env:RELEASE_TAG, '--title', $title, '--notes-file', 'release/v1.2.4.md')
+            $flags = @('release', 'edit', $env:RELEASE_TAG, '--title', $title, '--notes-file', 'release/v1.2.5.md')
             if ($isPrerelease) { $flags += @('--prerelease', '--latest=false') } else { $flags += '--latest' }
             & gh @flags
           } else {
-            $flags = @('release', 'create', $env:RELEASE_TAG) + $assets + @('--target', $env:GITHUB_SHA, '--title', $title, '--notes-file', 'release/v1.2.4.md')
+            $flags = @('release', 'create', $env:RELEASE_TAG) + $assets + @('--target', $env:GITHUB_SHA, '--title', $title, '--notes-file', 'release/v1.2.5.md')
             if ($isPrerelease) { $flags += '--prerelease' } else { $flags += '--latest' }
             & gh @flags
           }
