@@ -17,6 +17,8 @@ _voidstepProgressionEnabled_v1
 _voidstepProgressionDataVersion
 ```
 
+Skill levels remain keyed by the original integer `VoidstepSkillId` values. `MasteryGraphPolicy` validates all 19 identifiers before applying the current prerequisite graph and never rewrites XP, levels or invested points. Existing saves therefore retain every investment when prerequisites are relaxed or reorganized.
+
 Mission code never queries those dictionaries directly. `VoidstepProgressionService` builds one immutable `VoidstepProgressionProfile` containing an indexed skill-level array. The volatile profile reference is replaced only when campaign state changes: attach/load, XP gain, rank change, investment, respec, enable/disable or detach. Mission reads are constant-time and lock-free.
 
 Progression-disabled and no-campaign states use a shared disabled profile. Every runtime modifier returns the original configured value in that state.
@@ -39,7 +41,9 @@ Ability unlock validation occurs before `AbilityManager.TryActivate`. Active Dar
 
 The catalogue contains 19 skills across Core, Mobility, Force, Dominion, Reservoir and Convergence branches. One mastery rank grants one point, up to rank 99. Rank, melee-skill and prerequisite checks are evaluated before each investment.
 
-The final path is intentionally reachable within the finite budget. The complete prerequisite route to `Avatar of the Void` costs 78 points, leaving enough points to raise that 10-rank capstone to maximum before rank 99.
+The six ability foundation skills are independent. Unlocking Blink, Windblast, Bend Time, Domino or Dark Vision does not require investment in Cleave or another ability. Deep Reservoir is also independent of ability investment. Advanced nodes require only the preceding node in their own path.
+
+`Singularity` requires one rank in each of the six ability foundations, expressing actual convergence without forcing deep investment in unrelated abilities. `Avatar of the Void` retains the deliberate final requirements of Singularity 5 and Unbound Power 5. The complete route to maximum Avatar costs 41 points and remains comfortably reachable within the rank-99 budget.
 
 ## Mastery XP ownership
 
