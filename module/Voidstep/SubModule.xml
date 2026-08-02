@@ -2,7 +2,7 @@
 <Module>
   <Name value="Voidstep — Arcane Melee Abilities" />
   <Id value="Voidstep" />
-  <Version value="v1.2.4" />
+  <Version value="v1.2.5" />
   <DefaultModule value="false" />
   <SingleplayerModule value="true" />
   <MultiplayerModule value="false" />

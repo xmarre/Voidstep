@@ -1,0 +1,6 @@
+{
+  "version": "v1.2.5",
+  "channel": "stable",
+  "target": "merged-main",
+  "description": "Stable release improving mounted Cleave weapon presentation and moving-target reliability while removing unrelated mastery prerequisites with full existing-save compatibility."
+}

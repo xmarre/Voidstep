@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.5
+
+- Added weapon-specific Voidstep Cleave swing presentation for mounted and unmounted one-handed, two-handed and polearm weapons.
+- Kept Cleave damage resolution at the established 0.22 seconds while scaling the portion of the weapon animation used to the configured sweep breadth.
+- Lowered mounted Cleave trails from rider-chest height to an infantry-torso strike plane and scaled visual reach from the currently wielded weapon length.
+- Fixed live Cleave targeting dropping enemies that moved behind the previous angular boundary during the strike; newly observed targets in an already-swept sector are now immediately eligible.
+- Re-resolved the wielded melee weapon immediately before Cleave execution while retaining the captured weapon as a safe fallback.
+- Removed cross-ability mastery prerequisites so Blink, Windblast, Bend Time, Domino and Dark Vision no longer require Cleave or another unrelated ability path.
+- Made Deep Reservoir independent and limited advanced mastery prerequisites to the preceding skill in the same path.
+- Changed Singularity to require one rank in each of the six ability foundations; Avatar of the Void retains Singularity 5 and Unbound Power 5.
+- Preserved every existing mastery XP value, invested rank, serialized skill ID and v1 save key; no save migration, refund or remapping is required.
+- Added regression coverage for mounted Cleave timing and moving-target acquisition, independent mastery foundations, stable serialized IDs and save compatibility.
+
 ## 1.2.3
 
 - Removed the unresolved Harmony constructor patch that disabled the entire Voidstep runtime during module startup.
