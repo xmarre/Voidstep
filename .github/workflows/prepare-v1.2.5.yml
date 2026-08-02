@@ -1,8 +1,9 @@
 name: Prepare v1.2.5 release branch
 
 on:
-  push:
-    branches: [agent/release-v1.2.5]
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
