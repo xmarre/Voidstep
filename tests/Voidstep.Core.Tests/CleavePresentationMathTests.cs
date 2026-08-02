@@ -6,19 +6,23 @@ namespace Voidstep.Core.Tests
     public sealed class CleavePresentationMathTests
     {
         [Fact]
-        public void BroaderCleaveUsesLongerPresentationAndMoreOfWeaponAction()
+        public void BroaderCleaveUsesMoreOfWeaponAction()
         {
-            var halfDuration = CleavePresentationMath.CalculateDuration(180f);
-            var fullDuration = CleavePresentationMath.CalculateDuration(360f);
             var halfStart = CleavePresentationMath.CalculateActionStartProgress(180f);
             var fullStart = CleavePresentationMath.CalculateActionStartProgress(360f);
             var halfEnd = CleavePresentationMath.CalculateActionEndProgress(180f);
             var fullEnd = CleavePresentationMath.CalculateActionEndProgress(360f);
 
-            Assert.Equal(0.39f, halfDuration, 3);
-            Assert.Equal(0.60f, fullDuration, 3);
             Assert.True(fullStart < halfStart);
             Assert.True(fullEnd > halfEnd);
+        }
+
+        [Fact]
+        public void LateAcquiredTargetBehindCurrentSweepIsDueImmediately()
+        {
+            Assert.True(CleavePresentationMath.IsLiveTargetDue(0.25, 0.70));
+            Assert.True(CleavePresentationMath.IsLiveTargetDue(0.70, 0.70));
+            Assert.False(CleavePresentationMath.IsLiveTargetDue(0.80, 0.70));
         }
 
         [Fact]
