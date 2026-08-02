@@ -54,6 +54,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Mastery power invariant validation failed." }
     & python scripts/verify_mastery_unlock_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Mastery unlock invariant validation failed." }
+    & python scripts/verify_mastery_graph_invariants.py
+    if ($LASTEXITCODE -ne 0) { throw "Mastery graph compatibility invariant validation failed." }
     & python scripts/verify_ability_effect_invariants.py
     if ($LASTEXITCODE -ne 0) { throw "Runtime patch and ability effect invariant validation failed." }
     & python scripts/verify_wheel_invariants.py
