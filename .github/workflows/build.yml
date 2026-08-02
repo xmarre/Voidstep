@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           python3 scripts/prepare_release_v1_2_5.py
-          rm -f scripts/prepare_release_v1_2_5.py .github/workflows/prepare-v1.2.5.yml
+          rm -f scripts/prepare_release_v1_2_5.py
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
