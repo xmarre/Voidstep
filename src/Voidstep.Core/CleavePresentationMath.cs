@@ -4,6 +4,8 @@ namespace Voidstep.Core
 {
     public static class CleavePresentationMath
     {
+        public static float CalculateDuration(float sweepDegrees) => 0.22f;
+
         public static float CalculateActionStartProgress(float sweepDegrees)
         {
             var normalized = NormalizeSweep(sweepDegrees);
