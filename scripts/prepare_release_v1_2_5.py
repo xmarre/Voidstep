@@ -5,7 +5,6 @@ replacements = {
     "module/Voidstep/SubModule.xml": [("1.2.4", "1.2.5")],
     "scripts/build-ci.ps1": [("1.2.4", "1.2.5")],
     "scripts/package-source.ps1": [("1.2.4", "1.2.5")],
-    ".github/workflows/release.yml": [("1.2.4", "1.2.5")],
     "src/Voidstep/VoidstepSubModule.cs": [("1.2.4", "1.2.5")],
     "src/Voidstep/VoidstepMissionBehavior.cs": [("1.2.4", "1.2.5")],
     "scripts/verify_mastery_unlock_invariants.py": [
@@ -88,53 +87,3 @@ marker = """{
 """
 with (release_dir / "v1.2.5.json").open("w", encoding="utf-8", newline="\n") as handle:
     handle.write(marker)
-
-clean_build_workflow = """name: Windows build and package
-
-on:
-  workflow_dispatch:
-  pull_request:
-    branches: [main, develop]
-  push:
-    branches: [develop]
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  build:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
-        with:
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: |
-            src/**/*.csproj
-            tests/**/*.csproj
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-      - name: Build, test, package and verify
-        shell: pwsh
-        run: ./scripts/build-ci.ps1 -Configuration Release
-      - name: Upload installable module
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: Voidstep-v1.2.5-Bannerlord-1.3.15
-          path: |
-            dist/Voidstep-v1.2.5-Bannerlord-1.3.15.zip
-            dist/SHA256SUMS.txt
-            dist/SOURCE_SHA256.txt
-          if-no-files-found: error
-"""
-with Path(".github/workflows/build.yml").open("w", encoding="utf-8", newline="\n") as handle:
-    handle.write(clean_build_workflow)
